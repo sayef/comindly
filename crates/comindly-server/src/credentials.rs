@@ -130,3 +130,73 @@ fn write(f: &File) -> Result<()> {
     std::io::Write::write_all(&mut open.open(&tmp)?, text.as_bytes())?;
     std::fs::rename(&tmp, &p).with_context(|| format!("write {}", p.display()))
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::config::{export, Config};
+    use comindly_core::pipeline::RepoEntry;
+
+    // Written by toml 0.8; later versions must read and write the same files.
+    const CREDENTIALS: &str = r#"llm_api_key = "k0"
+
+[[team]]
+name = "a"
+llm_api_key = "k1"
+
+[server]
+url = "https://x.example"
+token = "t"
+email = "e@example.com"
+"#;
+
+    const PREFERENCES: &str = r#"# comindly preferences: `comindly config import <file> --override` applies this file.
+
+index_dir = "s3://b/i"
+signing_key = "~/.ssh/k"
+cache_ttl_secs = 300
+author_name = "A \"q\" B"
+record_names = false
+
+[[repos]]
+path = "/r/a"
+remote = "git@h:a.git"
+
+[[repos]]
+path = "/r/b"
+"#;
+
+    #[test]
+    fn credentials_file_round_trips() {
+        let f: super::File = toml::from_str(CREDENTIALS).unwrap();
+        assert_eq!(f.team[0].name, "a");
+        assert_eq!(f.server.as_ref().unwrap().email, "e@example.com");
+        assert_eq!(toml::to_string(&f).unwrap(), CREDENTIALS);
+    }
+
+    #[test]
+    fn preferences_file_round_trips() {
+        let c: Config = toml::from_str(PREFERENCES).unwrap();
+        assert_eq!(
+            c,
+            Config {
+                index_dir: Some("s3://b/i".into()),
+                signing_key: Some("~/.ssh/k".into()),
+                allowed_signers: None,
+                cache_ttl_secs: Some(300),
+                author_name: Some("A \"q\" B".into()),
+                record_names: Some(false),
+                repos: vec![
+                    RepoEntry {
+                        path: "/r/a".into(),
+                        remote: Some("git@h:a.git".into()),
+                    },
+                    RepoEntry {
+                        path: "/r/b".into(),
+                        remote: None,
+                    },
+                ],
+            }
+        );
+        assert_eq!(export(&c).unwrap(), PREFERENCES);
+    }
+}
