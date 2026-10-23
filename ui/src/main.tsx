@@ -19,6 +19,7 @@ import { SettingsPage, SettingsShell } from "@/pages/settings";
 import { SetupPage } from "@/pages/setup";
 import { AccessPage, IntegrationsPage, MembersPage } from "@/pages/access";
 import { SignInPage } from "@/pages/signin";
+import { DevicePage } from "@/pages/device";
 import { ApiError, api } from "@/lib/api";
 import "./index.css";
 
@@ -63,6 +64,7 @@ createRoot(document.getElementById("root")!).render(
           <BrowserRouter>
             <Gate>
               <Routes>
+                <Route path="device" element={<DevicePage />} />
                 <Route element={<Layout />}>
                   <Route index element={<OverviewPage />} />
                   <Route path="contracts" element={<ContractsPage />} />

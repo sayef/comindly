@@ -12,7 +12,9 @@ use lancedb::arrow::arrow_array::{RecordBatch, RecordBatchIterator, StringArray}
 use lancedb::arrow::arrow_schema::{DataType, Field, Schema};
 use serde::{Deserialize, Serialize};
 
-use crate::backends::{AccountStore, Authenticator, Mailer, SecretStore, SettingsStore};
+use crate::backends::{
+    AccountStore, Authenticator, DeviceSignIn, Mailer, SecretStore, SettingsStore,
+};
 
 /// `NAME` from the environment, or the contents of the file `NAME_FILE` names.
 pub fn env_secret(name: &str) -> Option<String> {
@@ -112,6 +114,7 @@ pub struct Server {
     pub config: ServerConfig,
     pub accounts: Arc<dyn AccountStore>,
     pub auth: Arc<dyn Authenticator>,
+    pub devices: Arc<dyn DeviceSignIn>,
     pub secrets: Arc<dyn SecretStore>,
     pub settings: Arc<dyn SettingsStore>,
     pub mailer: Arc<dyn Mailer>,
@@ -130,6 +133,7 @@ impl Server {
             config,
             accounts: store.clone(),
             auth: store.clone(),
+            devices: store.clone(),
             secrets: store.clone(),
             settings: store.clone(),
             jobs: store,
@@ -230,6 +234,9 @@ const MAX_FAILED: i64 = 5;
 const MAX_REDEEM_FAILED: i64 = 20;
 const LOCK_MINUTES: i64 = 15;
 const MAX_LINKS_PER_HOUR: i64 = 5;
+const DEVICE_MINUTES: i64 = 10;
+/// Command-line sign-ins one address may start in `LOCK_MINUTES`.
+const MAX_DEVICE_STARTS: i64 = 10;
 const CODE_ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 fn now() -> String {
@@ -338,6 +345,36 @@ struct Link {
     expires: String,
 }
 
+/// A sign-in asked for by a command line, until a member approves it and the command collects it.
+#[derive(Clone, Serialize, Deserialize)]
+struct Device {
+    /// The hash of the code the member confirms in the browser.
+    user_code: String,
+    client: String,
+    created: String,
+    expires: String,
+    approved_by: Option<String>,
+    denied: bool,
+    /// The token issued on approval, sealed until it is collected: `(sealed, nonce)` in hex.
+    token: Option<(String, String)>,
+}
+
+/// What a member sees before approving a command-line sign-in.
+#[derive(Debug, Clone, Serialize)]
+pub struct DeviceRequest {
+    pub client: String,
+    pub expires: String,
+}
+
+/// Where a command-line sign-in stands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DevicePoll {
+    Pending,
+    Approved { token: String, email: String },
+    Denied,
+    Expired,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 struct Session {
     email: String,
@@ -383,6 +420,7 @@ struct State {
     seen: HashMap<String, String>,
     /// The server's `config.toml`, for containers that start without it.
     config: HashMap<String, String>,
+    devices: HashMap<String, Device>,
     jobs: HashMap<String, crate::jobs::JobRecord>,
     job_events: HashMap<String, Vec<crate::events::Event>>,
     failures: Vec<(String, String)>,
@@ -420,6 +458,7 @@ impl State {
             "code" => add(&mut self.codes, key, json),
             "seen" => add(&mut self.seen, key, json),
             "config" => add(&mut self.config, key, json),
+            "device" => add(&mut self.devices, key, json),
             "job" => add(&mut self.jobs, key, json),
             "job-events" => add(&mut self.job_events, key, json),
             _ => {}
@@ -441,6 +480,7 @@ impl State {
                     "code" => drop(self.codes.remove(key)),
                     "seen" => drop(self.seen.remove(key)),
                     "config" => drop(self.config.remove(key)),
+                    "device" => drop(self.devices.remove(key)),
                     "job" => drop(self.jobs.remove(key)),
                     "job-events" => drop(self.job_events.remove(key)),
                     _ => {}
@@ -452,7 +492,7 @@ impl State {
 
 const TABLE: &str = "server";
 const CONFIG: &str = "config.toml";
-const KINDS: [&str; 11] = [
+const KINDS: [&str; 12] = [
     "user",
     "invite",
     "link",
@@ -462,6 +502,7 @@ const KINDS: [&str; 11] = [
     "code",
     "seen",
     "config",
+    "device",
     "job",
     "job-events",
 ];
@@ -760,6 +801,12 @@ impl Store {
                     .iter()
                     .filter(|(_, s)| s.expires < t)
                     .map(|(k, _)| del("session", k)),
+            );
+            changes.extend(
+                st.devices
+                    .iter()
+                    .filter(|(_, d)| d.expires < t)
+                    .map(|(k, _)| del("device", k)),
             );
             st.failures.retain(|(_, at)| *at >= day);
         }
@@ -1352,6 +1399,113 @@ impl crate::backends::AccountStore for Store {
     }
 }
 
+impl crate::backends::DeviceSignIn for Store {
+    fn device_start(&self, client: &str, from: &str) -> Result<(String, String)> {
+        let key = format!("device|{from}");
+        anyhow::ensure!(
+            self.failures(&key) < MAX_DEVICE_STARTS,
+            "Too many sign-ins started from here; try again in {LOCK_MINUTES} minutes"
+        );
+        self.fail(&key);
+        let client: String = client.trim().chars().take(80).collect();
+        anyhow::ensure!(!client.is_empty(), "name the client signing in");
+        let device_code = new_token("dev_");
+        let user_code = new_code()[..9].to_string();
+        let row = Device {
+            user_code: code_hash(&user_code),
+            client,
+            created: now(),
+            expires: (Utc::now() + Duration::minutes(DEVICE_MINUTES)).to_rfc3339(),
+            approved_by: None,
+            denied: false,
+            token: None,
+        };
+        self.commit(vec![put("device", &hash(&device_code), &row)])?;
+        Ok((device_code, user_code))
+    }
+
+    fn device_info(&self, user_code: &str) -> Option<DeviceRequest> {
+        let (h, t) = (code_hash(user_code), now());
+        self.state()
+            .devices
+            .values()
+            .find(|d| d.user_code == h && d.expires > t && d.approved_by.is_none() && !d.denied)
+            .map(|d| DeviceRequest {
+                client: d.client.clone(),
+                expires: d.expires.clone(),
+            })
+    }
+
+    fn device_approve(&self, who: &Who, user_code: &str, approve: bool) -> Result<()> {
+        let key = format!("approve|{}", who.email);
+        anyhow::ensure!(
+            self.failures(&key) < MAX_FAILED,
+            "Too many wrong codes; try again in {LOCK_MINUTES} minutes"
+        );
+        let (h, t) = (code_hash(user_code), now());
+        let _w = self.write_lock();
+        let found = self
+            .state()
+            .devices
+            .iter()
+            .find(|(_, d)| {
+                d.user_code == h && d.expires > t && d.approved_by.is_none() && !d.denied
+            })
+            .map(|(k, d)| (k.clone(), d.clone()));
+        let Some((id, mut row)) = found else {
+            self.fail(&key);
+            bail!("That code is not waiting for approval; start the sign-in again");
+        };
+        if approve {
+            let token = self.create_token(who, &row.client)?;
+            let (sealed, nonce) = seal(&self.key, &format!("device:{id}"), &token)?;
+            row.token = Some((hex(&sealed), hex(&nonce)));
+            row.approved_by = Some(who.email.clone());
+        } else {
+            row.denied = true;
+        }
+        self.commit(vec![put("device", &id, &row)])?;
+        self.audit(
+            &who.email,
+            if approve {
+                "device-approved"
+            } else {
+                "device-denied"
+            },
+            &row.client,
+        );
+        Ok(())
+    }
+
+    fn device_poll(&self, device_code: &str) -> Result<DevicePoll> {
+        let id = hash(device_code.trim());
+        let _w = self.write_lock();
+        let Some(row) = self.state().devices.get(&id).cloned() else {
+            return Ok(DevicePoll::Expired);
+        };
+        if row.denied {
+            self.commit(vec![del("device", &id)])?;
+            return Ok(DevicePoll::Denied);
+        }
+        if let (Some(email), Some((sealed, nonce))) = (&row.approved_by, &row.token) {
+            let token = unhex(sealed)
+                .zip(unhex(nonce))
+                .and_then(|(s, n)| open(&self.key, &format!("device:{id}"), &s, &n))
+                .context("the issued token cannot be read; start the sign-in again")?;
+            self.commit(vec![del("device", &id)])?;
+            return Ok(DevicePoll::Approved {
+                token,
+                email: email.clone(),
+            });
+        }
+        Ok(if row.expires < now() {
+            DevicePoll::Expired
+        } else {
+            DevicePoll::Pending
+        })
+    }
+}
+
 impl crate::backends::Authenticator for Store {
     /// The member behind a session cookie or, failing that, a bearer token, and which it was.
     fn authenticate(
@@ -1536,6 +1690,37 @@ mod tests {
         assert_eq!(back.email, "dev@x.org");
         s.sign_out(&session, false).unwrap();
         assert!(s.authenticate(Some(&session), None).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_command_line_sign_in_is_approved_once_and_collected_once() {
+        use crate::backends::DeviceSignIn;
+        let (_d, s) = temp_store();
+        let invite = s.invite("a@x.org", "m@x.org", Role::Member, false).unwrap();
+        let (_, who) = s.redeem(&invite, "1.2.3.4").unwrap();
+        let (device, user) = s.device_start("comindly CLI on laptop", "1.2.3.4").unwrap();
+        assert_eq!(s.device_poll(&device).unwrap(), DevicePoll::Pending);
+        assert_eq!(
+            s.device_info(&user.to_lowercase()).unwrap().client,
+            "comindly CLI on laptop"
+        );
+        assert!(s.device_approve(&who, "AAAA-AAAA", true).is_err());
+        s.device_approve(&who, &user, true).unwrap();
+        assert!(s.device_info(&user).is_none(), "approved once");
+        let DevicePoll::Approved { token, email } = s.device_poll(&device).unwrap() else {
+            panic!("not approved");
+        };
+        assert_eq!(email, "m@x.org");
+        assert!(s.authenticate(None, Some(&token)).unwrap().is_some());
+        assert_eq!(
+            s.device_poll(&device).unwrap(),
+            DevicePoll::Expired,
+            "collected once"
+        );
+
+        let (device, user) = s.device_start("other", "1.2.3.4").unwrap();
+        s.device_approve(&who, &user, false).unwrap();
+        assert_eq!(s.device_poll(&device).unwrap(), DevicePoll::Denied);
     }
 
     #[test]

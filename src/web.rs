@@ -397,6 +397,10 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
             .route("/api/v1/auth/code", post(auth::sign_in_code))
             .route("/api/v1/auth/reset-code", post(auth::reset_own_code))
             .route("/api/v1/auth/signout", post(auth::sign_out))
+            .route("/api/v1/auth/device/start", post(auth::device_start))
+            .route("/api/v1/auth/device/token", post(auth::device_token))
+            .route("/api/v1/auth/device", get(auth::device_info))
+            .route("/api/v1/auth/device/approve", post(auth::device_approve))
             .route("/api/v1/members", get(auth::members))
             .route("/api/v1/members/invite", post(auth::invite))
             .route("/api/v1/members/reset", post(auth::reset_code))
@@ -470,6 +474,7 @@ pub(crate) fn error_body(
         StatusCode::FORBIDDEN => "forbidden",
         StatusCode::NOT_FOUND => "not_found",
         StatusCode::CONFLICT => "conflict",
+        StatusCode::GONE => "gone",
         StatusCode::SERVICE_UNAVAILABLE => "unavailable",
         _ => "error",
     };

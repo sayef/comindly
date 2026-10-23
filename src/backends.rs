@@ -4,7 +4,9 @@
 use anyhow::{Context, Result};
 use futures::future::BoxFuture;
 
-use crate::server::{AccessToken, Invite, Member, Role, SecretInfo, Via, Who};
+use crate::server::{
+    AccessToken, DevicePoll, DeviceRequest, Invite, Member, Role, SecretInfo, Via, Who,
+};
 
 /// Members, invitations, sign-in links and codes, sessions and personal access tokens.
 pub trait AccountStore: Send + Sync {
@@ -35,6 +37,16 @@ pub trait AccountStore: Send + Sync {
     fn create_token(&self, who: &Who, name: &str) -> Result<String>;
     fn tokens(&self, who: &Who) -> Result<Vec<AccessToken>>;
     fn revoke_token(&self, who: &Who, id: &str) -> Result<()>;
+}
+
+/// Command-line sign-in approved in the browser: the command starts it and polls, a signed-in
+/// member approves it, and the command receives a personal access token.
+pub trait DeviceSignIn: Send + Sync {
+    /// A device code for the command and a short code for the member to confirm.
+    fn device_start(&self, client: &str, from: &str) -> Result<(String, String)>;
+    fn device_info(&self, user_code: &str) -> Option<DeviceRequest>;
+    fn device_approve(&self, who: &Who, user_code: &str, approve: bool) -> Result<()>;
+    fn device_poll(&self, device_code: &str) -> Result<DevicePoll>;
 }
 
 /// Who a request comes from: a session cookie or a bearer token, or nobody.

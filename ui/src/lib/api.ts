@@ -422,6 +422,8 @@ export const api = {
   me: () => get<Me>("/api/v1/auth/me"),
   requestLink: (email: string) => post("/api/v1/auth/link", { email }),
   redeem: (token: string) => post("/api/v1/auth/redeem", { token }),
+  deviceInfo: (code: string) => get<{ client: string; expires: string }>(`/api/v1/auth/device?code=${encodeURIComponent(code)}`),
+  deviceApprove: (code: string, approve: boolean) => post("/api/v1/auth/device/approve", { code, approve }),
   signInCode: (email: string, code: string) => post<Done & { code: string | null }>("/api/v1/auth/code", { email, code }),
   resetOwnCode: () => post<Done & { code: string }>("/api/v1/auth/reset-code", {}),
   signOut: (everywhere = false) => post(`/api/v1/auth/signout${everywhere ? "?everywhere=true" : ""}`, {}),

@@ -150,7 +150,12 @@ pub(super) async fn guard(
     }
     let open = matches!(
         path.as_str(),
-        "/api/v1/auth/me" | "/api/v1/auth/link" | "/api/v1/auth/redeem" | "/api/v1/auth/code"
+        "/api/v1/auth/me"
+            | "/api/v1/auth/link"
+            | "/api/v1/auth/redeem"
+            | "/api/v1/auth/code"
+            | "/api/v1/auth/device/start"
+            | "/api/v1/auth/device/token"
     );
     let token = bearer(&req);
     let session = cookie(&req, cookie_name(&server.config));
@@ -631,6 +636,93 @@ pub(super) async fn set_secret(
     };
     done(
         server.secrets.set_secret(&who.email, &name, &q.value),
+        message,
+    )
+}
+
+#[derive(Deserialize)]
+pub(super) struct DeviceStartQ {
+    client: String,
+}
+
+/// A command line asks to sign in; a member approves it at the returned address.
+pub(super) async fn device_start(
+    On(server): On,
+    axum::extract::ConnectInfo(peer): axum::extract::ConnectInfo<std::net::SocketAddr>,
+    headers: axum::http::HeaderMap,
+    Json(q): Json<DeviceStartQ>,
+) -> Response {
+    let from = client(&server.config, peer, &headers);
+    match server.devices.device_start(&q.client, &from) {
+        Ok((device_code, user_code)) => Json(json!({
+            "device_code": device_code,
+            "user_code": user_code,
+            "verify_url": format!("{}/device?code={user_code}", server.config.public_url),
+            "interval": 2,
+            "expires_in": 600,
+        }))
+        .into_response(),
+        Err(e) => bad(e),
+    }
+}
+
+#[derive(Deserialize)]
+pub(super) struct DeviceTokenQ {
+    device_code: String,
+}
+
+/// What the command line polls: pending, or the token once a member approved.
+pub(super) async fn device_token(On(server): On, Json(q): Json<DeviceTokenQ>) -> Response {
+    match server.devices.device_poll(&q.device_code) {
+        Ok(server::DevicePoll::Pending) => Json(json!({"status": "pending"})).into_response(),
+        Ok(server::DevicePoll::Approved { token, email }) => {
+            Json(json!({"status": "approved", "token": token, "email": email})).into_response()
+        }
+        Ok(server::DevicePoll::Denied) => fail(StatusCode::FORBIDDEN, "The sign-in was denied"),
+        Ok(server::DevicePoll::Expired) => fail(
+            StatusCode::GONE,
+            "The sign-in expired or was already used; start it again",
+        ),
+        Err(e) => bad(e),
+    }
+}
+
+#[derive(Deserialize)]
+pub(super) struct DeviceCodeQ {
+    code: String,
+}
+
+pub(super) async fn device_info(
+    On(server): On,
+    axum::extract::Query(q): axum::extract::Query<DeviceCodeQ>,
+) -> Response {
+    match server.devices.device_info(&q.code) {
+        Some(r) => Json(json!(r)).into_response(),
+        None => fail(
+            StatusCode::NOT_FOUND,
+            "That code is not waiting for approval; start the sign-in again",
+        ),
+    }
+}
+
+#[derive(Deserialize)]
+pub(super) struct DeviceApproveQ {
+    code: String,
+    approve: bool,
+}
+
+pub(super) async fn device_approve(
+    On(server): On,
+    Extension(who): Extension<Who>,
+    Json(q): Json<DeviceApproveQ>,
+) -> Response {
+    let message = if q.approve {
+        "Approved; the command line is signed in"
+    } else {
+        "Denied"
+    };
+    done(
+        server.devices.device_approve(&who, &q.code, q.approve),
         message,
     )
 }

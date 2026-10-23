@@ -8,9 +8,21 @@ import { Input } from "@/components/ui/input";
 import { api, type Me } from "@/lib/api";
 
 const field = "flex flex-col gap-1 text-xs font-medium";
-const home = () => window.location.replace("/");
+const AFTER = "comindly:after-sign-in";
 
-function Shell({ children }: { children: React.ReactNode }) {
+/** Back where sign-in interrupted, else home. */
+const home = () => {
+  let to = "/";
+  try {
+    to = localStorage.getItem(AFTER) ?? "/";
+    localStorage.removeItem(AFTER);
+  } catch {
+    // storage blocked: home it is
+  }
+  window.location.replace(/^\/(?![/\\])/.test(to) ? to : "/");
+};
+
+export function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-full items-center justify-center bg-sidebar p-6">
       <div className="w-full max-w-sm">
@@ -178,6 +190,13 @@ function AdminToken() {
 
 export function SignInPage({ me }: { me: Me }) {
   const token = new URLSearchParams(window.location.search).get("t");
+  if (window.location.pathname !== "/signin") {
+    try {
+      localStorage.setItem(AFTER, window.location.pathname + window.location.search);
+    } catch {
+      // storage blocked: sign-in returns home
+    }
+  }
   if (token && me.sign_in === "email") return <Confirm token={token} />;
   return (
     <Shell>
