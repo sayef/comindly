@@ -1599,6 +1599,7 @@ dependencies = [
  "sqlparser 0.63.0",
  "tao",
  "tokio",
+ "tokio-util",
  "toml",
  "toml_edit 0.25.17+spec-1.1.0",
  "tree-sitter",

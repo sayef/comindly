@@ -42,6 +42,24 @@ pub struct Enrichment {
 }
 
 impl LlmClient {
+    /// A client for `model` at `base_url` (OpenAI when absent), with `key`.
+    pub fn new(base_url: Option<&str>, model: &str, key: Option<&str>) -> Result<Self> {
+        let key = key.map(str::to_string);
+        let client = match base_url {
+            Some(base) => openai::OpenAIConfig::new(key.unwrap_or_else(|| "sk-noauth".into()))
+                .with_base_url(base)
+                .client(),
+            None => openai::OpenAIConfig::new(key.context("no LLM key")?).client(),
+        };
+        Ok(Self {
+            client,
+            model: model.to_string(),
+            openai_native: base_url.is_none(),
+            input_tokens: Arc::new(AtomicU64::new(0)),
+            output_tokens: Arc::new(AtomicU64::new(0)),
+        })
+    }
+
     /// Build a client from config + environment. Model and base URL resolve via
     /// [`crate::config`] (env → `config.toml` → default); the key stays env-only
     /// (`OPENAI_API_KEY`).

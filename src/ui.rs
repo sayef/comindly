@@ -196,3 +196,108 @@ pub fn progress(len: u64, msg: &str) -> ProgressBar {
     }
     pb
 }
+
+/// Renders core's events: styled lines and progress bars at a terminal, one JSON object per line
+/// with `COMINDLY_LOG_FORMAT=json`, plain progress lines every 30 s otherwise.
+pub struct Terminal {
+    bar: Mutex<Option<(String, ProgressBar)>>,
+    last_progress: Mutex<Option<std::time::Instant>>,
+}
+
+impl Terminal {
+    pub fn new() -> Self {
+        Terminal {
+            bar: Mutex::new(None),
+            last_progress: Mutex::new(None),
+        }
+    }
+
+    fn finish_bar(&self) {
+        if let Some((_, pb)) = self.bar.lock().ok().and_then(|mut b| b.take()) {
+            pb.finish_and_clear();
+        }
+    }
+
+    fn due(&self) -> bool {
+        let mut last = self.last_progress.lock().unwrap_or_else(|e| e.into_inner());
+        let now = std::time::Instant::now();
+        let due = last.is_none_or(|t| now.duration_since(t) >= Duration::from_secs(30));
+        if due {
+            *last = Some(now);
+        }
+        due
+    }
+}
+
+impl Default for Terminal {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl crate::events::EventSink for Terminal {
+    fn emit(&self, e: crate::events::Event) {
+        use crate::events::Kind;
+        if e.kind != Kind::Progress {
+            self.finish_bar();
+        }
+        if json_logs() {
+            if e.kind != Kind::Progress || self.due() {
+                if let Ok(line) = serde_json::to_string(&e) {
+                    eprintln!("{line}");
+                }
+            }
+            return;
+        }
+        let usage = e.tokens_in.map(|i| {
+            crate::events::Usage {
+                tokens_in: i,
+                tokens_out: e.tokens_out.unwrap_or(0),
+                usd: e.usd,
+            }
+            .to_string()
+        });
+        match e.kind {
+            Kind::Step => eprintln!("\n{}", style(&e.message).bold().cyan()),
+            Kind::Done => eprintln!("{} {}", style("✓").green().bold(), e.message),
+            Kind::Note => eprintln!("  {}", style(&e.message).dim()),
+            Kind::Warning => eprintln!("{} {}", style("!").yellow().bold(), e.message),
+            Kind::Error => eprintln!("{} {}", style("✗").red().bold(), e.message),
+            Kind::Progress => {
+                let (done, total) = (e.done.unwrap_or(0), e.total.unwrap_or(0));
+                if !std::io::IsTerminal::is_terminal(&std::io::stderr()) {
+                    if self.due() {
+                        eprintln!(
+                            "  {}: {done}/{total}{}",
+                            e.message,
+                            usage.map(|u| format!(" · {u}")).unwrap_or_default()
+                        );
+                    }
+                    return;
+                }
+                let mut bar = self.bar.lock().unwrap_or_else(|p| p.into_inner());
+                if bar.as_ref().is_none_or(|(m, _)| *m != e.message) {
+                    if let Some((_, old)) = bar.take() {
+                        old.finish_and_clear();
+                    }
+                    let pb =
+                        ProgressBar::with_draw_target(Some(total), ProgressDrawTarget::stderr());
+                    pb.set_style(
+                        ProgressStyle::with_template(
+                            "{spinner:.cyan} [{elapsed_precise}] [{bar:32.cyan/blue}] {pos}/{len} {msg} {eta:.dim}",
+                        )
+                        .unwrap_or_else(|_| ProgressStyle::default_bar())
+                        .progress_chars("=>-"),
+                    );
+                    pb.enable_steady_tick(Duration::from_millis(90));
+                    *bar = Some((e.message.clone(), pb));
+                }
+                if let Some((_, pb)) = bar.as_ref() {
+                    pb.set_length(total);
+                    pb.set_position(done);
+                    pb.set_message(usage.unwrap_or_else(|| e.message.clone()));
+                }
+            }
+        }
+    }
+}

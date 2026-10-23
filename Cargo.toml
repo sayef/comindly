@@ -33,7 +33,8 @@ indicatif = "0.18" # stderr progress bars / spinners (auto-degrade off-TTY)
 console = "0.16" # styled status lines + TTY detection
 comfy-table = "7" # unicode result tables
 anyhow = "1"
-tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "io-std", "net", "process", "io-util"] }
+tokio-util = "0.7"
+tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "io-std", "net", "process", "io-util", "signal"] }
 futures = "0.3"
 toml_edit = "0.25"
 rpassword = "7"
