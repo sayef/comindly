@@ -12,6 +12,8 @@ use lancedb::arrow::arrow_array::{RecordBatch, RecordBatchIterator, StringArray}
 use lancedb::arrow::arrow_schema::{DataType, Field, Schema};
 use serde::{Deserialize, Serialize};
 
+use crate::backends::{AccountStore, Authenticator, Mailer, SecretStore, SettingsStore};
+
 /// `NAME` from the environment, or the contents of the file `NAME_FILE` names.
 pub fn env_secret(name: &str) -> Option<String> {
     if let Some(v) = std::env::var(name).ok().filter(|v| !v.trim().is_empty()) {
@@ -105,51 +107,37 @@ impl ServerConfig {
     }
 }
 
-/// A running server: its settings and its accounts.
+/// A running server: its settings and its backends.
 pub struct Server {
     pub config: ServerConfig,
-    pub store: Store,
+    pub accounts: Arc<dyn AccountStore>,
+    pub auth: Arc<dyn Authenticator>,
+    pub secrets: Arc<dyn SecretStore>,
+    pub settings: Arc<dyn SettingsStore>,
+    pub mailer: Arc<dyn Mailer>,
 }
 
 impl Server {
-    /// Open the server's table under `index_root`.
+    /// The default backends: a signed table under `index_root`, and SMTP.
     pub fn open(index_root: &str, config: ServerConfig) -> Result<Server> {
-        let store = Store::open(index_root, &config)?;
-        Ok(Server { config, store })
+        let store = Arc::new(Store::open(index_root, &config)?);
+        let mailer = Arc::new(crate::backends::Smtp {
+            url: config.smtp_url.clone(),
+            from: config.smtp_from.clone(),
+        });
+        Ok(Server {
+            config,
+            accounts: store.clone(),
+            auth: store.clone(),
+            secrets: store.clone(),
+            settings: store,
+            mailer,
+        })
     }
 
     /// A git host's token: the deployment's, else the one stored here.
     pub fn git_token(&self, host: &str) -> Option<String> {
-        crate::config::env_token(host).or_else(|| self.store.secret(&git_secret(host)))
-    }
-
-    /// Send a plain-text email through `COMINDLY_SMTP_URL` (e.g. `smtps://user:pass@host`).
-    pub async fn send_mail(&self, to: &str, subject: &str, body: &str) -> Result<()> {
-        use lettre::message::header::ContentType;
-        use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
-        let url = self
-            .config
-            .smtp_url
-            .as_deref()
-            .context("no mail server configured")?;
-        let msg = Message::builder()
-            .from(
-                self.config
-                    .smtp_from
-                    .parse()
-                    .context("COMINDLY_SMTP_FROM is not an address")?,
-            )
-            .to(to.parse().context("not an email address")?)
-            .subject(subject)
-            .header(ContentType::TEXT_PLAIN)
-            .body(body.to_string())?;
-        AsyncSmtpTransport::<Tokio1Executor>::from_url(url)
-            .context("COMINDLY_SMTP_URL is not a valid smtp:// or smtps:// URL")?
-            .build()
-            .send(msg)
-            .await
-            .map_err(|e| anyhow::anyhow!("sending mail failed: {e}"))?;
-        Ok(())
+        crate::config::env_token(host).or_else(|| self.secrets.secret(&git_secret(host)))
     }
 }
 
@@ -806,8 +794,99 @@ impl Store {
         }
     }
 
+    fn session_for(&self, email: &str) -> Result<(String, Who)> {
+        let who = self.member(email)?.context("not a member")?;
+        let token = new_token("ses_");
+        let session = Session {
+            email: who.email.clone(),
+            created: now(),
+            expires: (Utc::now() + Duration::days(SESSION_DAYS)).to_rfc3339(),
+        };
+        self.commit(vec![put("session", &hash(&token), &session)])?;
+        Ok((token, who))
+    }
+
+    /// Re-seal secrets stored under `COMINDLY_SECRET_KEY_PREVIOUS` with the current key.
+    fn rotate_key(&self) -> Result<()> {
+        let (key, Some(old)) = (self.key.clone(), self.previous.clone()) else {
+            return Ok(());
+        };
+        let rows: Vec<(String, Secret)> = self
+            .state()
+            .secrets
+            .iter()
+            .map(|(n, s)| (n.clone(), s.clone()))
+            .collect();
+        let mut changes = Vec::new();
+        for (name, row) in rows {
+            if unseal(&key, &name, &row).is_some() {
+                continue;
+            }
+            let Some(plain) = unseal(&old, &name, &row) else {
+                continue;
+            };
+            let mut again = sealed(&key, &name, &plain, &row.updated_by)?;
+            again.updated = row.updated;
+            changes.push(put("secret", &name, &again));
+        }
+        self.commit(changes)
+    }
+
+    fn write_lock(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.writing.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+fn sealed(key: &str, name: &str, value: &str, by: &str) -> Result<Secret> {
+    let (s, n) = seal(key, name, value)?;
+    Ok(Secret {
+        sealed: hex(&s),
+        nonce: hex(&n),
+        hint: hint(value),
+        updated: now(),
+        updated_by: by.to_string(),
+    })
+}
+
+fn unseal(key: &str, name: &str, row: &Secret) -> Option<String> {
+    open(key, name, &unhex(&row.sealed)?, &unhex(&row.nonce)?)
+}
+
+fn hex(b: &[u8]) -> String {
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+fn unhex(s: &str) -> Option<Vec<u8>> {
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok())
+        .collect()
+}
+
+/// Equal without revealing where or how long the values differ.
+fn constant_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (blake3::hash(a.as_bytes()), blake3::hash(b.as_bytes()));
+    a.as_bytes()
+        .iter()
+        .zip(b.as_bytes())
+        .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+        == 0
+}
+
+fn valid_email(email: &str) -> bool {
+    email.contains('@') && !email.contains(|c: char| c.is_whitespace() || c == '|')
+}
+
+/// Secret names for a git host's token and for the LLM key.
+pub fn git_secret(host: &str) -> String {
+    format!("git:{}", host.to_lowercase())
+}
+
+pub const LLM_SECRET: &str = "llm_api_key";
+
+impl crate::backends::AccountStore for Store {
     /// The member `email`, with deployment admins always present and admin.
-    pub fn member(&self, email: &str) -> Result<Option<Who>> {
+    fn member(&self, email: &str) -> Result<Option<Who>> {
         let email = normalize(email);
         if self.admins.contains(&email) {
             return Ok(Some(Who {
@@ -819,7 +898,7 @@ impl Store {
         Ok(role.map(|role| Who { email, role }))
     }
 
-    pub fn members(&self) -> Result<Vec<Member>> {
+    fn members(&self) -> Result<Vec<Member>> {
         let admins = self.admins.clone();
         let st = self.state();
         let mut out: Vec<Member> = st
@@ -853,7 +932,7 @@ impl Store {
         Ok(out)
     }
 
-    pub fn set_role(&self, by: &str, email: &str, role: Role) -> Result<()> {
+    fn set_role(&self, by: &str, email: &str, role: Role) -> Result<()> {
         let email = normalize(email);
         if self.admins.contains(&email) {
             bail!("{email} is an admin by the deployment's settings");
@@ -868,7 +947,7 @@ impl Store {
     }
 
     /// Remove a member with their sessions, tokens and invitations.
-    pub fn remove(&self, by: &str, email: &str) -> Result<()> {
+    fn remove(&self, by: &str, email: &str) -> Result<()> {
         let email = normalize(email);
         if self.admins.contains(&email) {
             bail!("{email} is an admin by the deployment's settings");
@@ -912,7 +991,7 @@ impl Store {
     }
 
     /// An invitation for `email` only: a link token, or with `code` a code to hand over.
-    pub fn invite(&self, by: &str, email: &str, role: Role, code: bool) -> Result<String> {
+    fn invite(&self, by: &str, email: &str, role: Role, code: bool) -> Result<String> {
         let email = normalize(email);
         anyhow::ensure!(
             email.contains('@') && !email.contains(char::is_whitespace),
@@ -951,7 +1030,7 @@ impl Store {
         Ok(token)
     }
 
-    pub fn invites(&self) -> Result<Vec<Invite>> {
+    fn invites(&self) -> Result<Vec<Invite>> {
         let t = now();
         let mut out: Vec<(String, Invite)> = self
             .state()
@@ -974,7 +1053,7 @@ impl Store {
         Ok(out.into_iter().map(|(_, i)| i).collect())
     }
 
-    pub fn revoke_invite(&self, by: &str, email: &str) -> Result<()> {
+    fn revoke_invite(&self, by: &str, email: &str) -> Result<()> {
         let email = normalize(email);
         let _w = self.write_lock();
         let changes = self
@@ -990,7 +1069,7 @@ impl Store {
     }
 
     /// A sign-in link token for a member, or `None` when `email` is not one.
-    pub fn sign_in_link(&self, email: &str) -> Result<Option<String>> {
+    fn sign_in_link(&self, email: &str) -> Result<Option<String>> {
         let Some(who) = self.member(email)? else {
             return Ok(None);
         };
@@ -1020,7 +1099,7 @@ impl Store {
 
     /// Exchange a sign-in link, an invitation or the admin token for a new session; `client`
     /// limits how often one place may guess.
-    pub fn redeem(&self, token: &str, client: &str) -> Result<(String, Who)> {
+    fn redeem(&self, token: &str, client: &str) -> Result<(String, Who)> {
         let token = token.trim();
         let from = format!("redeem|{client}");
         anyhow::ensure!(
@@ -1086,7 +1165,7 @@ impl Store {
     /// person's own sign-in code (returned once), or that sign-in code.
     /// `client` identifies where the attempt comes from: wrong codes pause that address for that
     /// client only, so nobody can lock another person out.
-    pub fn sign_in_code(
+    fn sign_in_code(
         &self,
         email: &str,
         code: &str,
@@ -1156,7 +1235,7 @@ impl Store {
     }
 
     /// Give `email` a new sign-in code; their sessions end, except `keep` (the caller's own).
-    pub fn reset_code(&self, by: &str, email: &str, keep: Option<&str>) -> Result<String> {
+    fn reset_code(&self, by: &str, email: &str, keep: Option<&str>) -> Result<String> {
         let email = normalize(email);
         anyhow::ensure!(self.member(&email)?.is_some(), "{email} is not a member");
         anyhow::ensure!(
@@ -1189,20 +1268,75 @@ impl Store {
         Ok(code)
     }
 
-    fn session_for(&self, email: &str) -> Result<(String, Who)> {
-        let who = self.member(email)?.context("not a member")?;
-        let token = new_token("ses_");
-        let session = Session {
-            email: who.email.clone(),
-            created: now(),
-            expires: (Utc::now() + Duration::days(SESSION_DAYS)).to_rfc3339(),
+    fn sign_out(&self, session: &str, everywhere: bool) -> Result<()> {
+        let h = hash(session);
+        let changes = {
+            let st = self.state();
+            match (everywhere, st.sessions.get(&h)) {
+                (true, Some(s)) => st
+                    .sessions
+                    .iter()
+                    .filter(|(_, x)| x.email == s.email)
+                    .map(|(k, _)| del("session", k))
+                    .collect(),
+                _ => vec![del("session", &h)],
+            }
         };
-        self.commit(vec![put("session", &hash(&token), &session)])?;
-        Ok((token, who))
+        self.commit(changes)
     }
 
+    /// A personal access token for agents; its value is returned once.
+    fn create_token(&self, who: &Who, name: &str) -> Result<String> {
+        let name = name.trim();
+        anyhow::ensure!(!name.is_empty(), "give the token a name");
+        let token = new_token("cly_");
+        let id = uuid::Uuid::new_v4().simple().to_string();
+        let row = Token {
+            hash: hash(&token),
+            email: who.email.clone(),
+            name: name.to_string(),
+            created: now(),
+            last_used: None,
+        };
+        self.commit(vec![put("token", &id, &row)])?;
+        self.audit(&who.email, "token", name);
+        Ok(token)
+    }
+
+    fn tokens(&self, who: &Who) -> Result<Vec<AccessToken>> {
+        let mut out: Vec<AccessToken> = self
+            .state()
+            .tokens
+            .iter()
+            .filter(|(_, t)| t.email == who.email)
+            .map(|(id, t)| AccessToken {
+                id: id.clone(),
+                name: t.name.clone(),
+                created: t.created.clone(),
+                last_used: t.last_used.clone(),
+            })
+            .collect();
+        out.sort_by(|a, b| b.created.cmp(&a.created));
+        Ok(out)
+    }
+
+    fn revoke_token(&self, who: &Who, id: &str) -> Result<()> {
+        let mine = self
+            .state()
+            .tokens
+            .get(id)
+            .is_some_and(|t| t.email == who.email);
+        if mine {
+            self.commit(vec![del("token", id)])?;
+        }
+        self.audit(&who.email, "revoke-token", id);
+        Ok(())
+    }
+}
+
+impl crate::backends::Authenticator for Store {
     /// The member behind a session cookie or, failing that, a bearer token, and which it was.
-    pub fn authenticate(
+    fn authenticate(
         &self,
         session: Option<&str>,
         bearer: Option<&str>,
@@ -1268,74 +1402,11 @@ impl Store {
         }
         Ok(who.map(|w| (w, via)))
     }
+}
 
-    pub fn sign_out(&self, session: &str, everywhere: bool) -> Result<()> {
-        let h = hash(session);
-        let changes = {
-            let st = self.state();
-            match (everywhere, st.sessions.get(&h)) {
-                (true, Some(s)) => st
-                    .sessions
-                    .iter()
-                    .filter(|(_, x)| x.email == s.email)
-                    .map(|(k, _)| del("session", k))
-                    .collect(),
-                _ => vec![del("session", &h)],
-            }
-        };
-        self.commit(changes)
-    }
-
-    /// A personal access token for agents; its value is returned once.
-    pub fn create_token(&self, who: &Who, name: &str) -> Result<String> {
-        let name = name.trim();
-        anyhow::ensure!(!name.is_empty(), "give the token a name");
-        let token = new_token("cly_");
-        let id = uuid::Uuid::new_v4().simple().to_string();
-        let row = Token {
-            hash: hash(&token),
-            email: who.email.clone(),
-            name: name.to_string(),
-            created: now(),
-            last_used: None,
-        };
-        self.commit(vec![put("token", &id, &row)])?;
-        self.audit(&who.email, "token", name);
-        Ok(token)
-    }
-
-    pub fn tokens(&self, who: &Who) -> Result<Vec<AccessToken>> {
-        let mut out: Vec<AccessToken> = self
-            .state()
-            .tokens
-            .iter()
-            .filter(|(_, t)| t.email == who.email)
-            .map(|(id, t)| AccessToken {
-                id: id.clone(),
-                name: t.name.clone(),
-                created: t.created.clone(),
-                last_used: t.last_used.clone(),
-            })
-            .collect();
-        out.sort_by(|a, b| b.created.cmp(&a.created));
-        Ok(out)
-    }
-
-    pub fn revoke_token(&self, who: &Who, id: &str) -> Result<()> {
-        let mine = self
-            .state()
-            .tokens
-            .get(id)
-            .is_some_and(|t| t.email == who.email);
-        if mine {
-            self.commit(vec![del("token", id)])?;
-        }
-        self.audit(&who.email, "revoke-token", id);
-        Ok(())
-    }
-
+impl crate::backends::SecretStore for Store {
     /// Store `value` under `name` (an empty value removes it), sealed with `COMINDLY_SECRET_KEY`.
-    pub fn set_secret(&self, by: &str, name: &str, value: &str) -> Result<()> {
+    fn set_secret(&self, by: &str, name: &str, value: &str) -> Result<()> {
         let value = value.trim();
         if value.is_empty() {
             self.commit(vec![del("secret", name)])?;
@@ -1348,12 +1419,12 @@ impl Store {
         Ok(())
     }
 
-    pub fn secret(&self, name: &str) -> Option<String> {
+    fn secret(&self, name: &str) -> Option<String> {
         let row = self.state().secrets.get(name).cloned()?;
         unseal(&self.key, name, &row)
     }
 
-    pub fn secret_info(&self, name: &str) -> Option<SecretInfo> {
+    fn secret_info(&self, name: &str) -> Option<SecretInfo> {
         self.state().secrets.get(name).map(|s| SecretInfo {
             name: name.to_string(),
             source: "stored",
@@ -1364,38 +1435,14 @@ impl Store {
     }
 
     /// Names of stored secrets.
-    pub fn secret_names(&self) -> Vec<String> {
+    fn secret_names(&self) -> Vec<String> {
         self.state().secrets.keys().cloned().collect()
     }
+}
 
-    /// Re-seal secrets stored under `COMINDLY_SECRET_KEY_PREVIOUS` with the current key.
-    fn rotate_key(&self) -> Result<()> {
-        let (key, Some(old)) = (self.key.clone(), self.previous.clone()) else {
-            return Ok(());
-        };
-        let rows: Vec<(String, Secret)> = self
-            .state()
-            .secrets
-            .iter()
-            .map(|(n, s)| (n.clone(), s.clone()))
-            .collect();
-        let mut changes = Vec::new();
-        for (name, row) in rows {
-            if unseal(&key, &name, &row).is_some() {
-                continue;
-            }
-            let Some(plain) = unseal(&old, &name, &row) else {
-                continue;
-            };
-            let mut again = sealed(&key, &name, &plain, &row.updated_by)?;
-            again.updated = row.updated;
-            changes.push(put("secret", &name, &again));
-        }
-        self.commit(changes)
-    }
-
+impl crate::backends::SettingsStore for Store {
     /// Keep the server's `config.toml` (repositories, indexing settings) with the accounts.
-    pub fn keep_config(&self, text: &str) -> Result<()> {
+    fn keep_config(&self, text: &str) -> Result<()> {
         if self.state().config.get(CONFIG).map(String::as_str) == Some(text) {
             return Ok(());
         }
@@ -1403,61 +1450,10 @@ impl Store {
     }
 
     /// The kept `config.toml`, if any.
-    pub fn kept_config(&self) -> Option<String> {
+    fn kept_config(&self) -> Option<String> {
         self.state().config.get(CONFIG).cloned()
     }
-
-    fn write_lock(&self) -> std::sync::MutexGuard<'_, ()> {
-        self.writing.lock().unwrap_or_else(|e| e.into_inner())
-    }
 }
-
-fn sealed(key: &str, name: &str, value: &str, by: &str) -> Result<Secret> {
-    let (s, n) = seal(key, name, value)?;
-    Ok(Secret {
-        sealed: hex(&s),
-        nonce: hex(&n),
-        hint: hint(value),
-        updated: now(),
-        updated_by: by.to_string(),
-    })
-}
-
-fn unseal(key: &str, name: &str, row: &Secret) -> Option<String> {
-    open(key, name, &unhex(&row.sealed)?, &unhex(&row.nonce)?)
-}
-
-fn hex(b: &[u8]) -> String {
-    b.iter().map(|x| format!("{x:02x}")).collect()
-}
-
-fn unhex(s: &str) -> Option<Vec<u8>> {
-    (0..s.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok())
-        .collect()
-}
-
-/// Equal without revealing where or how long the values differ.
-fn constant_eq(a: &str, b: &str) -> bool {
-    let (a, b) = (blake3::hash(a.as_bytes()), blake3::hash(b.as_bytes()));
-    a.as_bytes()
-        .iter()
-        .zip(b.as_bytes())
-        .fold(0u8, |acc, (x, y)| acc | (x ^ y))
-        == 0
-}
-
-fn valid_email(email: &str) -> bool {
-    email.contains('@') && !email.contains(|c: char| c.is_whitespace() || c == '|')
-}
-
-/// Secret names for a git host's token and for the LLM key.
-pub fn git_secret(host: &str) -> String {
-    format!("git:{}", host.to_lowercase())
-}
-
-pub const LLM_SECRET: &str = "llm_api_key";
 
 #[cfg(test)]
 mod tests {

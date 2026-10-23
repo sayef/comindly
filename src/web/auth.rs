@@ -143,7 +143,6 @@ pub(super) async fn guard(
     mut req: Request,
     next: Next,
 ) -> Response {
-    let store = &server.store;
     let path = req.uri().path().to_string();
     if !(path.starts_with("/api/") || path.starts_with("/mcp")) {
         return next.run(req).await;
@@ -155,7 +154,8 @@ pub(super) async fn guard(
     let token = bearer(&req);
     let session = cookie(&req, cookie_name(&server.config));
     let found = tokio::task::block_in_place(|| {
-        store
+        server
+            .auth
             .authenticate(session.as_deref(), token.as_deref())
             .unwrap_or(None)
     });
@@ -227,7 +227,7 @@ pub(super) async fn request_link(On(server): On, Json(q): Json<EmailQ>) -> Respo
     }
     let email = server::normalize(&q.email);
     // Sent in the background, so the answer neither waits on the mail server nor reveals a member.
-    match server.store.sign_in_link(&email) {
+    match server.accounts.sign_in_link(&email) {
         Ok(Some(token)) => {
             let body = format!(
                 "Sign in to comindly with this link (valid for 15 minutes, once):\n\n{}\n\nIf you did not ask for it, ignore this email.",
@@ -236,7 +236,8 @@ pub(super) async fn request_link(On(server): On, Json(q): Json<EmailQ>) -> Respo
             let server = server.clone();
             tokio::spawn(async move {
                 if let Err(e) = server
-                    .send_mail(&email, "Your comindly sign-in link", &body)
+                    .mailer
+                    .send(&email, "Your comindly sign-in link", &body)
                     .await
                 {
                     crate::ui::warn(&super::error_text(&e));
@@ -271,7 +272,10 @@ pub(super) async fn redeem(
     Json(q): Json<TokenQ>,
 ) -> Response {
     let cfg = &server.config;
-    match server.store.redeem(&q.token, &client(cfg, peer, &headers)) {
+    match server
+        .accounts
+        .redeem(&q.token, &client(cfg, peer, &headers))
+    {
         Ok((session, who)) => (
             StatusCode::OK,
             [(
@@ -327,7 +331,7 @@ pub(super) async fn sign_in_code(
         return fail(StatusCode::BAD_REQUEST, "This server signs in by email");
     }
     match server
-        .store
+        .accounts
         .sign_in_code(&q.email, &q.code, &client(cfg, peer, &headers))
     {
         Ok((session, who, code)) => (
@@ -355,7 +359,7 @@ pub(super) async fn reset_own_code(
         return fail(StatusCode::BAD_REQUEST, "This server signs in by email");
     }
     let mine = cookie(&req, cookie_name(&server.config));
-    match server.store.reset_code(&who.email, &who.email, mine.as_deref()) {
+    match server.accounts.reset_code(&who.email, &who.email, mine.as_deref()) {
         Ok(code) => Json(json!({"ok": true, "message": "New sign-in code; the old one no longer works", "code": code}))
             .into_response(),
         Err(e) => bad(e),
@@ -368,7 +372,7 @@ pub(super) async fn sign_out(On(server): On, req: Request) -> Response {
         .query()
         .is_some_and(|q| q.contains("everywhere=true"));
     if let Some(s) = cookie(&req, cookie_name(&server.config)) {
-        let _ = server.store.sign_out(&s, everywhere);
+        let _ = server.accounts.sign_out(&s, everywhere);
     }
     (
         StatusCode::OK,
@@ -379,7 +383,7 @@ pub(super) async fn sign_out(On(server): On, req: Request) -> Response {
 }
 
 pub(super) async fn members(On(server): On) -> Response {
-    let store = &server.store;
+    let store = &server.accounts;
     match (store.members(), store.invites()) {
         (Ok(m), Ok(i)) => {
             Json(json!({"members": m, "invites": i, "sign_in": server.config.sign_in}))
@@ -401,7 +405,7 @@ pub(super) async fn invite(
     Extension(who): Extension<Who>,
     Json(q): Json<InviteQ>,
 ) -> Response {
-    let store = &server.store;
+    let store = &server.accounts;
     let email = server::normalize(&q.email);
     let code = server.config.sign_in == SignIn::Code;
     let token = match store.invite(&who.email, &email, q.role, code) {
@@ -418,7 +422,8 @@ pub(super) async fn invite(
         link(&server.config, "signin", &token)
     );
     match server
-        .send_mail(&email, "You're invited to comindly", &body)
+        .mailer
+        .send(&email, "You're invited to comindly", &body)
         .await
     {
         Ok(()) => Json(json!({"ok": true, "message": format!("Invitation emailed to {email}")}))
@@ -439,7 +444,7 @@ pub(super) async fn reset_code(
     if server.config.sign_in != SignIn::Code {
         return fail(StatusCode::BAD_REQUEST, "This server signs in by email");
     }
-    match server.store.reset_code(&who.email, &q.email, None) {
+    match server.accounts.reset_code(&who.email, &q.email, None) {
         Ok(code) => {
             Json(json!({"ok": true, "message": "New sign-in code; give it to them", "code": code}))
                 .into_response()
@@ -460,7 +465,7 @@ pub(super) async fn set_role(
     Json(q): Json<RoleQ>,
 ) -> Response {
     done(
-        server.store.set_role(&who.email, &q.email, q.role),
+        server.accounts.set_role(&who.email, &q.email, q.role),
         "Role changed",
     )
 }
@@ -473,7 +478,10 @@ pub(super) async fn remove(
     if server::normalize(&q.email) == who.email {
         return fail(StatusCode::BAD_REQUEST, "You cannot remove yourself");
     }
-    done(server.store.remove(&who.email, &q.email), "Member removed")
+    done(
+        server.accounts.remove(&who.email, &q.email),
+        "Member removed",
+    )
 }
 
 pub(super) async fn revoke_invite(
@@ -482,7 +490,7 @@ pub(super) async fn revoke_invite(
     Json(q): Json<EmailQ>,
 ) -> Response {
     done(
-        server.store.revoke_invite(&who.email, &q.email),
+        server.accounts.revoke_invite(&who.email, &q.email),
         "Invitation withdrawn",
     )
 }
@@ -495,7 +503,7 @@ fn done(r: anyhow::Result<()>, message: &str) -> Response {
 }
 
 pub(super) async fn tokens(On(server): On, Extension(who): Extension<Who>) -> Response {
-    match server.store.tokens(&who) {
+    match server.accounts.tokens(&who) {
         Ok(t) => Json(json!({"tokens": t})).into_response(),
         Err(e) => bad(e),
     }
@@ -512,7 +520,7 @@ pub(super) async fn create_token(
     Extension(who): Extension<Who>,
     Json(q): Json<NameQ>,
 ) -> Response {
-    match server.store.create_token(&who, &q.name) {
+    match server.accounts.create_token(&who, &q.name) {
         Ok(t) => Json(json!({"ok": true, "message": "Token created; copy it now, it is shown once", "token": t}))
             .into_response(),
         Err(e) => bad(e),
@@ -529,7 +537,7 @@ pub(super) async fn revoke_token(
     Extension(who): Extension<Who>,
     Json(q): Json<IdQ>,
 ) -> Response {
-    done(server.store.revoke_token(&who, &q.id), "Token revoked")
+    done(server.accounts.revoke_token(&who, &q.id), "Token revoked")
 }
 
 /// The deployment's value for a secret, which always wins over one stored here.
@@ -552,7 +560,7 @@ fn label(name: &str) -> String {
 
 /// The server's tokens and keys: where each comes from, never their values.
 pub(super) async fn secrets(On(server): On) -> Response {
-    let store = &server.store;
+    let store = &server.secrets;
     let mut names = vec![
         server::LLM_SECRET.to_string(),
         server::git_secret("github.com"),
@@ -621,7 +629,7 @@ pub(super) async fn set_secret(
         "Saved"
     };
     done(
-        server.store.set_secret(&who.email, &name, &q.value),
+        server.secrets.set_secret(&who.email, &name, &q.value),
         message,
     )
 }

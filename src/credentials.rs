@@ -55,7 +55,7 @@ pub fn llm_key(
         if let Some(k) = server.config.llm_key.clone() {
             return (Some(k), Source::Environment);
         }
-        return match server.store.secret(crate::server::LLM_SECRET) {
+        return match server.secrets.secret(crate::server::LLM_SECRET) {
             Some(k) => (Some(k), Source::Server),
             None => (None, Source::None),
         };

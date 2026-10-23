@@ -1473,7 +1473,7 @@ fn cmd_ui(from: Option<&str>, web: Option<(String, u16)>, open: bool) -> ExitCod
                 let (url, sign_in) = (cfg.public_url.clone(), cfg.sign_in);
                 let server =
                     comindly::server::Server::open(&root, cfg).context("open the server table")?;
-                let store = &server.store;
+                let store = &server.settings;
                 let config = comindly::config::config_path();
                 // The kept copy is the server's settings; the file is what commands read.
                 match store.kept_config() {

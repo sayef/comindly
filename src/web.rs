@@ -248,7 +248,7 @@ impl AppState {
     fn keep_config(&self) -> Result<()> {
         if let Some(s) = &self.server {
             let text = std::fs::read_to_string(crate::config::config_path()).unwrap_or_default();
-            s.store.keep_config(&text)?;
+            s.settings.keep_config(&text)?;
         }
         Ok(())
     }

@@ -538,7 +538,7 @@ pub(super) async fn remote_list(
             let host = source.host.clone();
             match (&server, who) {
                 (Some(server), Some(w)) => {
-                    if let Err(e) = server.store.set_secret(
+                    if let Err(e) = server.secrets.set_secret(
                         &w.email,
                         &crate::server::git_secret(&host),
                         &a.token,
