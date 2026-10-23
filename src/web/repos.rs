@@ -75,7 +75,8 @@ fn absolute(p: &str) -> String {
         .unwrap_or(p)
 }
 
-pub(super) async fn list(Conf(cfg): Conf, Cur(s): Cur) -> Json<Value> {
+pub(super) async fn list(State(app): State<Shared>, Cur(s): Cur) -> Json<Value> {
+    let cfg = app.config();
     let indexed: std::collections::HashMap<String, usize> =
         s.data.graph.repos().into_iter().collect();
     let meta = match super::graph_uri(&s) {
@@ -127,9 +128,9 @@ pub(super) async fn list(Conf(cfg): Conf, Cur(s): Cur) -> Json<Value> {
         })
         .map(|u| same_repo(&u))
         .collect();
-    let team_missing: Vec<String> = crate::team::current()
-        .map(|t| t.repos)
-        .unwrap_or_default()
+    let team_missing: Vec<String> = app
+        .team()
+        .repos
         .into_iter()
         .filter(|u| !mine.contains(&same_repo(u)))
         .collect();
@@ -631,7 +632,7 @@ pub(super) async fn remote_add(
             }
             if shared > 0 {
                 crate::team::save(&root, &settings, stored.version).await?;
-                crate::team::set_current(settings);
+                app.set_team(settings);
             }
         }
         anyhow::Ok(match (added, q.share) {

@@ -2,7 +2,7 @@
 //! using it runs the same LLM, embedding model and LLM steps. No secrets: each member's API key
 //! comes from their own credentials file or environment.
 
-use std::sync::{Arc, OnceLock, RwLock};
+use std::sync::Arc;
 
 use anyhow::{bail, Result};
 use futures::TryStreamExt;
@@ -135,30 +135,6 @@ pub async fn save_as(
         ],
     )?;
     crate::index::write_versioned(&db, TABLE, batch).await
-}
-
-fn active() -> &'static RwLock<Option<TeamSettings>> {
-    static A: OnceLock<RwLock<Option<TeamSettings>>> = OnceLock::new();
-    A.get_or_init(|| RwLock::new(None))
-}
-
-/// The team settings this process runs with, if its index has any.
-pub fn current() -> Option<TeamSettings> {
-    active().read().ok().and_then(|a| a.clone())
-}
-
-/// Use the team settings of the index at `root` in this process.
-pub fn apply(root: &str) -> Result<()> {
-    let stored = crate::rt::block_on(load(root))?;
-    set_current(stored.settings);
-    Ok(())
-}
-
-/// Replace the process's team settings (after a save or a switch from the UI).
-pub fn set_current(settings: TeamSettings) {
-    if let Ok(mut g) = active().write() {
-        *g = Some(settings);
-    }
 }
 
 #[cfg(test)]

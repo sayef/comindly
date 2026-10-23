@@ -8,7 +8,7 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::{Conf, Cur, Shared, Srv};
+use super::{Cur, Shared};
 use crate::config::Setting;
 
 fn fail(e: anyhow::Error) -> (StatusCode, Json<Value>) {
@@ -18,10 +18,11 @@ fn fail(e: anyhow::Error) -> (StatusCode, Json<Value>) {
     )
 }
 
-pub(super) async fn get(Srv(server): Srv, Conf(cfg): Conf, Cur(s): Cur) -> Json<Value> {
+pub(super) async fn get(State(app): State<Shared>, Cur(s): Cur) -> Json<Value> {
+    let (server, cfg, settings) = (app.server.clone(), app.config(), app.settings());
     let root = s.data.root.clone().unwrap_or_default();
+    let team = app.team().name;
     let key = tokio::task::spawn_blocking(move || {
-        let team = crate::team::current().and_then(|t| t.name);
         crate::credentials::llm_key(team.as_deref(), server.as_deref()).1
     })
     .await
@@ -34,7 +35,7 @@ pub(super) async fn get(Srv(server): Srv, Conf(cfg): Conf, Cur(s): Cur) -> Json<
         "author_effective": crate::config::local_identity().name,
         "record_names": cfg.record_names.unwrap_or(true),
         "llm_base_url": cfg.llm_base_url,
-        "llm_model": cfg.llm_model(),
+        "llm_model": settings.llm_model,
         "defaults": super::team::defaults(),
         "llm_key": key,
         "cache_ttl_secs": cfg.cache_ttl_secs.unwrap_or(crate::cache::DEFAULT_TTL),

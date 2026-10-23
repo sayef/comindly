@@ -99,7 +99,7 @@ pub(super) async fn save(
             Some(w) => team::save_as(&root, &next, b.version, &w.email).await?,
             None => team::save(&root, &next, b.version).await?,
         };
-        team::set_current(next);
+        app.set_team(next);
         if format_changed {
             app.reload_mcp(&root);
         }
@@ -225,6 +225,6 @@ async fn has_index(root: &str) -> anyhow::Result<bool> {
 async fn use_location(app: &Shared, root: &str, settings: TeamSettings) -> anyhow::Result<()> {
     crate::config::update(&[("index_dir", crate::config::Setting::Text(root.to_string()))])?;
     app.keep_config()?;
-    team::set_current(settings);
+    app.set_team(settings);
     app.reload(root).await
 }

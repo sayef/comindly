@@ -113,6 +113,8 @@ struct AppState {
     watch: tokio::sync::Mutex<repos::Watch>,
     /// Members, sign-in and stored secrets, in server mode.
     server: Option<Arc<crate::server::Server>>,
+    /// The loaded index's shared settings.
+    team: std::sync::RwLock<crate::team::TeamSettings>,
     /// `config.toml` as last read, with the file's modification time.
     config: std::sync::Mutex<(Arc<crate::config::Config>, Option<std::time::SystemTime>)>,
     /// What agents reach at `/mcp` on a server.
@@ -229,6 +231,19 @@ impl AppState {
         c.0.clone()
     }
 
+    fn team(&self) -> crate::team::TeamSettings {
+        self.team.read().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    fn set_team(&self, team: crate::team::TeamSettings) {
+        *self.team.write().unwrap_or_else(|e| e.into_inner()) = team;
+    }
+
+    /// The settings the loaded index runs with here.
+    fn settings(&self) -> crate::context::Settings {
+        crate::context::Settings::resolve(&self.team(), &self.config())
+    }
+
     /// A server keeps `config.toml` with its accounts, so a new container starts with it.
     fn keep_config(&self) -> Result<()> {
         if let Some(s) = &self.server {
@@ -243,6 +258,11 @@ impl AppState {
         let owned = root.to_string();
         let data = tokio::task::spawn_blocking(move || Data::load_or_empty(&owned)).await?;
         let fresh = self.config().fresh();
+        let team = crate::team::load(root)
+            .await
+            .map(|t| t.settings)
+            .unwrap_or_default();
+        self.set_team(team);
         *self.current.write().await = Arc::new(Session::open(data, fresh).await);
         self.reload_mcp(root);
         Ok(())
@@ -259,9 +279,9 @@ impl AppState {
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
             + 1;
         let latest = self.mcp_generation.clone();
-        let cfg = self.config();
+        let (fresh, markdown) = (self.config().fresh(), self.settings().format != "json");
         tokio::spawn(async move {
-            match crate::mcp::load(&uri, cfg.format() != "json", cfg.fresh()).await {
+            match crate::mcp::load(&uri, markdown, fresh).await {
                 // A slower, older load never replaces a newer one.
                 Ok(server) if latest.load(std::sync::atomic::Ordering::SeqCst) == generation => {
                     if let Ok(mut m) = mcp.write() {
@@ -295,7 +315,15 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
     let modified = std::fs::metadata(crate::config::config_path())
         .and_then(|m| m.modified())
         .ok();
+    let team = match &root {
+        Some(r) => rt
+            .block_on(crate::team::load(r))
+            .map(|t| t.settings)
+            .unwrap_or_default(),
+        None => Default::default(),
+    };
     let state = Arc::new(AppState {
+        team: std::sync::RwLock::new(team),
         current: RwLock::new(Arc::new(rt.block_on(Session::open(data, cfg.fresh())))),
         config: std::sync::Mutex::new((cfg, modified)),
         job: Default::default(),
@@ -975,13 +1003,16 @@ async fn packages(Cur(s): Cur) -> Json<Value> {
 }
 
 /// Setup status and how to connect agents: index location, checks, MCP tools.
-async fn setup(Srv(server): Srv, Conf(cfg): Conf, Cur(s): Cur) -> Json<Value> {
+async fn setup(State(app): State<Shared>, Cur(s): Cur) -> Json<Value> {
+    let (server, cfg, team) = (app.server.clone(), app.config(), app.team());
     let root = s.data.root.clone().unwrap_or_default();
     let checks = {
-        let root = root.clone();
-        tokio::task::spawn_blocking(move || crate::doctor::run(&cfg, &root))
-            .await
-            .unwrap_or_default()
+        let (root, server) = (root.clone(), server.clone());
+        tokio::task::spawn_blocking(move || {
+            crate::doctor::run(&cfg, &team, server.as_deref(), &root)
+        })
+        .await
+        .unwrap_or_default()
     };
     let tools: Vec<Value> = crate::mcp::tools()
         .into_iter()

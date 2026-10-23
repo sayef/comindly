@@ -13,7 +13,13 @@ pub struct Check {
 }
 
 /// Check the index, ledger, remote access, hooks, LLM, signing and SCIP indexers for `root`.
-pub fn run(cfg: &crate::config::Config, root: &str) -> Vec<Check> {
+pub fn run(
+    cfg: &crate::config::Config,
+    team: &crate::team::TeamSettings,
+    server: Option<&crate::server::Server>,
+    root: &str,
+) -> Vec<Check> {
+    let resolved = crate::context::Settings::resolve(team, cfg);
     let set = |k: &str| std::env::var(k).is_ok_and(|v| !v.is_empty());
     let mut out = Vec::new();
     let mut check = |good: bool, optional: bool, ok: &str, bad: &str| {
@@ -94,15 +100,12 @@ pub fn run(cfg: &crate::config::Config, root: &str) -> Vec<Check> {
     );
     check(
         set("OPENAI_API_KEY")
-            || cfg.llm_base_url().is_some()
-            || crate::credentials::llm_key(
-                crate::team::current().and_then(|t| t.name).as_deref(),
-                None,
-            )
-            .0
-            .is_some(),
+            || resolved.llm_base_url.is_some()
+            || crate::credentials::llm_key(team.name.as_deref(), server)
+                .0
+                .is_some(),
         true,
-        &format!("LLM configured (model {})", cfg.llm_model()),
+        &format!("LLM configured (model {})", resolved.llm_model),
         "no LLM key: summaries, flows and style guides are off (indexing works without)",
     );
     check(

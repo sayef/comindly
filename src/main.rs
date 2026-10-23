@@ -482,17 +482,6 @@ enum ConfigAction {
 
 fn main() -> ExitCode {
     let matches = Cli::command().get_matches();
-    // Commands that index, search, serve or show the UI run with the index's team settings.
-    if let Some((name, sub)) = matches.subcommand() {
-        let team = [
-            "index", "link", "serve", "ui", "app", "search", "doctor", "guide", "flow",
-        ];
-        if team.contains(&name) {
-            let flag = sub.try_get_one::<String>("index_dir").ok().flatten();
-            let root = comindly::config::Config::load().index_dir(flag.map(String::as_str));
-            let _ = comindly::team::apply(&root);
-        }
-    }
     let cli = match Cli::from_arg_matches(&matches) {
         Ok(c) => c,
         Err(e) => e.exit(),
@@ -518,13 +507,14 @@ fn main() -> ExitCode {
             let Some(scip) = scip_mode(scip.as_deref(), &cfg) else {
                 return ExitCode::FAILURE;
             };
+            let s = settings_for(index_dir.as_deref());
             cmd_index(
                 &repo,
                 index_dir.as_deref(),
-                tri(embed, no_embed).unwrap_or(cfg.embed()),
-                !no_llm && tri(enrich, no_enrich).unwrap_or(cfg.enrich()),
-                !no_llm && tri(flows, no_flows).unwrap_or(cfg.flows()),
-                !no_llm && tri(guide, no_guide).unwrap_or(cfg.guide()),
+                tri(embed, no_embed).unwrap_or(s.embed),
+                !no_llm && tri(enrich, no_enrich).unwrap_or(s.enrich),
+                !no_llm && tri(flows, no_flows).unwrap_or(s.flows),
+                !no_llm && tri(guide, no_guide).unwrap_or(s.guide),
                 incremental,
                 since.as_deref(),
                 scip,
@@ -549,13 +539,14 @@ fn main() -> ExitCode {
             let Some(scip) = scip_mode(scip.as_deref(), &cfg) else {
                 return ExitCode::FAILURE;
             };
+            let s = settings_for(index_dir.as_deref());
             cmd_link(
                 &repos,
                 index_dir.as_deref(),
-                tri(embed, no_embed).unwrap_or(cfg.embed()),
-                !no_llm && tri(enrich, no_enrich).unwrap_or(cfg.enrich()),
-                !no_llm && tri(flows, no_flows).unwrap_or(cfg.flows()),
-                !no_llm && tri(guide, no_guide).unwrap_or(cfg.guide()),
+                tri(embed, no_embed).unwrap_or(s.embed),
+                !no_llm && tri(enrich, no_enrich).unwrap_or(s.enrich),
+                !no_llm && tri(flows, no_flows).unwrap_or(s.flows),
+                !no_llm && tri(guide, no_guide).unwrap_or(s.guide),
                 incremental,
                 scip,
             )
@@ -577,7 +568,7 @@ fn main() -> ExitCode {
         } => {
             // CLI flag → config → default. `md`/`markdown` = markdown; anything else = table.
             let fmt = if md { Some("md".to_string()) } else { format };
-            let fmt = fmt.unwrap_or_else(|| comindly::config::Config::load().format());
+            let fmt = fmt.unwrap_or_else(|| settings_for(index_dir.as_deref()).format);
             let markdown = matches!(fmt.as_str(), "md" | "markdown");
             let repos: Vec<&str> = repo.iter().map(String::as_str).collect();
             cmd_search(&query.join(" "), index_dir.as_deref(), &repos, markdown)
@@ -616,7 +607,7 @@ fn main() -> ExitCode {
             } else {
                 format
             };
-            let fmt = fmt.unwrap_or_else(|| comindly::config::Config::load().format());
+            let fmt = fmt.unwrap_or_else(|| settings_for(index_dir.as_deref()).format);
             let markdown = !matches!(fmt.as_str(), "json");
             cmd_serve(index_dir.as_deref(), markdown)
         }
@@ -1973,12 +1964,21 @@ fn find_str<'v>(v: &'v serde_json::Value, key: &str) -> Option<&'v str> {
     }
 }
 
+/// The settings the index at `from` runs with on this machine.
+fn settings_for(from: Option<&str>) -> comindly::context::Settings {
+    let root = comindly::config::Config::load().index_dir(from);
+    comindly::rt::block_on(comindly::config::index_settings(&root))
+}
+
 fn cmd_doctor(from: Option<&str>) -> ExitCode {
     let cfg = comindly::config::Config::load();
     let root = cfg.index_dir(from);
     comindly::ui::header("comindly doctor");
     comindly::ui::field("index", &root);
-    let checks = comindly::doctor::run(&cfg, &root);
+    let team = comindly::rt::block_on(comindly::team::load(&root))
+        .map(|t| t.settings)
+        .unwrap_or_default();
+    let checks = comindly::doctor::run(&cfg, &team, None, &root);
     for c in &checks {
         if c.ok {
             comindly::ui::ok(&c.message);

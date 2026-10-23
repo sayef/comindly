@@ -130,82 +130,6 @@ impl Config {
         std::time::Duration::from_secs(self.cache_ttl_secs.unwrap_or(crate::cache::DEFAULT_TTL))
     }
 
-    /// Resolve the LLM model: `COMINDLY_LLM_MODEL` → file → `crate::llm::DEFAULT_MODEL`.
-    pub fn llm_model(&self) -> String {
-        team(|t| t.llm_model.clone())
-            .or_else(|| non_empty_env("COMINDLY_LLM_MODEL"))
-            .or_else(|| self.llm_model.clone())
-            .unwrap_or_else(|| crate::llm::DEFAULT_MODEL.to_string())
-    }
-
-    /// Resolve the embedding model: `COMINDLY_EMBED_MODEL` → file → `crate::embed::DEFAULT_MODEL`.
-    pub fn embed_model(&self) -> String {
-        team(|t| t.embed_model.clone())
-            .or_else(|| non_empty_env("COMINDLY_EMBED_MODEL"))
-            .or_else(|| self.embed_model.clone())
-            .unwrap_or_else(|| crate::embed::DEFAULT_MODEL.to_string())
-    }
-
-    /// Resolve an OpenAI-compatible base URL: `COMINDLY_LLM_BASE_URL` → file → none.
-    pub fn llm_base_url(&self) -> Option<String> {
-        team(|t| t.llm_base_url.clone())
-            .or_else(|| non_empty_env("COMINDLY_LLM_BASE_URL"))
-            .or_else(|| self.llm_base_url.clone())
-    }
-
-    /// Cap on enriched symbols (`max_enrich` in the file); `usize::MAX` = no cap.
-    pub fn max_enrich(&self) -> usize {
-        team(|t| t.max_enrich)
-            .or(self.max_enrich)
-            .unwrap_or(usize::MAX)
-    }
-
-    /// Cap on narrated flows (`max_flows` in the file); `usize::MAX` = no cap.
-    pub fn max_flows(&self) -> usize {
-        team(|t| t.max_flows)
-            .or(self.max_flows)
-            .unwrap_or(usize::MAX)
-    }
-
-    /// The team's LLM prices in USD per million `(input, output)` tokens, when set.
-    pub fn llm_prices(&self) -> Option<(f64, f64)> {
-        let t = crate::team::current()?;
-        (t.llm_price_in.is_some() || t.llm_price_out.is_some()).then(|| {
-            (
-                t.llm_price_in.unwrap_or(0.0),
-                t.llm_price_out.unwrap_or(0.0),
-            )
-        })
-    }
-
-    /// LLM requests in flight at once: team setting, else 8.
-    pub fn llm_concurrency(&self) -> usize {
-        team(|t| t.llm_concurrency).unwrap_or(8).clamp(1, 64)
-    }
-
-    /// Default output format: `COMINDLY_FORMAT` → file → `md`.
-    pub fn format(&self) -> String {
-        non_empty_env("COMINDLY_FORMAT")
-            .or_else(|| team(|t| t.format.clone()))
-            .or_else(|| self.format.clone())
-            .unwrap_or_else(|| "md".to_string())
-    }
-
-    /// Step defaults (file → built-in). All on by default; the LLM steps skip gracefully with a
-    /// warning when `OPENAI_API_KEY` is missing, so a keyless `index` still succeeds.
-    pub fn embed(&self) -> bool {
-        team(|t| t.embed).or(self.embed).unwrap_or(true)
-    }
-    pub fn enrich(&self) -> bool {
-        team(|t| t.enrich).or(self.enrich).unwrap_or(true)
-    }
-    pub fn flows(&self) -> bool {
-        team(|t| t.flows).or(self.flows).unwrap_or(true)
-    }
-    pub fn guide(&self) -> bool {
-        team(|t| t.guide).or(self.guide).unwrap_or(true)
-    }
-
     /// SCIP mode: `COMINDLY_SCIP` → file → `auto`.
     pub fn scip(&self) -> crate::scip::Mode {
         non_empty_env("COMINDLY_SCIP")
@@ -249,11 +173,6 @@ pub fn update(changes: &[(&str, Setting)]) -> Result<()> {
         }
     }
     write_config(&path, &doc.to_string())
-}
-
-/// A team setting, which wins over personal ones so everyone on an index runs the same.
-fn team<T>(pick: impl Fn(&crate::team::TeamSettings) -> Option<T>) -> Option<T> {
-    crate::team::current().and_then(|t| pick(&t))
 }
 
 /// The web UI's access token for browsers: created once, so bookmarks keep working.
