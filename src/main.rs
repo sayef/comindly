@@ -304,6 +304,17 @@ enum Cmd {
         /// The team's index (a folder, s3://, gs:// or az:// location)
         index: String,
     },
+    /// Run a comindly server for a team: the web app, `/api/v1` and `/mcp`, with sign-in
+    /// (needs `COMINDLY_PUBLIC_URL`; see the self-hosting guide)
+    Server {
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
+        #[arg(long, default_value_t = 7878)]
+        port: u16,
+        /// The address to listen on
+        #[arg(long, default_value = "0.0.0.0")]
+        host: String,
+    },
     /// The web UI in its own window (macOS)
     App {
         #[arg(long = "index-dir")]
@@ -610,10 +621,7 @@ fn main() -> ExitCode {
             repo,
         } => cmd_find(&query, index_dir.as_deref(), &repo),
         Cmd::Repos { what, index_dir } => cmd_repo_list(what, index_dir.as_deref()),
-        Cmd::Stats { index_dir, repo } => {
-            let repos: Vec<&str> = repo.iter().map(String::as_str).collect();
-            cmd_stats(&repos, index_dir.as_deref())
-        }
+        Cmd::Stats { index_dir, repo } => cmd_stats(&repo, index_dir.as_deref()),
         Cmd::Guide {
             index_dir,
             repo,
@@ -733,6 +741,17 @@ fn main() -> ExitCode {
             host,
             open,
         } => cmd_ui(index_dir.as_deref(), web.then_some((host, port)), open),
+        Cmd::Server {
+            index_dir,
+            port,
+            host,
+        } => {
+            if comindly::config::env("COMINDLY_PUBLIC_URL").is_none_or(|u| u.is_empty()) {
+                comindly::ui::err("set COMINDLY_PUBLIC_URL to the address members open (e.g. https://comindly.example.com); for the web UI on this machine run `comindly ui --web`");
+                return ExitCode::FAILURE;
+            }
+            cmd_ui(index_dir.as_deref(), Some((host, port)), false)
+        }
         Cmd::App { index_dir } => cmd_app(index_dir.as_deref()),
         Cmd::Team { what, index_dir } => cmd_team(what, index_dir.as_deref()),
         Cmd::Join { index } => cmd_join(&index),
@@ -823,25 +842,26 @@ fn cmd_explore(focus: &str, index_dir: Option<&str>, repos: &[&str]) -> ExitCode
         }
     };
     let g = comindly::graph::CodeGraph::build(&symbols, &edges);
-    let dangling = if g.dangling_edges > 0 {
-        format!(", {} dangling", g.dangling_edges)
+    render_explore(focus, &comindly::answers::explore(&g, focus))
+}
+
+fn render_explore(focus: &str, e: &comindly::answers::Explore) -> ExitCode {
+    let dangling = if e.dangling > 0 {
+        format!(", {} dangling", e.dangling)
     } else {
         String::new()
     };
     comindly::ui::note(&format!(
         "graph: {} symbols, {} edges{dangling}",
-        g.node_count(),
-        g.edge_count(),
+        e.symbols, e.edges,
     ));
-
-    let Some(idx) = g.lookup(focus) else {
+    let Some(v) = &e.view else {
         comindly::ui::err(&format!("no symbol matching `{focus}`"));
         return ExitCode::FAILURE;
     };
 
     // zoom
-    let z = g.zoom(idx);
-    if let Some(f) = &z.focus {
+    if let Some(f) = &v.focus {
         comindly::ui::header(&format!(
             "● {} [{}]  {}  {}",
             f.name, f.kind, f.repo, f.location
@@ -850,7 +870,7 @@ fn cmd_explore(focus: &str, index_dir: Option<&str>, repos: &[&str]) -> ExitCode
             comindly::ui::note(sig);
         }
     }
-    if let Some(c) = &z.container {
+    if let Some(c) = &v.container {
         // Drop the redundant location when the container is the file itself.
         if c.kind.eq_ignore_ascii_case("file") {
             comindly::ui::field("in", &c.name);
@@ -858,24 +878,20 @@ fn cmd_explore(focus: &str, index_dir: Option<&str>, repos: &[&str]) -> ExitCode
             comindly::ui::field("in", &format!("{}  ({})", c.name, c.location));
         }
     }
-    print_group("calls", &z.callees, 8);
-    print_group("called by", &z.callers, 8);
-    print_group("imported by", &z.importers, 8);
-    print_group("members", &z.members, 8);
+    print_group("calls", &v.callees, 8);
+    print_group("called by", &v.callers, 8);
+    print_group("imported by", &v.importers, 8);
+    print_group("members", &v.members, 8);
 
     // ripple — blast radius grouped by repo
-    let hits = g.ripple(idx, 4);
-    let mut by_repo: BTreeMap<String, usize> = BTreeMap::new();
-    for h in &hits {
-        *by_repo.entry(h.node.repo.clone()).or_default() += 1;
-    }
     comindly::ui::header(&format!(
-        "ripple (blast radius, ≤4 hops): {} dependents",
-        hits.len()
+        "ripple (blast radius, ≤{} hops): {} dependents",
+        comindly::answers::RIPPLE_DEPTH,
+        v.dependents
     ));
-    if !by_repo.is_empty() {
+    if !v.by_repo.is_empty() {
         let mut t = comindly::ui::table(&["repo", "dependents"]);
-        for (repo, n) in &by_repo {
+        for (repo, n) in &v.by_repo {
             t.add_row(vec![repo.clone(), n.to_string()]);
         }
         comindly::ui::right_align(&mut t, &[1]); // dependents
@@ -883,17 +899,16 @@ fn cmd_explore(focus: &str, index_dir: Option<&str>, repos: &[&str]) -> ExitCode
     }
 
     // context pack — the minimal correct read-set within a token budget
-    const BUDGET: usize = 1500;
-    let pack = g.context_pack(idx, BUDGET);
-    let total: usize = pack.iter().map(|(_, t)| t).sum();
+    let total: usize = v.pack.iter().map(|(_, t)| t).sum();
     comindly::ui::header(&format!(
-        "context pack for changing `{}` (~{total} tokens, budget {BUDGET}): {}",
-        z.focus.as_ref().map_or("?", |f| f.name.as_str()),
-        plural(pack.len(), "symbol")
+        "context pack for changing `{}` (~{total} tokens, budget {}): {}",
+        v.focus.as_ref().map_or("?", |f| f.name.as_str()),
+        v.budget,
+        plural(v.pack.len(), "symbol")
     ));
-    if !pack.is_empty() {
+    if !v.pack.is_empty() {
         let mut t = comindly::ui::table(&["symbol", "location"]);
-        for (node, _) in pack.iter().take(15) {
+        for (node, _) in v.pack.iter().take(15) {
             t.add_row(vec![node.name.clone(), node.location.clone()]);
         }
         println!("{t}");
@@ -1063,7 +1078,7 @@ fn cmd_repos(from: Option<&str>) -> ExitCode {
 
 /// `comindly stats [--repo x --repo y]` — per-repo symbols, edges, kinds, enrichment coverage.
 /// With no `--repo`, reports every indexed repo separately.
-fn cmd_stats(want: &[&str], from: Option<&str>) -> ExitCode {
+fn cmd_stats(want: &[String], from: Option<&str>) -> ExitCode {
     let Ok((symbols, edges)) = read_graph_or_err(from) else {
         return ExitCode::FAILURE;
     };
@@ -1077,51 +1092,32 @@ fn cmd_stats(want: &[&str], from: Option<&str>) -> ExitCode {
         .map(|(id, _, _)| id.render())
         .collect();
 
-    // All repos present, sorted.
-    let all: BTreeSet<String> = symbols.iter().map(|s| s.id.package.clone()).collect();
-    // Which repos to report: the requested ones (warn on unknown) or all.
-    let repos: Vec<String> = if want.is_empty() {
-        all.iter().cloned().collect()
-    } else {
-        for r in want {
-            if !all.contains(*r) {
-                comindly::ui::warn(&format!("no such repo in the index: {r}"));
-            }
-        }
-        want.iter()
-            .filter(|r| all.contains(**r))
-            .map(|r| r.to_string())
-            .collect()
-    };
-    if repos.is_empty() {
+    render_stats(&comindly::answers::stats(&symbols, &edges, &enriched, want))
+}
+
+fn render_stats(st: &comindly::answers::Stats) -> ExitCode {
+    for r in &st.unknown {
+        comindly::ui::warn(&format!("no such repo in the index: {r}"));
+    }
+    if st.repos.is_empty() {
         comindly::ui::err("no matching repos");
         return ExitCode::FAILURE;
     }
 
     comindly::ui::header(&format!(
         "Index stats — {} across {}",
-        plural(symbols.len(), "symbol"),
-        plural(all.len(), "repo")
+        plural(st.symbols, "symbol"),
+        plural(st.indexed, "repo")
     ));
 
-    for repo in &repos {
-        let rsyms: Vec<&Symbol> = symbols.iter().filter(|s| &s.id.package == repo).collect();
-        let redges = edges.iter().filter(|e| &e.src.package == repo).count();
-        let renr = rsyms
-            .iter()
-            .filter(|s| enriched.contains(&s.id.render()))
-            .count();
-        comindly::ui::header(&format!("● {repo}"));
-        comindly::ui::field("symbols", &rsyms.len().to_string());
-        comindly::ui::field("edges", &redges.to_string());
-        comindly::ui::field("enriched", &format!("{renr} / {}", rsyms.len()));
+    for r in &st.repos {
+        comindly::ui::header(&format!("● {}", r.repo));
+        comindly::ui::field("symbols", &r.symbols.to_string());
+        comindly::ui::field("edges", &r.edges.to_string());
+        comindly::ui::field("enriched", &format!("{} / {}", r.enriched, r.symbols));
 
-        let mut by_kind: BTreeMap<String, usize> = BTreeMap::new();
-        for s in &rsyms {
-            *by_kind.entry(format!("{:?}", s.kind)).or_default() += 1;
-        }
         let mut kt = comindly::ui::table(&["kind", "count"]);
-        for (k, n) in &by_kind {
+        for (k, n) in &r.kinds {
             kt.add_row(vec![k.clone(), n.to_string()]);
         }
         comindly::ui::right_align(&mut kt, &[1]);
@@ -1882,7 +1878,8 @@ fn open_in_browser(url: &str) {
     let _ = std::process::Command::new(opener).arg(url).spawn();
 }
 
-fn cmd_preflight(repo: &str, base: &str, strict: bool, from: Option<&str>) -> ExitCode {
+/// The working tree's changes in `repo` against `base`, or the exit code when there is nothing to check.
+fn preflight_changes(repo: &str, base: &str) -> Result<Vec<comindly::preflight::Change>, ExitCode> {
     let root = Path::new(repo);
     let name = std::fs::canonicalize(root)
         .ok()
@@ -1892,13 +1889,28 @@ fn cmd_preflight(repo: &str, base: &str, strict: bool, from: Option<&str>) -> Ex
         Ok(c) => c,
         Err(e) => {
             comindly::ui::err(&comindly::storage::explain(&format!("{e:#}")));
-            return ExitCode::FAILURE;
+            return Err(ExitCode::FAILURE);
         }
     };
     if raw.is_empty() {
         comindly::ui::ok("no changes against the base");
-        return ExitCode::SUCCESS;
+        return Err(ExitCode::SUCCESS);
     }
+    Ok(raw
+        .into_iter()
+        .map(|(path, lines)| comindly::preflight::Change {
+            repo: name.clone(),
+            path,
+            lines,
+        })
+        .collect())
+}
+
+fn cmd_preflight(repo: &str, base: &str, strict: bool, from: Option<&str>) -> ExitCode {
+    let changes = match preflight_changes(repo, base) {
+        Ok(c) => c,
+        Err(code) => return code,
+    };
     let cfg = comindly::config::Config::load();
     let (symbols, edges) = match comindly::index::read_graph_blocking(&cfg.graph_dir(from)) {
         Ok(x) => x,
@@ -1907,36 +1919,21 @@ fn cmd_preflight(repo: &str, base: &str, strict: bool, from: Option<&str>) -> Ex
             return ExitCode::FAILURE;
         }
     };
-    let changes: Vec<comindly::preflight::Change> = raw
-        .into_iter()
-        .map(|(path, lines)| comindly::preflight::Change {
-            repo: name.clone(),
-            path,
-            lines,
-        })
-        .collect();
     let g = comindly::graph::CodeGraph::build(&symbols, &edges);
     let records = comindly::ledger::all_blocking(&cfg.index_dir(from)).unwrap_or_default();
     let entries = comindly::ledger::derive(&records, &symbols, &comindly::config::local_verifier());
     let recipes = comindly::index::read_recipes_blocking(&cfg.graph_dir(from)).unwrap_or_default();
     let packages =
         comindly::index::read_packages_blocking(&cfg.graph_dir(from)).unwrap_or_default();
-    let findings = comindly::checks::run(&entries, &symbols, &edges, &packages);
-    println!(
-        "{}",
-        comindly::preflight::report(&g, &symbols, &edges, &entries, &recipes, &findings, &changes)
-    );
-    let changed: Vec<String> = changes
-        .iter()
-        .map(|c| format!("{}/{}", c.repo, c.path))
-        .collect();
-    let blocking = findings.iter().any(|f| {
-        f.severity == "must"
-            && f.violations
-                .iter()
-                .any(|v| changed.contains(&format!("{}/{}", v.repo, v.path)))
-    });
-    if strict && blocking {
+    render_preflight(
+        &comindly::answers::preflight(&g, &symbols, &edges, entries, &recipes, &packages, &changes),
+        strict,
+    )
+}
+
+fn render_preflight(p: &comindly::answers::Preflight, strict: bool) -> ExitCode {
+    println!("{}", p.markdown);
+    if strict && p.blocking {
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS
@@ -2289,10 +2286,13 @@ fn cmd_packages(from: Option<&str>, skew: bool) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let deps: Vec<_> = comindly::manifests::internal(&rows)
-        .into_iter()
-        .filter(|d| !skew || d.skewed())
-        .collect();
+    render_packages(&comindly::answers::packages(
+        comindly::manifests::internal(&rows),
+        skew,
+    ))
+}
+
+fn render_packages(deps: &[comindly::manifests::InternalDep]) -> ExitCode {
     let mut table = comfy_table::Table::new();
     table
         .load_preset(comfy_table::presets::UTF8_FULL)
@@ -2304,7 +2304,7 @@ fn cmd_packages(from: Option<&str>, skew: bool) -> ExitCode {
             "locked",
         ]);
     let opt = |v: &Option<String>| v.clone().unwrap_or_else(|| "—".into());
-    for d in &deps {
+    for d in deps {
         let locked = match (&d.locked, d.skewed()) {
             (Some(l), true) => format!("{l}  ≠"),
             _ => opt(&d.locked),
@@ -2469,7 +2469,7 @@ fn cmd_login(url: &str) -> ExitCode {
                     "this sign-in lasts until {day}; then run `comindly login {url}` again"
                 ));
             }
-            comindly::ui::note("find, search, why, ledger, flow, contracts, conventions, remember, review and link now ask the server; --local uses the index here");
+            comindly::ui::note("find, search, explore, why, ledger, flow, stats, contracts, packages, conventions, preflight, remember, review and link now ask the server; --local uses the index here");
             ExitCode::SUCCESS
         }
         Err(e) => {

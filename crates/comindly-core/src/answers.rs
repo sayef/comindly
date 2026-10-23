@@ -1,11 +1,14 @@
 //! What the read commands answer, computed the same way on this machine and on a server, so a
 //! command run with `--server` prints what a local run would.
 
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+
 use serde::{Deserialize, Serialize};
 
 use crate::conventions::{Convention, Manual, ORG};
 use crate::graph::{CodeGraph, ContractView, Node};
 use crate::ledger::Entry;
+use crate::manifests::InternalDep;
 use crate::model::{Edge, Symbol};
 use crate::search::SearchHit;
 
@@ -190,6 +193,166 @@ pub fn conventions(all: Vec<Convention>, manual: &[Manual], repo: Option<&str>) 
             .cloned()
             .collect(),
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Explore {
+    pub symbols: usize,
+    pub edges: usize,
+    pub dangling: usize,
+    /// `None` when no symbol matches the focus.
+    pub view: Option<ExploreView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExploreView {
+    pub focus: Option<Node>,
+    pub container: Option<Node>,
+    pub callees: Vec<Node>,
+    pub callers: Vec<Node>,
+    pub importers: Vec<Node>,
+    pub members: Vec<Node>,
+    /// Dependents within the blast radius, and how many per repo.
+    pub dependents: usize,
+    pub by_repo: BTreeMap<String, usize>,
+    pub budget: usize,
+    /// The context pack: symbols to read with their estimated tokens.
+    pub pack: Vec<(Node, usize)>,
+}
+
+/// Hops the blast radius follows, and the context pack's token budget.
+pub const RIPPLE_DEPTH: usize = 4;
+pub const PACK_BUDGET: usize = 1500;
+
+/// `explore`: zoom, blast radius and context pack for `focus`.
+pub fn explore(g: &CodeGraph, focus: &str) -> Explore {
+    let view = g.lookup(focus).map(|idx| {
+        let z = g.zoom(idx);
+        let hits = g.ripple(idx, RIPPLE_DEPTH);
+        let mut by_repo = BTreeMap::new();
+        for h in &hits {
+            *by_repo.entry(h.node.repo.clone()).or_default() += 1;
+        }
+        ExploreView {
+            focus: z.focus,
+            container: z.container,
+            callees: z.callees,
+            callers: z.callers,
+            importers: z.importers,
+            members: z.members,
+            dependents: hits.len(),
+            by_repo,
+            budget: PACK_BUDGET,
+            pack: g.context_pack(idx, PACK_BUDGET),
+        }
+    });
+    Explore {
+        symbols: g.node_count(),
+        edges: g.edge_count(),
+        dangling: g.dangling_edges,
+        view,
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Stats {
+    pub symbols: usize,
+    /// Repos in the index; `repos` holds those reported.
+    pub indexed: usize,
+    /// Asked-for repos the index does not have.
+    pub unknown: Vec<String>,
+    pub repos: Vec<RepoStats>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoStats {
+    pub repo: String,
+    pub symbols: usize,
+    pub edges: usize,
+    pub enriched: usize,
+    pub kinds: BTreeMap<String, usize>,
+}
+
+/// `stats`: per repo (`want`, else all) symbols, edges, kinds and how many have LLM summaries.
+pub fn stats(
+    symbols: &[Symbol],
+    edges: &[Edge],
+    enriched: &HashSet<String>,
+    want: &[String],
+) -> Stats {
+    let all: BTreeSet<&str> = symbols.iter().map(|s| s.id.package.as_str()).collect();
+    let (known, unknown): (Vec<&String>, Vec<&String>) =
+        want.iter().partition(|r| all.contains(r.as_str()));
+    let repos: Vec<&str> = if want.is_empty() {
+        all.iter().copied().collect()
+    } else {
+        known.into_iter().map(String::as_str).collect()
+    };
+    let repos = repos
+        .into_iter()
+        .map(|repo| {
+            let rsyms: Vec<&Symbol> = symbols.iter().filter(|s| s.id.package == repo).collect();
+            let mut kinds = BTreeMap::new();
+            for s in &rsyms {
+                *kinds.entry(format!("{:?}", s.kind)).or_default() += 1;
+            }
+            RepoStats {
+                repo: repo.to_string(),
+                symbols: rsyms.len(),
+                edges: edges.iter().filter(|e| e.src.package == repo).count(),
+                enriched: rsyms
+                    .iter()
+                    .filter(|s| enriched.contains(&s.id.render()))
+                    .count(),
+                kinds,
+            }
+        })
+        .collect();
+    Stats {
+        symbols: symbols.len(),
+        indexed: all.len(),
+        unknown: unknown.into_iter().cloned().collect(),
+        repos,
+    }
+}
+
+/// `packages`: internal dependencies, only the skewed ones with `skew`.
+pub fn packages(deps: Vec<InternalDep>, skew: bool) -> Vec<InternalDep> {
+    deps.into_iter().filter(|d| !skew || d.skewed()).collect()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Preflight {
+    pub markdown: String,
+    /// A `must` constraint check fails in a changed file.
+    pub blocking: bool,
+}
+
+/// `preflight`: what is known about the code `changes` touch; the changes come from git.
+pub fn preflight(
+    g: &CodeGraph,
+    symbols: &[Symbol],
+    edges: &[Edge],
+    mut entries: Vec<Entry>,
+    recipes: &[Convention],
+    packages: &[crate::manifests::PackageRow],
+    changes: &[crate::preflight::Change],
+) -> Preflight {
+    let findings = crate::checks::run(&entries, symbols, edges, packages);
+    crate::checks::promote(&mut entries, &findings);
+    let markdown =
+        crate::preflight::report(g, symbols, edges, &entries, recipes, &findings, changes);
+    let changed: Vec<String> = changes
+        .iter()
+        .map(|c| format!("{}/{}", c.repo, c.path))
+        .collect();
+    let blocking = findings.iter().any(|f| {
+        f.severity == "must"
+            && f.violations
+                .iter()
+                .any(|v| changed.contains(&format!("{}/{}", v.repo, v.path)))
+    });
+    Preflight { markdown, blocking }
 }
 
 fn in_repos(repo: &str, repos: &[String]) -> bool {

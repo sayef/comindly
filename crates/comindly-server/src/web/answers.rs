@@ -134,3 +134,66 @@ pub(super) async fn conventions(Cur(s): Cur, Query(q): Query<RepoQ>) -> Response
     let all = crate::conventions::apply(s.data.conventions.clone(), &manual);
     Json(crate::answers::conventions(all, &manual, q.repo.as_deref())).into_response()
 }
+
+#[derive(Deserialize)]
+pub(super) struct ExploreQ {
+    focus: String,
+}
+
+pub(super) async fn explore(Cur(s): Cur, Query(q): Query<ExploreQ>) -> Response {
+    Json(crate::answers::explore(&s.data.graph, &q.focus)).into_response()
+}
+
+#[derive(Deserialize)]
+pub(super) struct StatsQ {
+    repos: Option<String>,
+}
+
+pub(super) async fn stats(Cur(s): Cur, Query(q): Query<StatsQ>) -> Response {
+    let enriched = s.extras().await.enrichment.keys().cloned().collect();
+    Json(crate::answers::stats(
+        &s.data.symbols,
+        &s.data.edges,
+        &enriched,
+        &repos(&q.repos),
+    ))
+    .into_response()
+}
+
+#[derive(Deserialize)]
+pub(super) struct PackagesQ {
+    #[serde(default)]
+    skew: bool,
+}
+
+pub(super) async fn packages(Cur(s): Cur, Query(q): Query<PackagesQ>) -> Response {
+    Json(crate::answers::packages(s.data.deps.clone(), q.skew)).into_response()
+}
+
+#[derive(Deserialize)]
+pub(super) struct PreflightQ {
+    changes: Vec<crate::preflight::Change>,
+}
+
+/// `preflight`: the caller reads its changes from git; the index answers what they touch.
+pub(super) async fn preflight(Cur(s): Cur, Json(q): Json<PreflightQ>) -> Response {
+    let graph = super::graph_uri(&s);
+    let (recipes, packages) = match &graph {
+        Some(u) => (
+            crate::index::read_recipes(u).await.unwrap_or_default(),
+            crate::index::read_packages(u).await.unwrap_or_default(),
+        ),
+        None => Default::default(),
+    };
+    let entries = s.entries().await.clone();
+    Json(crate::answers::preflight(
+        &s.data.graph,
+        &s.data.symbols,
+        &s.data.edges,
+        entries,
+        &recipes,
+        &packages,
+        &q.changes,
+    ))
+    .into_response()
+}

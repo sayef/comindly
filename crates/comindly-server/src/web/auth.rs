@@ -135,6 +135,7 @@ fn needs(method: &Method, path: &str) -> Role {
     if method == Method::GET
         || path.starts_with("/api/v1/auth/")
         || path.starts_with("/api/v1/tokens")
+        || path.starts_with("/api/v1/answer/")
     {
         return Role::Viewer;
     }

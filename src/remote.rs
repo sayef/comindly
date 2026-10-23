@@ -122,6 +122,43 @@ pub fn dispatch(c: &Client, cmd: &Cmd) -> Option<ExitCode> {
             c.get("/api/v1/answer/flow", &q(&[("focus", focus.clone())])),
             |f| crate::render_flow(&f),
         ),
+        Cmd::Explore {
+            focus,
+            index_dir: None,
+            repos,
+        } if repos.is_empty() => show(
+            c.get("/api/v1/answer/explore", &q(&[("focus", focus.clone())])),
+            |e| crate::render_explore(focus, &e),
+        ),
+        Cmd::Stats {
+            index_dir: None,
+            repo,
+        } => show(
+            c.get("/api/v1/answer/stats", &q(&[("repos", csv(repo))])),
+            |s| crate::render_stats(&s),
+        ),
+        Cmd::Packages {
+            index_dir: None,
+            skew,
+        } => show(
+            c.get("/api/v1/answer/packages", &q(&[("skew", skew.to_string())])),
+            |d: Vec<comindly::manifests::InternalDep>| crate::render_packages(&d),
+        ),
+        Cmd::Preflight {
+            repo,
+            base,
+            strict,
+            index_dir: None,
+        } => {
+            let changes = match crate::preflight_changes(repo, base) {
+                Ok(c) => c,
+                Err(code) => return Some(code),
+            };
+            show(
+                c.post("/api/v1/answer/preflight", &json!({"changes": changes})),
+                |p| crate::render_preflight(&p, *strict),
+            )
+        }
         Cmd::Contracts {
             index_dir: None,
             kind,
