@@ -309,76 +309,78 @@ pub(super) async fn begin(
     }
     let app = app.clone();
     let key = format!("llm={llm} drop_unlisted={drop_unlisted}");
-    app.clone().jobs.submit("index", &key, by, request_id, move |job| {
-        Box::pin(async move {
-            if let Some(w) = why {
-                job.emit(Event::new(Level::Info, Kind::Note, w));
-            }
-            let root = app
-                .current
-                .read()
-                .await
-                .data
-                .root
-                .clone()
-                .context("read-only UI")?;
-            let repos = app.repos();
-            let team = crate::team::load(&root)
-                .await
-                .map(|t| t.settings)
-                .unwrap_or_default();
-            let mut settings = crate::context::Settings::resolve(&team, crate::config::env);
-            if !llm {
-                settings.enrich = false;
-                settings.flows = false;
-                settings.guide = false;
-            }
-            let client = if settings.enrich || settings.flows || settings.guide {
-                let key =
-                    crate::credentials::llm_key(team.name.as_deref(), app.server.as_deref()).0;
-                crate::llm::LlmClient::new(
-                    settings.llm_base_url.as_deref(),
-                    &settings.llm_model,
-                    key.as_deref(),
+    app.clone()
+        .jobs
+        .submit("index", &key, by, request_id, move |job| {
+            Box::pin(async move {
+                if let Some(w) = why {
+                    job.emit(Event::new(Level::Info, Kind::Note, w));
+                }
+                let root = app
+                    .current
+                    .read()
+                    .await
+                    .data
+                    .root
+                    .clone()
+                    .context("read-only UI")?;
+                let repos = app.repos();
+                let team = crate::team::load(&root)
+                    .await
+                    .map(|t| t.settings)
+                    .unwrap_or_default();
+                let mut settings = crate::context::Settings::resolve(&team, crate::config::env);
+                if !llm {
+                    settings.enrich = false;
+                    settings.flows = false;
+                    settings.guide = false;
+                }
+                let client = if settings.enrich || settings.flows || settings.guide {
+                    let key =
+                        crate::credentials::llm_key(team.name.as_deref(), app.server.as_deref()).0;
+                    crate::llm::LlmClient::new(
+                        settings.llm_base_url.as_deref(),
+                        &settings.llm_model,
+                        key.as_deref(),
+                    )
+                    .ok()
+                } else {
+                    None
+                };
+                let scip = settings.scip;
+                let creds = crate::config::git_credentials(app.server.clone());
+                let mut ctx = crate::context::IndexContext::new(
+                    root.clone(),
+                    settings,
+                    job.clone(),
+                    crate::config::cache_dir(),
                 )
-                .ok()
-            } else {
-                None
-            };
-            let scip = settings.scip;
-            let creds = crate::config::git_credentials(app.server.clone());
-            let mut ctx = crate::context::IndexContext::new(
-                root.clone(),
-                settings,
-                job.clone(),
-                crate::config::cache_dir(),
-            )
-            .with_llm(client)
-            .with_git(creds);
-            ctx.cancel = job.cancel.clone();
-            let run = async {
-                let sources =
-                    crate::pipeline::checkout(&ctx, &crate::config::expanded(&repos)).await?;
-                crate::pipeline::link(&ctx, sources, true, scip).await
-            };
-            match run.await {
-                Ok(_) => {
-                    if let Err(e) = app.reload(&root).await {
-                        ctx.report.error(format!("reload failed: {e:#}"));
+                .with_llm(client)
+                .with_git(creds);
+                ctx.cancel = job.cancel.clone();
+                let run = async {
+                    let sources =
+                        crate::pipeline::checkout(&ctx, &crate::config::expanded(&repos)).await?;
+                    crate::pipeline::link(&ctx, sources, true, scip).await
+                };
+                match run.await {
+                    Ok(_) => {
+                        if let Err(e) = app.reload(&root).await {
+                            ctx.report.error(format!("reload failed: {e:#}"));
+                        }
+                        Ok(())
                     }
-                    Ok(())
+                    Err(e) if e.is::<crate::context::Cancelled>() => {
+                        ctx.report.warn("Cancelled; what was already saved stays.");
+                        Err(e)
+                    }
+                    Err(e) => {
+                        ctx.report.error(crate::storage::explain(&format!("{e:#}")));
+                        Err(e)
+                    }
                 }
-                Err(e) if e.is::<crate::context::Cancelled>() => {
-                    ctx.report.warn("Cancelled; what was already saved stays.");
-                    Err(e)
-                }
-                Err(e) => {
-                    ctx.report.error(crate::storage::explain(&format!("{e:#}")));
-                    Err(e)
-                }
-            }
+            })
         })
-    })
 }
 
 /// What the automatic re-index last found.

@@ -595,8 +595,14 @@ mod tests {
         assert!(!b.coalesced && again.coalesced);
         assert_eq!(again.job.record().id, b.job.record().id);
         for k in 1..MAX_QUEUED {
-            jobs.submit("index", &k.to_string(), None, None, blocking(ran.clone(), "k"))
-                .unwrap();
+            jobs.submit(
+                "index",
+                &k.to_string(),
+                None,
+                None,
+                blocking(ran.clone(), "k"),
+            )
+            .unwrap();
         }
         assert!(jobs
             .submit("index", "full", None, None, blocking(ran.clone(), "f"))

@@ -2009,8 +2009,8 @@ mod tests {
         let (_d, s) = temp_store();
         let inv = s.invite("a", "m@x.org", Role::Member, false).unwrap();
         let (_, who) = s.redeem(&inv, "10.0.0.1").unwrap();
-        let laptop = s.create_token(&who, "laptop").unwrap();
-        let ci = s.create_token(&who, "ci").unwrap();
+        let laptop = s.create_token(&who, "laptop", None).unwrap();
+        let ci = s.create_token(&who, "ci", None).unwrap();
         assert!(s.revoke_own_token(&laptop).unwrap());
         assert!(s.authenticate(None, Some(&laptop)).unwrap().is_none());
         assert!(s.authenticate(None, Some(&ci)).unwrap().is_some());
