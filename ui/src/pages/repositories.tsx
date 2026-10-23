@@ -221,9 +221,10 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
   }, [j, seen, qc]);
   const watch = useQuery({ queryKey: ["index-watch"], queryFn: api.indexWatch, refetchInterval: 30_000 });
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.settings });
+  const team = useQuery({ queryKey: ["team"], queryFn: api.team });
   const auto = useMutation({
-    mutationFn: (on: boolean) => api.saveSettings({ auto_index: on }),
-    onSuccess: () => (qc.invalidateQueries({ queryKey: ["settings"] }), qc.invalidateQueries({ queryKey: ["index-watch"] })),
+    mutationFn: (on: boolean) => api.saveTeam({ ...team.data!.settings, auto_index: on }, team.data!.version),
+    onSuccess: () => (qc.invalidateQueries({ queryKey: ["team"] }), qc.invalidateQueries({ queryKey: ["index-watch"] })),
   });
 
   return (
@@ -268,8 +269,8 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
-            checked={settings.data?.auto_index ?? false}
-            disabled={!settings.data || auto.isPending}
+            checked={team.data?.settings.auto_index ?? false}
+            disabled={!team.data || auto.isPending}
             onChange={(e) => auto.mutate(e.target.checked)}
           />
           Re-index automatically when a default branch moves (checked every {settings.data?.cache_ttl_secs ?? 300} s, without LLM)

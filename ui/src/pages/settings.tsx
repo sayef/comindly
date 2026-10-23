@@ -34,30 +34,23 @@ export function Section({ title, description, children }: { title: string; descr
 
 export function SettingsPage() {
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.settings });
-  const team = useQuery({ queryKey: ["team"], queryFn: api.team });
-  const teamLlm = !!(team.data?.settings.llm_model || team.data?.settings.llm_base_url);
   const s = settings.data;
   const me = useQuery({ queryKey: ["me"], queryFn: api.me });
   const server = me.data?.mode === "server";
   const saveIndex = useSave();
   const saveYou = useSave();
-  const saveLlm = useSave();
   const saveFresh = useSave();
   const test = useMutation({ mutationFn: (dir: string) => api.testIndex(dir), meta: { inline: true, quiet: true } });
 
   const [index, setIndex] = useState("");
   const [name, setName] = useState("");
   const [names, setNames] = useState(true);
-  const [base, setBase] = useState("");
-  const [model, setModel] = useState("");
   const [ttl, setTtl] = useState(300);
   useEffect(() => {
     if (!s) return;
     setIndex(s.index_dir ?? s.index_effective);
     setName(s.author_name ?? "");
     setNames(s.record_names);
-    setBase(s.llm_base_url ?? "");
-    setModel(s.llm_model);
     setTtl(s.cache_ttl_secs);
   }, [s]);
 
@@ -136,43 +129,9 @@ export function SettingsPage() {
         </Section>
       )}
 
-      {server ? null : teamLlm ? (
-        <Card>
-          <CardContent className="pt-6 text-sm text-muted-foreground">
-            LLM: the team's settings apply (model {team.data?.settings.llm_model ?? s.defaults.llm_model}),{" "}
-            {server ? "with the key from Settings → Integrations." : "so everyone gets the same results with their own key."}
-            {!server && <ApiKey />}
-          </CardContent>
-        </Card>
-      ) : (
-        <Section
-          title={server ? "LLM" : "Your LLM"}
-          description="Optional: summaries, flow walkthroughs and style guides while indexing. Any OpenAI-compatible endpoint works; leave the endpoint empty for OpenAI."
-        >
-          <fieldset disabled={server && me.data?.role !== "admin"} className="grid gap-3 sm:grid-cols-2">
-            <label className={field}>
-              Endpoint
-              <Input value={base} onChange={(e) => setBase(e.target.value)} placeholder={s.defaults.llm_base_url} />
-            </label>
-            <label className={field}>
-              Model
-              <Input value={model} onChange={(e) => setModel(e.target.value)} placeholder={s.defaults.llm_model} />
-            </label>
-          </fieldset>
-          {(!server || me.data?.role === "admin") && (
-            <div>
-              <Button
-                variant="outline"
-                size="sm"
-                loading={saveLlm.isPending}
-                onClick={() => saveLlm.mutate({ llm_base_url: base, llm_model: model })}
-              >
-                Save
-              </Button>
-            </div>
-          )}
-          {result(saveLlm)}
-          {!server && <ApiKey />}
+      {!server && (
+        <Section title="Your LLM key" description="Used when indexing with LLM summaries; the endpoint and model are the index's settings above. Kept on this machine only.">
+          <ApiKey />
         </Section>
       )}
 

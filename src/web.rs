@@ -139,20 +139,6 @@ impl axum::extract::FromRequestParts<Shared> for Cur {
     }
 }
 
-/// `config.toml`, as the request found it.
-struct Conf(Arc<crate::config::Config>);
-
-impl axum::extract::FromRequestParts<Shared> for Conf {
-    type Rejection = std::convert::Infallible;
-
-    async fn from_request_parts(
-        _: &mut axum::http::request::Parts,
-        app: &Shared,
-    ) -> std::result::Result<Self, Self::Rejection> {
-        Ok(Conf(app.config()))
-    }
-}
-
 /// The server, in server mode.
 struct Srv(Option<Arc<crate::server::Server>>);
 
@@ -242,16 +228,22 @@ impl AppState {
 
     /// The settings the loaded index runs with here.
     fn settings(&self) -> crate::context::Settings {
-        crate::context::Settings::resolve(&self.team(), &self.config())
+        crate::context::Settings::resolve(&self.team())
     }
 
-    /// A server keeps `config.toml` with its accounts, so a new container starts with it.
-    fn keep_config(&self) -> Result<()> {
-        if let Some(s) = &self.server {
-            let text = std::fs::read_to_string(crate::config::config_path()).unwrap_or_default();
-            s.settings.keep_config(&text)?;
+    /// The repositories this app indexes: the server's, else this machine's in `config.toml`.
+    fn repos(&self) -> Vec<crate::config::RepoEntry> {
+        match &self.server {
+            Some(s) => s.settings.repos(),
+            None => self.config().repos.clone(),
         }
-        Ok(())
+    }
+
+    fn set_repos(&self, by: Option<&str>, list: &[crate::config::RepoEntry]) -> Result<()> {
+        match &self.server {
+            Some(s) => s.settings.set_repos(by.unwrap_or("admin"), list),
+            None => crate::config::set_repos(list),
+        }
     }
 
     /// Load the index at `root` and make it the one every request sees.
@@ -1091,15 +1083,13 @@ async fn packages(Cur(s): Cur) -> Json<Value> {
 
 /// Setup status and how to connect agents: index location, checks, MCP tools.
 async fn setup(State(app): State<Shared>, Cur(s): Cur) -> Json<Value> {
-    let (server, cfg, team) = (app.server.clone(), app.config(), app.team());
+    let (server, team) = (app.server.clone(), app.team());
     let root = s.data.root.clone().unwrap_or_default();
     let checks = {
         let (root, server) = (root.clone(), server.clone());
-        tokio::task::spawn_blocking(move || {
-            crate::doctor::run(&cfg, &team, server.as_deref(), &root)
-        })
-        .await
-        .unwrap_or_default()
+        tokio::task::spawn_blocking(move || crate::doctor::run(&team, server.as_deref(), &root))
+            .await
+            .unwrap_or_default()
     };
     let tools: Vec<Value> = crate::mcp::tools()
         .into_iter()

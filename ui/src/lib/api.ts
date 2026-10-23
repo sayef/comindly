@@ -184,11 +184,9 @@ export interface Settings {
   author_name: string | null;
   author_effective: string | null;
   record_names: boolean;
-  llm_base_url: string | null;
   llm_model: string;
   llm_key: KeySource;
   cache_ttl_secs: number;
-  auto_index: boolean;
   defaults: Defaults;
 }
 
@@ -207,6 +205,9 @@ export interface TeamSettings {
   llm_price_in?: number;
   llm_price_out?: number;
   format?: "md" | "json";
+  scip?: "auto" | "require" | "off";
+  auto_index?: boolean;
+  repos?: string[];
 }
 
 /** Where your API key comes from: your credentials file (team entry or default) or OPENAI_API_KEY. */
@@ -234,10 +235,7 @@ export type SettingsChange = Partial<{
   index_dir: string;
   author_name: string;
   record_names: boolean;
-  llm_base_url: string;
-  llm_model: string;
   cache_ttl_secs: number;
-  auto_index: boolean;
 }>;
 
 /** A failed request, with the server's error for those that carry more than a message. */

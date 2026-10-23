@@ -387,7 +387,7 @@ enum Cmd {
 
 #[derive(Subcommand)]
 enum TeamWhat {
-    /// Set team settings: name, llm_model, llm_base_url, embed_model, enrich, flows, guide (empty removes)
+    /// Set team settings, KEY=VALUE: name, llm_model, llm_base_url, embed_model, embed, enrich, flows, guide, max_enrich, max_flows, llm_concurrency, llm_price_in, llm_price_out, format, scip, auto_index (empty removes)
     Set {
         #[arg(required = true, value_name = "KEY=VALUE")]
         pairs: Vec<String>,
@@ -482,6 +482,15 @@ enum ConfigAction {
 
 fn main() -> ExitCode {
     let matches = Cli::command().get_matches();
+    // Index settings an older config.toml held move to the index once; a server moves its own.
+    if std::env::var_os("COMINDLY_PUBLIC_URL").is_none() {
+        let flag = matches
+            .subcommand()
+            .and_then(|(_, sub)| sub.try_get_one::<String>("index_dir").ok().flatten())
+            .cloned();
+        let root = comindly::config::Config::load().index_dir(flag.as_deref());
+        comindly::rt::block_on(comindly::config::migrate(&root));
+    }
     let cli = match Cli::from_arg_matches(&matches) {
         Ok(c) => c,
         Err(e) => e.exit(),
@@ -503,11 +512,10 @@ fn main() -> ExitCode {
             since,
             scip,
         } => {
-            let cfg = comindly::config::Config::load();
-            let Some(scip) = scip_mode(scip.as_deref(), &cfg) else {
+            let s = settings_for(index_dir.as_deref());
+            let Some(scip) = scip_mode(scip.as_deref(), s.scip) else {
                 return ExitCode::FAILURE;
             };
-            let s = settings_for(index_dir.as_deref());
             cmd_index(
                 &repo,
                 index_dir.as_deref(),
@@ -535,11 +543,10 @@ fn main() -> ExitCode {
             incremental,
             scip,
         } => {
-            let cfg = comindly::config::Config::load();
-            let Some(scip) = scip_mode(scip.as_deref(), &cfg) else {
+            let s = settings_for(index_dir.as_deref());
+            let Some(scip) = scip_mode(scip.as_deref(), s.scip) else {
                 return ExitCode::FAILURE;
             };
-            let s = settings_for(index_dir.as_deref());
             cmd_link(
                 &repos,
                 index_dir.as_deref(),
@@ -722,9 +729,9 @@ fn main() -> ExitCode {
 }
 
 /// `--scip` flag → config → `auto`; `None` (after an error message) for an unknown value.
-fn scip_mode(flag: Option<&str>, cfg: &comindly::config::Config) -> Option<comindly::scip::Mode> {
+fn scip_mode(flag: Option<&str>, default: comindly::scip::Mode) -> Option<comindly::scip::Mode> {
     match flag {
-        None => Some(cfg.scip()),
+        None => Some(default),
         Some(f) => comindly::scip::Mode::parse(f).or_else(|| {
             comindly::ui::err(&format!("--scip must be auto, require or off (got {f:?})"));
             None
@@ -1449,22 +1456,7 @@ fn cmd_ui(from: Option<&str>, web: Option<(String, u16)>, open: bool) -> ExitCod
                 let (url, sign_in) = (cfg.public_url.clone(), cfg.sign_in);
                 let server =
                     comindly::server::Server::open(&root, cfg).context("open the server table")?;
-                let store = &server.settings;
-                let config = comindly::config::config_path();
-                // The kept copy is the server's settings; the file is what commands read.
-                match store.kept_config() {
-                    Some(kept) => {
-                        std::fs::create_dir_all(config.parent().context("config dir")?)?;
-                        std::fs::write(&config, kept)?;
-                        comindly::ui::note(
-                            "settings and repository list loaded from the index location",
-                        );
-                    }
-                    None if config.exists() => {
-                        store.keep_config(&std::fs::read_to_string(&config)?)?
-                    }
-                    None => {}
-                }
+                migrate_server(&server, &root)?;
                 comindly::ui::ok(&format!("comindly server for {url}, listening on {addr}"));
                 comindly::ui::note(match sign_in {
                     comindly::server::SignIn::Email => "members sign in by email",
@@ -1775,6 +1767,14 @@ fn team_run(what: Option<TeamWhat>, root: &str) -> anyhow::Result<()> {
                         anyhow::ensure!(matches!(v, "" | "md" | "json"), "format is md or json");
                         s.format = text
                     }
+                    "scip" => {
+                        anyhow::ensure!(
+                            v.is_empty() || comindly::scip::Mode::parse(v).is_some(),
+                            "scip is auto, require or off"
+                        );
+                        s.scip = text
+                    }
+                    "auto_index" => s.auto_index = flag()?,
                     other => anyhow::bail!("unknown team setting `{other}`"),
                 }
             }
@@ -1943,6 +1943,29 @@ fn find_str<'v>(v: &'v serde_json::Value, key: &str) -> Option<&'v str> {
     }
 }
 
+/// An older server kept `config.toml` in its table: its repositories move to the server's
+/// settings and its index settings to the index, once.
+fn migrate_server(server: &comindly::server::Server, root: &str) -> anyhow::Result<()> {
+    let Some(text) = server.settings.legacy_config() else {
+        return Ok(());
+    };
+    if server.settings.repos().is_empty() {
+        let old: comindly::config::Config = toml::from_str(&text).unwrap_or_default();
+        server.settings.set_repos("upgrade", &old.repos)?;
+    }
+    comindly::rt::block_on(async {
+        let stored = comindly::team::load(root).await?;
+        let mut settings = stored.settings;
+        if comindly::config::adopt_legacy(&text, &mut settings) {
+            comindly::team::save_as(root, &settings, stored.version, "upgrade").await?;
+        }
+        anyhow::Ok(())
+    })?;
+    server.settings.drop_legacy_config()?;
+    comindly::ui::note("moved the server's kept config.toml into its settings and the index's");
+    Ok(())
+}
+
 /// The settings the index at `from` runs with on this machine.
 fn settings_for(from: Option<&str>) -> comindly::context::Settings {
     let root = comindly::config::Config::load().index_dir(from);
@@ -1957,7 +1980,7 @@ fn cmd_doctor(from: Option<&str>) -> ExitCode {
     let team = comindly::rt::block_on(comindly::team::load(&root))
         .map(|t| t.settings)
         .unwrap_or_default();
-    let checks = comindly::doctor::run(&cfg, &team, None, &root);
+    let checks = comindly::doctor::run(&team, None, &root);
     for c in &checks {
         if c.ok {
             comindly::ui::ok(&c.message);
@@ -2531,12 +2554,11 @@ where
 {
     let rt = comindly::rt::shared();
     rt.block_on(async {
-        let cfg = comindly::config::Config::load();
         let team = comindly::team::load(root)
             .await
             .map(|s| s.settings)
             .unwrap_or_default();
-        let mut settings = comindly::context::Settings::resolve(&team, &cfg);
+        let mut settings = comindly::context::Settings::resolve(&team);
         settings.embed = steps.embed;
         settings.enrich = steps.enrich;
         settings.flows = steps.flows;

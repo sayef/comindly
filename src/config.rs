@@ -1,7 +1,8 @@
-//! Comindly configuration — persistent defaults for the data location and model choices.
+//! `config.toml`: one person's preferences on this machine — which index to open, the repositories
+//! this machine indexes, and how records name and sign them. What an index runs with (models, LLM
+//! steps, limits) is stored with the index; a server keeps its settings in its database.
 //!
 //! Precedence, highest first: CLI flag → environment variable → `config.toml` → built-in default.
-//! Secrets (`OPENAI_API_KEY`) are never read from the file; keep them in the environment.
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
@@ -12,27 +13,6 @@ use std::path::{Path, PathBuf};
 pub struct Config {
     /// Default index directory for `--index-dir` (local path or `s3://…`).
     pub index_dir: Option<String>,
-    /// Default LLM model for `--enrich` / `--flows`.
-    pub llm_model: Option<String>,
-    /// Default embedding model (Hugging Face id or local path).
-    pub embed_model: Option<String>,
-    /// OpenAI-compatible base URL (Ollama, vLLM, LiteLLM proxy, Azure).
-    pub llm_base_url: Option<String>,
-    /// Cap on symbols enriched by `--enrich`. Absent = no cap (enrich the whole codebase).
-    pub max_enrich: Option<usize>,
-    /// Cap on flows narrated by `--flows`. Absent = no cap (narrate every entry point).
-    pub max_flows: Option<usize>,
-    /// Default output format when `--format` is not given. `search`: `md` | `table`;
-    /// `serve`: `md` | `json`. Absent = `md`.
-    pub format: Option<String>,
-    /// Default for `index`/`link` steps; `--x` / `--no-x` on the CLI override these.
-    /// Built-in defaults: all on; the LLM steps skip without a key, and `--no-llm` skips them all.
-    pub embed: Option<bool>,
-    pub enrich: Option<bool>,
-    pub flows: Option<bool>,
-    pub guide: Option<bool>,
-    /// SCIP use in `index`/`link`: `auto` (default) | `require` | `off`.
-    pub scip: Option<String>,
     /// SSH key that signs ledger records (default: git `user.signingkey` when `gpg.format=ssh`).
     pub signing_key: Option<String>,
     /// `allowed_signers` file for verifying records (default: git `gpg.ssh.allowedSignersFile`).
@@ -43,8 +23,6 @@ pub struct Config {
     pub author_name: Option<String>,
     /// `false` keeps names off new ledger records (only the pseudonymous actor id is stored).
     pub record_names: Option<bool>,
-    /// Re-index from the app when a listed repository's default branch moves on the remote.
-    pub auto_index: Option<bool>,
     /// Repositories `comindly link` indexes when given none: comindly checks out each one's default
     /// branch in its own worktree.
     #[serde(default)]
@@ -129,14 +107,6 @@ impl Config {
     pub fn fresh(&self) -> std::time::Duration {
         std::time::Duration::from_secs(self.cache_ttl_secs.unwrap_or(crate::cache::DEFAULT_TTL))
     }
-
-    /// SCIP mode: `COMINDLY_SCIP` → file → `auto`.
-    pub fn scip(&self) -> crate::scip::Mode {
-        non_empty_env("COMINDLY_SCIP")
-            .or_else(|| self.scip.clone())
-            .and_then(|s| crate::scip::Mode::parse(&s))
-            .unwrap_or(crate::scip::Mode::Auto)
-    }
 }
 
 /// `$XDG_CONFIG_HOME/comindly/config.toml`, else `~/.config/comindly/config.toml`.
@@ -220,29 +190,12 @@ pub fn init(force: bool) -> Result<PathBuf> {
         std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     }
     let body = format!(
-        "# Comindly configuration. CLI flags and environment variables override these.\n\
-         # Secrets (OPENAI_API_KEY) belong in the environment, not here.\n\n\
-         index_dir   = \"{}\"\n\
-         llm_model   = \"{}\"\n\
-         embed_model = \"{}\"\n\
-         format      = \"md\"   # default output when --format is absent (search: md|table, serve: md|json)\n\
-         # llm_base_url = \"http://localhost:11434/v1\"  # Ollama / vLLM / LiteLLM proxy\n\n\
-         # index/link step defaults (CLI --x / --no-x override). enrich/flows/guide call an LLM\n\
-         # (cost + sends code; need OPENAI_API_KEY). Set false to skip; they also skip with a\n\
-         # warning if no key is set.\n\
-         embed  = true\n\
-         enrich = true\n\
-         flows  = true\n\
-         guide  = true\n\n\
-         # SCIP (compiler-grade resolution): auto = use index.scip or installed indexers,\n\
-         # require = fail without it, off = tree-sitter only.\n\
-         scip   = \"auto\"\n\n\
-         # Cost caps for LLM steps. Omit for no cap (cover the whole codebase).\n\
-         # max_enrich = 200   # max symbols enriched by --enrich\n\
-         # max_flows  = 50    # max flows narrated by --flows\n",
+        "# Your comindly preferences on this machine. CLI flags and environment variables override\n\
+         # them. Models, LLM steps and limits belong to the index: `comindly team set`.\n\n\
+         index_dir = \"{}\"\n\n\
+         # author_name  = \"Your Name\"   # on the ledger records you write (default: git user.name)\n\
+         # record_names = false           # keep names off new records (only a pseudonymous id)\n",
         default_index_dir(),
-        crate::llm::DEFAULT_MODEL,
-        crate::embed::DEFAULT_MODEL,
     );
     write_config(&path, &body)?;
     Ok(path)
@@ -294,7 +247,7 @@ pub async fn index_settings(root: &str) -> crate::context::Settings {
         .await
         .map(|s| s.settings)
         .unwrap_or_default();
-    crate::context::Settings::resolve(&team, &Config::load())
+    crate::context::Settings::resolve(&team)
 }
 
 /// An LLM client for `settings`, with the key for `team` from this machine or `server`.
@@ -408,5 +361,110 @@ pub fn local_identity() -> crate::ledger::Identity {
     crate::ledger::Identity {
         actor,
         name: name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty()),
+    }
+}
+
+/// Settings older versions kept in `config.toml` that now belong to the index.
+#[derive(Debug, Default, Deserialize)]
+struct Legacy {
+    llm_model: Option<String>,
+    embed_model: Option<String>,
+    llm_base_url: Option<String>,
+    max_enrich: Option<usize>,
+    max_flows: Option<usize>,
+    format: Option<String>,
+    embed: Option<bool>,
+    enrich: Option<bool>,
+    flows: Option<bool>,
+    guide: Option<bool>,
+    scip: Option<String>,
+    auto_index: Option<bool>,
+}
+
+const LEGACY: [&str; 12] = [
+    "llm_model",
+    "embed_model",
+    "llm_base_url",
+    "max_enrich",
+    "max_flows",
+    "format",
+    "embed",
+    "enrich",
+    "flows",
+    "guide",
+    "scip",
+    "auto_index",
+];
+
+/// Fill what `team` leaves unset from settings an older `config.toml` held; `true` if any.
+pub fn adopt_legacy(text: &str, team: &mut crate::team::TeamSettings) -> bool {
+    let Ok(old) = toml::from_str::<Legacy>(text) else {
+        return false;
+    };
+    let mut changed = false;
+    macro_rules! take {
+        ($($f:ident),*) => {$(
+            if team.$f.is_none() && old.$f.is_some() {
+                team.$f = old.$f.clone();
+                changed = true;
+            }
+        )*};
+    }
+    take!(
+        llm_model,
+        embed_model,
+        llm_base_url,
+        max_enrich,
+        max_flows,
+        format,
+        embed,
+        enrich,
+        flows,
+        guide,
+        scip,
+        auto_index
+    );
+    changed
+}
+
+/// Move index settings an older `config.toml` holds into the index's shared settings, once.
+/// Only for an index on this machine: a shared remote index keeps the settings it has.
+pub async fn migrate(root: &str) {
+    let path = config_path();
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return;
+    };
+    let Ok(mut doc) = text.parse::<toml_edit::DocumentMut>() else {
+        return;
+    };
+    if !LEGACY.iter().any(|k| doc.contains_key(k)) {
+        return;
+    }
+    if !crate::cache::is_remote(root) {
+        let moved = async {
+            let stored = crate::team::load(root).await?;
+            let mut settings = stored.settings;
+            if adopt_legacy(&text, &mut settings) {
+                crate::team::save(root, &settings, stored.version).await?;
+            }
+            anyhow::Ok(())
+        };
+        if let Err(e) = moved.await {
+            crate::ui::warn(&format!(
+                "could not move settings from {} into the index: {e:#}",
+                path.display()
+            ));
+            return;
+        }
+    }
+    for k in LEGACY {
+        doc.remove(k);
+    }
+    match write_config(&path, &doc.to_string()) {
+        Ok(()) => crate::ui::note(&format!(
+            "models, LLM steps and limits now live with the index (`comindly team`); removed them from {}",
+            path.display()
+        )),
+        Err(e) => crate::ui::warn(&format!("{e:#}")),
     }
 }

@@ -5,14 +5,13 @@ use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
 
-use crate::config::Config;
 use crate::events::{EventSink, Reporter};
 use crate::llm::LlmClient;
 use crate::team::TeamSettings;
 use crate::worktree::{Credentials, NoCredentials};
 
-/// Settings resolved once at the edge: shared settings first, then the environment, then
-/// `config.toml`, then comindly's defaults.
+/// Settings resolved once at the edge: the index's shared settings, then the environment, then
+/// comindly's defaults.
 #[derive(Debug, Clone)]
 pub struct Settings {
     pub llm_model: String,
@@ -29,35 +28,34 @@ pub struct Settings {
     pub prices: Option<(f64, f64)>,
     /// What MCP tools return as text: `md` or `json`.
     pub format: String,
+    pub scip: crate::scip::Mode,
+    pub auto_index: bool,
 }
 
 impl Settings {
-    pub fn resolve(team: &TeamSettings, cfg: &Config) -> Settings {
-        let env = |k: &str| crate::config::env(k);
+    pub fn resolve(team: &TeamSettings) -> Settings {
+        let env = |k: &str| crate::config::env(k).filter(|v| !v.is_empty());
         Settings {
             llm_model: team
                 .llm_model
                 .clone()
                 .or_else(|| env("COMINDLY_LLM_MODEL"))
-                .or_else(|| cfg.llm_model.clone())
                 .unwrap_or_else(|| crate::llm::DEFAULT_MODEL.to_string()),
             llm_base_url: team
                 .llm_base_url
                 .clone()
-                .or_else(|| env("COMINDLY_LLM_BASE_URL"))
-                .or_else(|| cfg.llm_base_url.clone()),
+                .or_else(|| env("COMINDLY_LLM_BASE_URL")),
             embed_model: team
                 .embed_model
                 .clone()
                 .or_else(|| env("COMINDLY_EMBED_MODEL"))
-                .or_else(|| cfg.embed_model.clone())
                 .unwrap_or_else(|| crate::embed::DEFAULT_MODEL.to_string()),
-            embed: team.embed.or(cfg.embed).unwrap_or(true),
-            enrich: team.enrich.or(cfg.enrich).unwrap_or(true),
-            flows: team.flows.or(cfg.flows).unwrap_or(true),
-            guide: team.guide.or(cfg.guide).unwrap_or(true),
-            max_enrich: team.max_enrich.or(cfg.max_enrich).unwrap_or(usize::MAX),
-            max_flows: team.max_flows.or(cfg.max_flows).unwrap_or(usize::MAX),
+            embed: team.embed.unwrap_or(true),
+            enrich: team.enrich.unwrap_or(true),
+            flows: team.flows.unwrap_or(true),
+            guide: team.guide.unwrap_or(true),
+            max_enrich: team.max_enrich.unwrap_or(usize::MAX),
+            max_flows: team.max_flows.unwrap_or(usize::MAX),
             llm_concurrency: team.llm_concurrency.unwrap_or(8).clamp(1, 64),
             prices: (team.llm_price_in.is_some() || team.llm_price_out.is_some()).then(|| {
                 (
@@ -67,8 +65,12 @@ impl Settings {
             }),
             format: env("COMINDLY_FORMAT")
                 .or_else(|| team.format.clone())
-                .or_else(|| cfg.format.clone())
                 .unwrap_or_else(|| "md".to_string()),
+            scip: env("COMINDLY_SCIP")
+                .or_else(|| team.scip.clone())
+                .and_then(|s| crate::scip::Mode::parse(&s))
+                .unwrap_or(crate::scip::Mode::Auto),
+            auto_index: team.auto_index.unwrap_or(false),
         }
     }
 }

@@ -14,12 +14,11 @@ pub struct Check {
 
 /// Check the index, ledger, remote access, hooks, LLM, signing and SCIP indexers for `root`.
 pub fn run(
-    cfg: &crate::config::Config,
     team: &crate::team::TeamSettings,
     server: Option<&crate::server::Server>,
     root: &str,
 ) -> Vec<Check> {
-    let resolved = crate::context::Settings::resolve(team, cfg);
+    let resolved = crate::context::Settings::resolve(team);
     let set = |k: &str| std::env::var(k).is_ok_and(|v| !v.is_empty());
     let mut out = Vec::new();
     let mut check = |good: bool, optional: bool, ok: &str, bad: &str| {

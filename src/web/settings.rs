@@ -31,12 +31,10 @@ pub(super) async fn get(State(app): State<Shared>, Cur(s): Cur) -> Json<Value> {
         "author_name": cfg.author_name,
         "author_effective": crate::config::local_identity().name,
         "record_names": cfg.record_names.unwrap_or(true),
-        "llm_base_url": cfg.llm_base_url,
         "llm_model": settings.llm_model,
         "defaults": super::team::defaults(),
         "llm_key": key,
         "cache_ttl_secs": cfg.cache_ttl_secs.unwrap_or(crate::cache::DEFAULT_TTL),
-        "auto_index": cfg.auto_index.unwrap_or(false),
     }))
 }
 
@@ -45,10 +43,7 @@ pub(super) struct Changes {
     index_dir: Option<String>,
     author_name: Option<String>,
     record_names: Option<bool>,
-    llm_base_url: Option<String>,
-    llm_model: Option<String>,
     cache_ttl_secs: Option<u64>,
-    auto_index: Option<bool>,
 }
 
 /// Save the given settings; a new index location is loaded before it is saved.
@@ -60,22 +55,17 @@ pub(super) async fn save(State(app): State<Shared>, Json(c): Json<Changes>) -> i
             None => unreachable!(),
         };
         let mut changes: Vec<(&str, Setting)> = Vec::new();
-        for (key, v) in [
-            ("author_name", &c.author_name),
-            ("llm_base_url", &c.llm_base_url),
-            ("llm_model", &c.llm_model),
-        ] {
+        anyhow::ensure!(
+            app.server.is_none(),
+            "a server takes its settings from the deployment and the index's shared settings"
+        );
+        for (key, v) in [("author_name", &c.author_name)] {
             if v.is_some() {
                 changes.push((key, text(v)));
             }
         }
-        for (key, v) in [
-            ("record_names", c.record_names),
-            ("auto_index", c.auto_index),
-        ] {
-            if let Some(v) = v {
-                changes.push((key, Setting::Flag(v)));
-            }
+        if let Some(v) = c.record_names {
+            changes.push(("record_names", Setting::Flag(v)));
         }
         if let Some(v) = c.cache_ttl_secs {
             changes.push(("cache_ttl_secs", Setting::Number(v.max(30) as i64)));
@@ -93,7 +83,6 @@ pub(super) async fn save(State(app): State<Shared>, Json(c): Json<Changes>) -> i
             message = format!("saved; now showing {dir}");
         }
         crate::config::update(&changes)?;
-        app.keep_config()?;
         anyhow::Ok(message)
     };
     match run.await {

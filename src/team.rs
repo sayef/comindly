@@ -51,6 +51,12 @@ pub struct TeamSettings {
     /// What MCP tools return as text: `md` (default) or `json`; the JSON is always attached too.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format: Option<String>,
+    /// SCIP use when indexing: `auto` (default), `require` or `off`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scip: Option<String>,
+    /// Re-index when a listed repository's default branch moves on its remote.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_index: Option<bool>,
     /// Clone URLs of the team's repositories, so everyone can get the same set.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub repos: Vec<String>,

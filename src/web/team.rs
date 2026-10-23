@@ -220,8 +220,9 @@ async fn has_index(root: &str) -> anyhow::Result<bool> {
 
 /// Remember `root` in the personal config and load it with its team settings.
 async fn use_location(app: &Shared, root: &str, settings: TeamSettings) -> anyhow::Result<()> {
-    crate::config::update(&[("index_dir", crate::config::Setting::Text(root.to_string()))])?;
-    app.keep_config()?;
+    if app.server.is_none() {
+        crate::config::update(&[("index_dir", crate::config::Setting::Text(root.to_string()))])?;
+    }
     app.set_team(settings);
     app.reload(root).await
 }

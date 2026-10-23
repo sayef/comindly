@@ -2,14 +2,14 @@
 
 use std::path::Path;
 
-use axum::extract::Query;
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::{Conf, Cur};
+use super::Cur;
 
 /// Every flow worth showing: entry points that reach furthest, plus any the index narrated.
 pub(super) async fn list(Cur(s): Cur) -> Json<Value> {
@@ -97,12 +97,15 @@ fn around() -> usize {
 }
 
 /// The lines around `path:line` in this machine's copy of `repo` (comindly's checkout of its default branch when there is one).
-pub(super) async fn source(Conf(cfg): Conf, Query(q): Query<SourceQ>) -> impl IntoResponse {
+pub(super) async fn source(
+    State(app): State<super::Shared>,
+    Query(q): Query<SourceQ>,
+) -> impl IntoResponse {
+    let repos = app.repos();
     let run = || -> anyhow::Result<Value> {
         let (path, line) = q.at.rsplit_once(':').unwrap_or((q.at.as_str(), "1"));
         let line: usize = line.parse().unwrap_or(1).max(1);
-        let entry = cfg
-            .repos
+        let entry = repos
             .iter()
             .find(|r| crate::worktree::name(Path::new(&r.path)) == q.repo)
             .ok_or_else(|| anyhow::anyhow!("{} has no folder on this machine", q.repo))?;

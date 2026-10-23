@@ -67,10 +67,13 @@ pub trait SecretStore: Send + Sync {
     fn secret_names(&self) -> Vec<String>;
 }
 
-/// The server's `config.toml`, kept so a new container starts with it.
+/// The server's own settings: the repositories it indexes.
 pub trait SettingsStore: Send + Sync {
-    fn keep_config(&self, text: &str) -> Result<()>;
-    fn kept_config(&self) -> Option<String>;
+    fn repos(&self) -> Vec<crate::config::RepoEntry>;
+    fn set_repos(&self, by: &str, repos: &[crate::config::RepoEntry]) -> Result<()>;
+    /// The `config.toml` an older server kept, until it has been moved over.
+    fn legacy_config(&self) -> Option<String>;
+    fn drop_legacy_config(&self) -> Result<()>;
 }
 
 /// Sends sign-in links and invitations.

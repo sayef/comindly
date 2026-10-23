@@ -511,6 +511,7 @@ impl State {
 
 const TABLE: &str = "server";
 const CONFIG: &str = "config.toml";
+const REPOS: &str = "repos";
 const KINDS: [&str; 12] = [
     "user",
     "invite",
@@ -1649,17 +1650,26 @@ impl crate::backends::SecretStore for Store {
 }
 
 impl crate::backends::SettingsStore for Store {
-    /// Keep the server's `config.toml` (repositories, indexing settings) with the accounts.
-    fn keep_config(&self, text: &str) -> Result<()> {
-        if self.state().config.get(CONFIG).map(String::as_str) == Some(text) {
-            return Ok(());
-        }
-        self.commit(vec![put("config", CONFIG, &text.to_string())])
+    fn repos(&self) -> Vec<crate::config::RepoEntry> {
+        self.state()
+            .config
+            .get(REPOS)
+            .and_then(|j| serde_json::from_str(j).ok())
+            .unwrap_or_default()
     }
 
-    /// The kept `config.toml`, if any.
-    fn kept_config(&self) -> Option<String> {
+    fn set_repos(&self, by: &str, repos: &[crate::config::RepoEntry]) -> Result<()> {
+        self.commit(vec![put("config", REPOS, &serde_json::to_string(repos)?)])?;
+        self.audit(by, "repos", &repos.len().to_string());
+        Ok(())
+    }
+
+    fn legacy_config(&self) -> Option<String> {
         self.state().config.get(CONFIG).cloned()
+    }
+
+    fn drop_legacy_config(&self) -> Result<()> {
+        self.commit(vec![del("config", CONFIG)])
     }
 }
 
