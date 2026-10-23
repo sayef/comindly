@@ -28,28 +28,6 @@ pub fn run(
             message: if good { ok } else { bad }.to_string(),
         })
     };
-    let file = std::fs::read_to_string(crate::config::config_path()).unwrap_or_default();
-    let obsolete: Vec<&str> = ["aws_profile", "sso_auto_login"]
-        .into_iter()
-        .filter(|k| {
-            file.lines().any(|l| {
-                l.trim_start()
-                    .strip_prefix(k)
-                    .is_some_and(|r| r.trim_start().starts_with('='))
-            })
-        })
-        .collect();
-    if !obsolete.is_empty() {
-        check(
-            false,
-            true,
-            "",
-            &format!(
-                "config.toml still sets {}, which comindly no longer reads: remove it and set AWS_PROFILE in the environment if you use a profile",
-                obsolete.join(" and ")
-            ),
-        );
-    }
     let graph = format!("{}/_graph", root.trim_end_matches('/'));
     match crate::index::graph_versions_blocking(&graph) {
         Ok(v) if !v.is_empty() => {

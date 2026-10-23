@@ -1,35 +1,53 @@
-//! `config.toml`: one person's preferences on this machine — which index to open, the repositories
-//! this machine indexes, and how records name and sign them. What an index runs with (models, LLM
-//! steps, limits) is stored with the index; a server keeps its settings in its database.
+//! Your preferences on this machine — which index to open, the repositories this machine indexes,
+//! and how your ledger records are named and signed — kept in a versioned LanceDB table in
+//! comindly's config folder. A TOML file of the same shape can be imported and exported. What an
+//! index runs with is stored with the index; a server keeps its settings in its database.
 //!
-//! Precedence, highest first: CLI flag → environment variable → `config.toml` → built-in default.
+//! Precedence, highest first: CLI flag → environment variable → these preferences → default.
 
 use anyhow::{Context, Result};
-use serde::Deserialize;
-use std::path::{Path, PathBuf};
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
-/// Non-secret preferences, all optional. Read from `config.toml` if present.
-#[derive(Debug, Default, Deserialize)]
+/// Non-secret preferences, all optional.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 pub struct Config {
     /// Default index directory for `--index-dir` (local path or `s3://…`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub index_dir: Option<String>,
     /// SSH key that signs ledger records (default: git `user.signingkey` when `gpg.format=ssh`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signing_key: Option<String>,
     /// `allowed_signers` file for verifying records (default: git `gpg.ssh.allowedSignersFile`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub allowed_signers: Option<String>,
     /// Seconds between freshness checks of the local mirror of a remote index (default 300).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_ttl_secs: Option<u64>,
     /// Name shown on ledger records you write (default: git `user.name`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub author_name: Option<String>,
     /// `false` keeps names off new ledger records (only the pseudonymous actor id is stored).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub record_names: Option<bool>,
     /// Repositories `comindly link` indexes when given none: comindly checks out each one's default
     /// branch in its own worktree.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub repos: Vec<RepoEntry>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize, serde::Serialize)]
+/// The preferences, by the names files and `comindly config set` use.
+pub const KEYS: [&str; 7] = [
+    "index_dir",
+    "signing_key",
+    "allowed_signers",
+    "cache_ttl_secs",
+    "author_name",
+    "record_names",
+    "repos",
+];
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct RepoEntry {
     /// The clone comindly indexes: yours, or its own under the data folder.
     pub path: String,
@@ -38,51 +56,53 @@ pub struct RepoEntry {
     pub remote: Option<String>,
 }
 
-fn write_config(path: &Path, text: &str) -> Result<()> {
-    std::fs::create_dir_all(path.parent().context("config dir")?)?;
-    std::fs::write(path, text).with_context(|| format!("write {}", path.display()))
+const TABLE: &str = "preferences";
+
+/// Where the preferences are kept: `<config folder>/settings`.
+pub fn store_path() -> PathBuf {
+    config_dir().join("settings")
 }
 
-/// Replace the repository list in `config.toml`.
+/// The stored preferences with their version.
+pub fn stored() -> Result<crate::docstore::Stored<Config>> {
+    let uri = store_path().to_string_lossy().into_owned();
+    crate::rt::block_on(crate::docstore::load(&uri, TABLE))
+}
+
+fn save(cfg: &Config, expected: Option<u64>) -> Result<u64> {
+    let uri = store_path().to_string_lossy().into_owned();
+    let me = local_identity();
+    let by = me.name.unwrap_or(me.actor);
+    crate::rt::block_on(crate::docstore::save(&uri, TABLE, cfg, expected, &by))
+}
+
+/// Every saved version of the preferences, newest first.
+pub fn history() -> Result<Vec<crate::docstore::Version>> {
+    let uri = store_path().to_string_lossy().into_owned();
+    crate::rt::block_on(crate::docstore::history(&uri, TABLE))
+}
+
+/// Replace the repository list.
 pub fn set_repos(list: &[RepoEntry]) -> Result<()> {
-    let path = config_path();
-    let text = std::fs::read_to_string(&path).unwrap_or_default();
-    let mut doc: toml_edit::DocumentMut = text.parse().context("parse config.toml")?;
-    let mut tables = toml_edit::ArrayOfTables::new();
-    for r in list {
-        let mut t = toml_edit::Table::new();
-        t["path"] = toml_edit::value(r.path.as_str());
-        if let Some(u) = &r.remote {
-            t["remote"] = toml_edit::value(u.as_str());
-        }
-        tables.push(t);
-    }
-    if list.is_empty() {
-        doc.remove("repos");
-    } else {
-        doc["repos"] = toml_edit::Item::ArrayOfTables(tables);
-    }
-    write_config(&path, &doc.to_string())
+    let s = stored()?;
+    let mut cfg = s.doc;
+    cfg.repos = list.to_vec();
+    save(&cfg, s.version).map(drop)
 }
 
 impl Config {
-    /// Load `config.toml`, or an empty config if it is missing. A malformed file warns and
-    /// falls back to defaults rather than aborting the command.
+    /// The stored preferences; on a read error, a warning and the defaults.
     pub fn load() -> Self {
-        let path = config_path();
-        let Ok(text) = std::fs::read_to_string(&path) else {
-            return Self::default();
-        };
-        match toml::from_str(&text) {
-            Ok(cfg) => cfg,
+        match stored() {
+            Ok(s) => s.doc,
             Err(e) => {
-                crate::ui::warn(&format!("ignoring {}: {e}", path.display()));
+                crate::ui::warn(&format!("your preferences could not be read: {e:#}"));
                 Self::default()
             }
         }
     }
 
-    /// Resolve the index location: flag → `COMINDLY_INDEX_DIR` → file → `~/.local/share/comindly`.
+    /// Resolve the index location: flag → `COMINDLY_INDEX_DIR` → preferences → `~/.local/share/comindly`.
     pub fn index_dir(&self, flag: Option<&str>) -> String {
         if let Some(f) = flag {
             return expand_tilde(f);
@@ -109,7 +129,7 @@ impl Config {
     }
 }
 
-/// `$XDG_CONFIG_HOME/comindly/config.toml`, else `~/.config/comindly/config.toml`.
+/// Where older versions kept preferences as a file; imported once if found.
 pub fn config_path() -> PathBuf {
     config_dir().join("config.toml")
 }
@@ -127,22 +147,29 @@ pub enum Setting {
     Remove,
 }
 
-/// Write `changes` into `config.toml`, keeping its comments and layout.
+/// Apply `changes` to the stored preferences.
 pub fn update(changes: &[(&str, Setting)]) -> Result<()> {
-    let path = config_path();
-    let text = std::fs::read_to_string(&path).unwrap_or_default();
-    let mut doc: toml_edit::DocumentMut = text.parse().context("parse config.toml")?;
+    let s = stored()?;
+    let mut doc = serde_json::to_value(&s.doc)?;
+    let map = doc.as_object_mut().context("preferences")?;
     for (key, value) in changes {
+        anyhow::ensure!(
+            KEYS.contains(key) && *key != "repos",
+            "unknown preference `{key}` (one of {})",
+            KEYS[..6].join(", ")
+        );
         match value {
-            Setting::Text(v) => doc[key] = toml_edit::value(v.as_str()),
-            Setting::Flag(v) => doc[key] = toml_edit::value(*v),
-            Setting::Number(v) => doc[key] = toml_edit::value(*v),
-            Setting::Remove => {
-                doc.remove(key);
-            }
+            Setting::Text(v) => drop(map.insert(key.to_string(), v.as_str().into())),
+            Setting::Flag(v) => drop(map.insert(key.to_string(), (*v).into())),
+            Setting::Number(v) => drop(map.insert(key.to_string(), (*v).into())),
+            Setting::Remove => drop(map.remove(*key)),
         }
     }
-    write_config(&path, &doc.to_string())
+    let next: Config = serde_json::from_value(doc).context("preferences")?;
+    if next != s.doc {
+        save(&next, s.version)?;
+    }
+    Ok(())
 }
 
 /// The web UI's access token for browsers: created once, so bookmarks keep working.
@@ -177,28 +204,6 @@ pub fn data_dir() -> String {
 /// The default index location: the data folder itself.
 pub fn default_index_dir() -> String {
     data_dir()
-}
-
-/// Write a commented `config.toml` with the resolved defaults. Without `force`, errors if one
-/// already exists (the caller handles confirmation).
-pub fn init(force: bool) -> Result<PathBuf> {
-    let path = config_path();
-    if path.exists() && !force {
-        anyhow::bail!("config already exists at {}", path.display());
-    }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
-    }
-    let body = format!(
-        "# Your comindly preferences on this machine. CLI flags and environment variables override\n\
-         # them. Models, LLM steps and limits belong to the index: `comindly team set`.\n\n\
-         index_dir = \"{}\"\n\n\
-         # author_name  = \"Your Name\"   # on the ledger records you write (default: git user.name)\n\
-         # record_names = false           # keep names off new records (only a pseudonymous id)\n",
-        default_index_dir(),
-    );
-    write_config(&path, &body)?;
-    Ok(path)
 }
 
 fn non_empty_env(key: &str) -> Option<String> {
@@ -427,44 +432,124 @@ pub fn adopt_legacy(text: &str, team: &mut crate::team::TeamSettings) -> bool {
     changed
 }
 
-/// Move index settings an older `config.toml` holds into the index's shared settings, once.
-/// Only for an index on this machine: a shared remote index keeps the settings it has.
-pub async fn migrate(root: &str) {
+/// Keys older files may carry that nothing reads any more; imports skip them.
+const OBSOLETE: [&str; 2] = ["aws_profile", "sso_auto_login"];
+
+/// What an import changed.
+#[derive(Debug, Default)]
+pub struct Imported {
+    pub changed: bool,
+    /// Preferences already set to something else, left as they were.
+    pub kept: Vec<String>,
+    /// Index settings the file carried, moved into the index's shared settings.
+    pub moved: bool,
+}
+
+/// Import a preferences file. Without `overwrite` it fills only what is unset; with it, the file
+/// replaces the preferences. Index settings older files carried move to the index once.
+pub fn import(text: &str, overwrite: bool) -> Result<Imported> {
+    let table: toml::Table = toml::from_str(text).context("not a TOML file")?;
+    let unknown: Vec<&str> = table
+        .keys()
+        .map(String::as_str)
+        .filter(|k| !KEYS.contains(k) && !LEGACY.contains(k) && !OBSOLETE.contains(k))
+        .collect();
+    anyhow::ensure!(
+        unknown.is_empty(),
+        "unknown setting(s): {} (preferences are {})",
+        unknown.join(", "),
+        KEYS.join(", ")
+    );
+    let file: Config = toml::from_str(text)?;
+    let s = stored()?;
+    let mut out = Imported::default();
+    let next = if overwrite {
+        file
+    } else {
+        let mut next = s.doc.clone();
+        macro_rules! fill {
+            ($($f:ident),*) => {$(
+                match (&next.$f, &file.$f) {
+                    (None, Some(_)) => next.$f = file.$f.clone(),
+                    (Some(a), Some(b)) if a != b => out.kept.push(stringify!($f).to_string()),
+                    _ => {}
+                }
+            )*};
+        }
+        fill!(
+            index_dir,
+            signing_key,
+            allowed_signers,
+            cache_ttl_secs,
+            author_name,
+            record_names
+        );
+        if next.repos.is_empty() {
+            next.repos = file.repos.clone();
+        } else if !file.repos.is_empty() && file.repos != next.repos {
+            out.kept.push("repos".into());
+        }
+        next
+    };
+    if next != s.doc {
+        save(&next, s.version)?;
+        out.changed = true;
+    }
+    let root = next.index_dir(None);
+    if LEGACY.iter().any(|k| table.contains_key(*k)) && !crate::cache::is_remote(&root) {
+        let me = local_identity();
+        let by = me.name.unwrap_or(me.actor);
+        out.moved = crate::rt::block_on(async {
+            let stored = crate::team::load(&root).await?;
+            let mut settings = stored.settings;
+            let moved = adopt_legacy(text, &mut settings);
+            if moved {
+                crate::team::save_as(&root, &settings, stored.version, &by).await?;
+            }
+            anyhow::Ok(moved)
+        })?;
+    }
+    Ok(out)
+}
+
+/// The preferences as a TOML file that [`import`] reads back.
+pub fn export(cfg: &Config) -> Result<String> {
+    Ok(format!(
+        "# comindly preferences: `comindly config import <file> --override` applies this file.\n\n{}",
+        toml::to_string_pretty(cfg)?
+    ))
+}
+
+/// An older `config.toml` is imported once and renamed; one that appears later is pointed out.
+pub fn adopt_file() {
     let path = config_path();
     let Ok(text) = std::fs::read_to_string(&path) else {
         return;
     };
-    let Ok(mut doc) = text.parse::<toml_edit::DocumentMut>() else {
-        return;
-    };
-    if !LEGACY.iter().any(|k| doc.contains_key(k)) {
-        return;
-    }
-    if !crate::cache::is_remote(root) {
-        let moved = async {
-            let stored = crate::team::load(root).await?;
-            let mut settings = stored.settings;
-            if adopt_legacy(&text, &mut settings) {
-                crate::team::save(root, &settings, stored.version).await?;
-            }
-            anyhow::Ok(())
-        };
-        if let Err(e) = moved.await {
+    match stored() {
+        Ok(s) if s.version.is_some() => {
             crate::ui::warn(&format!(
-                "could not move settings from {} into the index: {e:#}",
+                "{} is not read; apply it with `comindly config import {}`",
+                path.display(),
                 path.display()
             ));
             return;
         }
+        Err(_) => return,
+        Ok(_) => {}
     }
-    for k in LEGACY {
-        doc.remove(k);
-    }
-    match write_config(&path, &doc.to_string()) {
+    let done = import(&text, true).and_then(|_| {
+        Ok(std::fs::rename(
+            &path,
+            path.with_extension("toml.imported"),
+        )?)
+    });
+    match done {
         Ok(()) => crate::ui::note(&format!(
-            "models, LLM steps and limits now live with the index (`comindly team`); removed them from {}",
-            path.display()
+            "imported {} into your preferences (`comindly config`); the file is kept as {}",
+            path.display(),
+            path.with_extension("toml.imported").display()
         )),
-        Err(e) => crate::ui::warn(&format!("{e:#}")),
+        Err(e) => crate::ui::warn(&format!("could not import {}: {e:#}", path.display())),
     }
 }

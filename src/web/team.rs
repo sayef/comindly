@@ -222,6 +222,7 @@ async fn has_index(root: &str) -> anyhow::Result<bool> {
 async fn use_location(app: &Shared, root: &str, settings: TeamSettings) -> anyhow::Result<()> {
     if app.server.is_none() {
         crate::config::update(&[("index_dir", crate::config::Setting::Text(root.to_string()))])?;
+        app.config_changed();
     }
     app.set_team(settings);
     app.reload(root).await

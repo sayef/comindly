@@ -2,13 +2,7 @@
 //! using it runs the same LLM, embedding model and LLM steps. No secrets: each member's API key
 //! comes from their own credentials file or environment.
 
-use std::sync::Arc;
-
-use anyhow::{bail, Result};
-use futures::TryStreamExt;
-use lancedb::arrow::arrow_array::{ArrayRef, RecordBatch, StringArray};
-use lancedb::arrow::arrow_schema::{DataType, Field, Schema};
-use lancedb::query::ExecutableQuery;
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 const TABLE: &str = "settings";
@@ -77,25 +71,13 @@ fn uri(root: &str) -> String {
 
 /// The team settings of the index at `root` (empty when none were saved).
 pub async fn load(root: &str) -> Result<Stored> {
-    let db = crate::storage::connect(&uri(root)).execute().await?;
-    let Ok(tbl) = db.open_table(TABLE).execute().await else {
-        return Ok(Stored::default());
-    };
-    let version = tbl.version().await.ok();
-    let mut st = tbl.query().execute().await?;
-    let mut out = Stored {
-        version,
-        ..Default::default()
-    };
-    while let Some(b) = st.try_next().await? {
-        let col = |n: &str| crate::index::str_col(&b, n);
-        if b.num_rows() > 0 {
-            out.settings = serde_json::from_str(col("settings")?.value(0))?;
-            out.changed_by = Some(col("changed_by")?.value(0).to_string());
-            out.changed_at = Some(col("changed_at")?.value(0).to_string());
-        }
-    }
-    Ok(out)
+    let s = crate::docstore::load::<TeamSettings>(&uri(root), TABLE).await?;
+    Ok(Stored {
+        settings: s.doc,
+        version: s.version,
+        changed_by: s.changed_by,
+        changed_at: s.changed_at,
+    })
 }
 
 /// Save `settings` if nobody saved since `expected` (the version they were loaded at).
@@ -117,30 +99,14 @@ pub async fn save_as(
     expected: Option<u64>,
     by: &str,
 ) -> Result<u64> {
-    let by = by.to_string();
-    let db = crate::storage::connect(&uri(root)).execute().await?;
-    let now = match db.open_table(TABLE).execute().await {
-        Ok(t) => Some(t.version().await?),
-        Err(_) => None,
-    };
-    if now != expected {
-        bail!("the team settings were changed by someone else; reload and try again");
-    }
-    let schema = Arc::new(Schema::new(vec![
-        Field::new("settings", DataType::Utf8, false),
-        Field::new("changed_by", DataType::Utf8, false),
-        Field::new("changed_at", DataType::Utf8, false),
-    ]));
-    let col = |v: String| Arc::new(StringArray::from(vec![v])) as ArrayRef;
-    let batch = RecordBatch::try_new(
-        schema,
-        vec![
-            col(serde_json::to_string(settings)?),
-            col(by),
-            col(chrono::Utc::now().to_rfc3339()),
-        ],
-    )?;
-    crate::index::write_versioned(&db, TABLE, batch).await
+    crate::docstore::save(&uri(root), TABLE, settings, expected, by)
+        .await
+        .map_err(|e| match format!("{e}").contains("changed meanwhile") {
+            true => anyhow::anyhow!(
+                "the team settings were changed by someone else; reload and try again"
+            ),
+            false => e,
+        })
 }
 
 #[cfg(test)]

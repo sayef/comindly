@@ -21,10 +21,7 @@ struct Entry {
 }
 
 pub fn path() -> PathBuf {
-    crate::config::config_path()
-        .parent()
-        .map(|d| d.join("credentials"))
-        .unwrap_or_else(|| PathBuf::from("credentials"))
+    crate::config::config_dir().join("credentials")
 }
 
 fn read() -> File {

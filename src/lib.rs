@@ -17,6 +17,7 @@ pub mod config;
 pub mod configvals;
 pub mod context;
 pub mod conventions;
+pub mod docstore;
 pub mod doctor;
 
 pub mod credentials;

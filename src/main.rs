@@ -378,7 +378,7 @@ enum Cmd {
         #[command(subcommand)]
         what: EvalWhat,
     },
-    /// Show or scaffold the config file
+    /// Your preferences on this machine: show, set, import, export, history
     Config {
         #[command(subcommand)]
         action: Option<ConfigAction>,
@@ -470,26 +470,30 @@ enum EvalWhat {
 
 #[derive(Subcommand)]
 enum ConfigAction {
-    /// Print the config file location and resolved index dir
-    Path,
-    /// Write a commented config.toml with the current defaults
-    Init {
-        /// Overwrite an existing config file (discards its current contents)
-        #[arg(long)]
-        overwrite: bool,
+    /// Show your preferences (the default)
+    Show,
+    /// Set preferences: KEY=VALUE (index_dir, author_name, record_names, signing_key, allowed_signers, cache_ttl_secs); empty removes
+    Set { pairs: Vec<String> },
+    /// Apply a TOML file in the shape `export` writes; fills what is unset unless --override
+    Import {
+        file: String,
+        /// Replace your preferences with the file's
+        #[arg(long = "override")]
+        replace: bool,
     },
+    /// Write your preferences as TOML, to a file or stdout
+    Export { file: Option<String> },
+    /// Earlier versions of your preferences
+    History,
+    /// Where your preferences are kept
+    Path,
 }
 
 fn main() -> ExitCode {
     let matches = Cli::command().get_matches();
-    // Index settings an older config.toml held move to the index once; a server moves its own.
+    // An older config.toml is imported once; a server keeps its settings in its database.
     if std::env::var_os("COMINDLY_PUBLIC_URL").is_none() {
-        let flag = matches
-            .subcommand()
-            .and_then(|(_, sub)| sub.try_get_one::<String>("index_dir").ok().flatten())
-            .cloned();
-        let root = comindly::config::Config::load().index_dir(flag.as_deref());
-        comindly::rt::block_on(comindly::config::migrate(&root));
+        comindly::config::adopt_file();
     }
     let cli = match Cli::from_arg_matches(&matches) {
         Ok(c) => c,
@@ -2396,57 +2400,99 @@ fn cmd_eval_graph(fixture: &str, verbose: bool, scip: Option<&str>, repos: &[Str
 }
 
 fn cmd_config(action: Option<ConfigAction>) -> ExitCode {
-    match action {
-        None | Some(ConfigAction::Path) => {
-            // Path stays plain on stdout so `$(comindly config path)` is scriptable.
-            println!("{}", comindly::config::config_path().display());
-            comindly::ui::field("index dir", &comindly::config::default_index_dir());
-            ExitCode::SUCCESS
-        }
-        Some(ConfigAction::Init { overwrite }) => {
-            use std::io::IsTerminal;
-            let path = comindly::config::config_path();
-            if path.exists() && !overwrite {
-                // Can't prompt when piped/CI → refuse and point at --overwrite.
-                if !std::io::stdin().is_terminal() {
-                    comindly::ui::err("config exists — re-run with --overwrite to replace it");
-                    return ExitCode::FAILURE;
-                }
-                // Deliberate interactive decline is a valid choice, not an error.
-                if !prompt_yes(&path) {
-                    comindly::ui::note("kept existing config");
-                    return ExitCode::SUCCESS;
+    use anyhow::Context as _;
+    let run = || -> anyhow::Result<()> {
+        match action.unwrap_or(ConfigAction::Show) {
+            ConfigAction::Show => {
+                let s = comindly::config::stored()?;
+                print!("{}", comindly::config::export(&s.doc)?);
+                if let (Some(v), Some(at)) = (s.version, s.changed_at) {
+                    comindly::ui::note(&format!("version {v}, saved {at}"));
                 }
             }
-            match comindly::config::init(true) {
-                Ok(path) => {
-                    comindly::ui::ok(&format!("wrote {}", path.display()));
-                    comindly::ui::note("edit it to set index_dir / llm_model / format, or run: comindly index . --embed");
-                    ExitCode::SUCCESS
+            ConfigAction::Set { pairs } => {
+                let mut changes = Vec::new();
+                for p in &pairs {
+                    let (k, v) = p
+                        .split_once('=')
+                        .with_context(|| format!("`{p}` is not KEY=VALUE"))?;
+                    let v = v.trim();
+                    use comindly::config::Setting;
+                    let value = match (k.trim(), v) {
+                        (_, "") => Setting::Remove,
+                        ("record_names", v) => {
+                            Setting::Flag(v.parse().context("record_names is true or false")?)
+                        }
+                        ("cache_ttl_secs", v) => Setting::Number(
+                            v.parse::<i64>()
+                                .context("cache_ttl_secs is a number of seconds")?
+                                .max(30),
+                        ),
+                        ("index_dir", v) => Setting::Text(comindly::config::expand_tilde(v)),
+                        (_, v) => Setting::Text(v.to_string()),
+                    };
+                    changes.push((k.trim(), value));
                 }
-                Err(e) => {
-                    comindly::ui::err(&comindly::storage::explain(&format!("{e:#}")));
-                    ExitCode::FAILURE
+                comindly::config::update(&changes)?;
+                comindly::ui::ok("saved");
+            }
+            ConfigAction::Import { file, replace } => {
+                let text =
+                    std::fs::read_to_string(&file).with_context(|| format!("read {file}"))?;
+                let r = comindly::config::import(&text, replace)?;
+                comindly::ui::ok(if r.changed {
+                    "imported"
+                } else {
+                    "nothing to change"
+                });
+                if !r.kept.is_empty() {
+                    comindly::ui::note(&format!(
+                        "kept your current {}; --override replaces them with the file's",
+                        r.kept.join(", ")
+                    ));
+                }
+                if r.moved {
+                    comindly::ui::note(
+                        "its models, LLM steps and limits went to the index's shared settings (`comindly team`)",
+                    );
                 }
             }
+            ConfigAction::Export { file } => {
+                let text = comindly::config::export(&comindly::config::stored()?.doc)?;
+                match file {
+                    Some(f) => {
+                        std::fs::write(&f, text).with_context(|| format!("write {f}"))?;
+                        comindly::ui::ok(&format!("wrote {f}"));
+                    }
+                    None => print!("{text}"),
+                }
+            }
+            ConfigAction::History => {
+                for v in comindly::config::history()? {
+                    comindly::ui::field(
+                        &format!("v{}", v.version),
+                        &format!("{} by {}", v.changed_at, v.changed_by),
+                    );
+                }
+            }
+            ConfigAction::Path => {
+                // Plain on stdout so `$(comindly config path)` is scriptable.
+                println!("{}", comindly::config::store_path().display());
+                comindly::ui::field(
+                    "index dir",
+                    &comindly::config::Config::load().index_dir(None),
+                );
+            }
+        }
+        Ok(())
+    };
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            comindly::ui::err(&format!("{e:#}"));
+            ExitCode::FAILURE
         }
     }
-}
-
-/// Interactive y/N prompt (caller guarantees a TTY). `y`/`yes` = overwrite; anything else = keep.
-fn prompt_yes(path: &Path) -> bool {
-    use std::io::Write;
-    comindly::ui::warn(&format!(
-        "{} already exists; overwriting resets every value to its default.",
-        path.display()
-    ));
-    eprint!("Overwrite it? [y/N] ");
-    let _ = std::io::stderr().flush();
-    let mut line = String::new();
-    if std::io::stdin().read_line(&mut line).is_err() {
-        return false;
-    }
-    matches!(line.trim().to_ascii_lowercase().as_str(), "y" | "yes")
 }
 
 fn repo_name(path: &str) -> String {

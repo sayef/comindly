@@ -117,7 +117,8 @@ struct AppState {
     /// The loaded index's shared settings.
     team: std::sync::RwLock<crate::team::TeamSettings>,
     /// `config.toml` as last read, with the file's modification time.
-    config: std::sync::Mutex<(Arc<crate::config::Config>, Option<std::time::SystemTime>)>,
+    /// Your preferences as last read, and when; `None` reads them again.
+    config: std::sync::Mutex<(Arc<crate::config::Config>, Option<std::time::Instant>)>,
     /// What agents reach at `/mcp` on a server.
     mcp: Option<crate::mcp::Shared>,
     mcp_generation: Arc<std::sync::atomic::AtomicU64>,
@@ -207,15 +208,23 @@ impl Session {
 
 impl AppState {
     /// `config.toml`, read again only when the file changed.
+    /// Your preferences, read again every few seconds: the CLI may change them too.
     fn config(&self) -> Arc<crate::config::Config> {
-        let modified = std::fs::metadata(crate::config::config_path())
-            .and_then(|m| m.modified())
-            .ok();
         let mut c = self.config.lock().unwrap_or_else(|e| e.into_inner());
-        if c.1 != modified {
-            *c = (Arc::new(crate::config::Config::load()), modified);
+        if c.1
+            .is_none_or(|t| t.elapsed() > std::time::Duration::from_secs(5))
+        {
+            *c = (
+                Arc::new(crate::config::Config::load()),
+                Some(std::time::Instant::now()),
+            );
         }
         c.0.clone()
+    }
+
+    /// After a change here: read the preferences again on next use.
+    fn config_changed(&self) {
+        self.config.lock().unwrap_or_else(|e| e.into_inner()).1 = None;
     }
 
     fn team(&self) -> crate::team::TeamSettings {
@@ -242,7 +251,7 @@ impl AppState {
     fn set_repos(&self, by: Option<&str>, list: &[crate::config::RepoEntry]) -> Result<()> {
         match &self.server {
             Some(s) => s.settings.set_repos(by.unwrap_or("admin"), list),
-            None => crate::config::set_repos(list),
+            None => crate::config::set_repos(list).map(|()| self.config_changed()),
         }
     }
 
@@ -305,9 +314,6 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
         Access::Local(_) => None,
     };
     let cfg = Arc::new(crate::config::Config::load());
-    let modified = std::fs::metadata(crate::config::config_path())
-        .and_then(|m| m.modified())
-        .ok();
     let team = match &root {
         Some(r) => rt
             .block_on(crate::team::load(r))
@@ -318,7 +324,7 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
     let state = Arc::new(AppState {
         team: std::sync::RwLock::new(team),
         current: RwLock::new(Arc::new(rt.block_on(Session::open(data, cfg.fresh())))),
-        config: std::sync::Mutex::new((cfg, modified)),
+        config: std::sync::Mutex::new((cfg, Some(std::time::Instant::now()))),
         jobs: crate::jobs::Jobs::new(
             match &server {
                 Some(s) => s.jobs.clone(),

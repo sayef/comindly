@@ -37,3 +37,17 @@ where
         Err(_) => shared().block_on(f),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blocking_calls_nest_inside_the_runtime_and_its_workers() {
+        let from_main = shared().block_on(async { block_on(async { block_on(async { 1 }) }) });
+        let on_worker = shared()
+            .block_on(shared().spawn(async { block_on(async { block_on(async { 2 }) }) }))
+            .unwrap();
+        assert_eq!((from_main, on_worker), (1, 2));
+    }
+}

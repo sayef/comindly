@@ -25,7 +25,7 @@ pub(super) async fn get(State(app): State<Shared>, Cur(s): Cur) -> Json<Value> {
     .await
     .unwrap_or(crate::credentials::Source::None);
     Json(json!({
-        "config_path": crate::config::config_path(),
+        "config_path": crate::config::store_path(),
         "index_dir": cfg.index_dir,
         "index_effective": root,
         "author_name": cfg.author_name,
@@ -83,6 +83,7 @@ pub(super) async fn save(State(app): State<Shared>, Json(c): Json<Changes>) -> i
             message = format!("saved; now showing {dir}");
         }
         crate::config::update(&changes)?;
+        app.config_changed();
         anyhow::Ok(message)
     };
     match run.await {

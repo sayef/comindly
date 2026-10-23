@@ -181,7 +181,7 @@ fn open_external(url: &str) {
 }
 
 fn root_hint() -> String {
-    crate::config::config_path().display().to_string()
+    crate::config::store_path().display().to_string()
 }
 
 fn escape(s: &str) -> String {
