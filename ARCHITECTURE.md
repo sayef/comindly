@@ -127,7 +127,7 @@ re-exports core, so `comindly::graph` is `comindly_core::graph`.
 
 | Area | Modules |
 |---|---|
-| HTTP | `web` and `web/*` (`/api/v1`, the embedded app, `/health`, `/ready`, graceful shutdown), `mcp` (the tools, over streamable HTTP and stdio) |
+| HTTP | `api` (every route's request and answer types), `web` and `web/*` (`/api/v1`, the embedded app, `/health`, `/ready`, graceful shutdown), `mcp` (the tools, over streamable HTTP and stdio) |
 | Access | `server` (`ServerConfig`, roles, the default account store), `backends` (the traits and SMTP) |
 | Work | `jobs` (runner, cancellation, records, live events) |
 | This machine | `config` (preferences, identity and signing), `credentials` (API keys and the server sign-in), `doctor`, `cache` (the hooks' local mirror), `ui` (events as terminal lines or JSON logs) |
@@ -231,6 +231,9 @@ person whose token the agent uses.
   and on a server, so `--server` prints what a local run does. `/api/v1/view` sends the terminal UI
   `comindly_core::view::View` (symbols, edges, ledger entries, conventions, dependencies), gzip-compressed;
   the client rebuilds the graph and contracts from it.
+- Types: every route's request and answer is a type in `comindly_server::api` (grouped by area,
+  reusing domain types such as `answers::*`, `graph::Node` and `jobs::JobRecord`); handlers return them and
+  the CLI's client reads them, so the server and the command line cannot disagree on a shape.
 - Errors: one shape, `{ "error": { "code", "message" } }`, with HTTP status codes that mean what they say.
 - `/mcp`: MCP over streamable HTTP for agents, with a personal access token.
 - `/health` (alive) and `/ready` (an index is loaded and the accounts can be read).
