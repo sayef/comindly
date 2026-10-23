@@ -12,29 +12,62 @@ use serde_json::json;
 use tokio::sync::broadcast::error::RecvError;
 
 use super::Shared;
+use crate::events::{Event, Kind, Level};
+use crate::jobs::Status;
 
+/// Most recent first; waiting jobs carry their `position`, 1 for the next to run.
 pub(super) async fn list(State(app): State<Shared>) -> Response {
-    Json(json!({"jobs": app.jobs.list(crate::jobs::MAX_JOBS)})).into_response()
+    let jobs: Vec<_> = app
+        .jobs
+        .list(crate::jobs::MAX_JOBS)
+        .into_iter()
+        .map(|j| {
+            let mut v = json!(j);
+            if j.status == Status::Queued {
+                v["position"] = json!(app.jobs.position(&j.id));
+            }
+            v
+        })
+        .collect();
+    Json(json!({"jobs": jobs})).into_response()
 }
 
 pub(super) async fn one(State(app): State<Shared>, Path(id): Path<String>) -> Response {
     match app.jobs.get(&id) {
-        Some((job, events)) => Json(json!({"job": job, "events": events})).into_response(),
+        Some((job, events)) => {
+            let position = app.jobs.position(&id);
+            Json(json!({"job": job, "events": events, "position": position})).into_response()
+        }
         None => missing(),
     }
 }
 
-/// The job's events so far, then new ones as they happen; ends when the job does.
+/// The job's events so far, then new ones as they happen; ends when the job does. While it waits
+/// in the queue, a note says its position each time that changes.
 pub(super) async fn events(State(app): State<Shared>, Path(id): Path<String>) -> Response {
     let events: BoxStream<'static, Result<Sse, Infallible>> = match app.jobs.live(&id) {
         Some(job) => {
             let (past, rx) = job.follow();
-            let live = stream::unfold((rx, job), |(mut rx, job)| async move {
+            let state = (rx, job, app.clone(), None::<usize>);
+            let live = stream::unfold(state, |(mut rx, job, app, mut at)| async move {
                 loop {
+                    if job.record().status == Status::Queued {
+                        let now = app.jobs.position(&job.record().id);
+                        if now.is_some() && now != at {
+                            at = now;
+                            let mut e = Event::new(
+                                Level::Info,
+                                Kind::Note,
+                                format!("queued (position {})", now.unwrap_or(1)),
+                            );
+                            e.job_id = Some(job.record().id);
+                            return Some((event(e), (rx, job, app, at)));
+                        }
+                    }
                     tokio::select! {
                         biased;
                         r = rx.recv() => match r {
-                            Ok(e) => return Some((event(e), (rx, job))),
+                            Ok(e) => return Some((event(e), (rx, job, app, at))),
                             Err(RecvError::Lagged(_)) => continue,
                             Err(RecvError::Closed) => return None,
                         },
@@ -64,17 +97,15 @@ pub(super) async fn events(State(app): State<Shared>, Path(id): Path<String>) ->
 }
 
 pub(super) async fn cancel(State(app): State<Shared>, Path(id): Path<String>) -> Response {
-    match app.jobs.live(&id) {
-        Some(job) => {
-            job.cancel.cancel();
-            Json(json!({"ok": true, "message": "cancelling; work already saved stays"}))
-                .into_response()
-        }
-        None => Json(json!({"ok": true, "message": "that job is not running"})).into_response(),
-    }
+    let message = match app.jobs.cancel(&id) {
+        Some(Status::Queued) => "removed from the queue",
+        Some(_) => "cancelling; work already saved stays",
+        None => "that job is not running or queued",
+    };
+    Json(json!({"ok": true, "message": message})).into_response()
 }
 
-fn event(e: crate::events::Event) -> Result<Sse, Infallible> {
+fn event(e: Event) -> Result<Sse, Infallible> {
     Ok(Sse::default()
         .event("event")
         .json_data(&e)

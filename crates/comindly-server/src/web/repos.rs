@@ -219,8 +219,15 @@ pub(super) async fn cancel(State(app): State<Shared>) -> impl IntoResponse {
 }
 
 pub(super) async fn job(State(app): State<Shared>) -> Json<Value> {
+    let queued: Vec<Value> = app
+        .jobs
+        .queued()
+        .iter()
+        .enumerate()
+        .map(|(i, q)| json!({"id": q.id, "kind": q.kind, "position": i + 1, "started_by": q.started_by, "created": q.created}))
+        .collect();
     let Some((j, events)) = app.jobs.latest() else {
-        return Json(json!({"running": false, "events": []}));
+        return Json(json!({"running": false, "events": [], "queued": queued}));
     };
     Json(json!({
         "id": j.id,
@@ -229,8 +236,9 @@ pub(super) async fn job(State(app): State<Shared>) -> Json<Value> {
         "ok": j.status.finished().then_some(j.status == Status::Succeeded),
         "status": j.status,
         "events": events,
-        "started": j.created,
+        "started": j.started.unwrap_or(j.created),
         "finished": j.finished,
+        "queued": queued,
     }))
 }
 
@@ -250,25 +258,35 @@ pub(super) async fn start(
 ) -> impl IntoResponse {
     let by = who.map(|w| w.email.clone());
     match begin(&app, q.llm, q.drop_unlisted, None, by).await {
-        Ok(id) => (
-            StatusCode::OK,
-            Json(json!({"ok": true, "message": "indexing started", "id": id})),
-        ),
+        Ok(s) => {
+            let message = match (s.position, s.coalesced) {
+                (None, _) => "indexing started".to_string(),
+                (Some(n), false) => format!("queued (position {n})"),
+                (Some(n), true) => format!("the same indexing is already queued (position {n})"),
+            };
+            let r = s.job.record();
+            (
+                StatusCode::OK,
+                Json(
+                    json!({"ok": true, "message": message, "id": r.id, "status": r.status, "position": s.position}),
+                ),
+            )
+        }
         Err(e) => fail(e),
     }
 }
 
-/// Start `comindly link` over the listed repositories into the loaded index; the page follows
-/// `/api/index` and the UI switches to the new index when it succeeds. `why` opens the log.
+/// Queue `comindly link` over the listed repositories into the loaded index; it runs when the jobs
+/// before it end, with the repositories and settings of that moment. `why` opens the log.
 pub(super) async fn begin(
     app: &Shared,
     llm: bool,
     drop_unlisted: bool,
     why: Option<String>,
     by: Option<String>,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<crate::jobs::Submitted> {
     let session = app.current.read().await.clone();
-    let root = session.data.root.clone().context("read-only UI")?;
+    session.data.root.clone().context("read-only UI")?;
     if !drop_unlisted {
         let indexed = session.data.graph.repos().into_iter().collect();
         let listed: Vec<String> = app
@@ -286,46 +304,55 @@ pub(super) async fn begin(
             missing.join(", ")
         );
     }
-    anyhow::ensure!(app.jobs.running().is_none(), "indexing is already running");
-    let repos = app.repos();
-    let team = crate::team::load(&root)
-        .await
-        .map(|t| t.settings)
-        .unwrap_or_default();
-    let mut settings = crate::context::Settings::resolve(&team, crate::config::env);
-    if !llm {
-        settings.enrich = false;
-        settings.flows = false;
-        settings.guide = false;
-    }
-    let client = if settings.enrich || settings.flows || settings.guide {
-        let key = crate::credentials::llm_key(team.name.as_deref(), app.server.as_deref()).0;
-        crate::llm::LlmClient::new(
-            settings.llm_base_url.as_deref(),
-            &settings.llm_model,
-            key.as_deref(),
-        )
-        .ok()
-    } else {
-        None
-    };
-    let scip = settings.scip;
-    let git = crate::config::git_credentials(app.server.clone());
-    let app2 = app.clone();
-    let job = app.jobs.start("index", by, move |job| {
-        if let Some(w) = why {
-            job.emit(Event::new(Level::Info, Kind::Note, w));
-        }
-        let mut ctx = crate::context::IndexContext::new(
-            root.clone(),
-            settings,
-            job.clone(),
-            crate::config::cache_dir(),
-        )
-        .with_llm(client)
-        .with_git(git);
-        ctx.cancel = job.cancel.clone();
+    let app = app.clone();
+    let key = format!("llm={llm} drop_unlisted={drop_unlisted}");
+    app.clone().jobs.submit("index", &key, by, move |job| {
         Box::pin(async move {
+            if let Some(w) = why {
+                job.emit(Event::new(Level::Info, Kind::Note, w));
+            }
+            let root = app
+                .current
+                .read()
+                .await
+                .data
+                .root
+                .clone()
+                .context("read-only UI")?;
+            let repos = app.repos();
+            let team = crate::team::load(&root)
+                .await
+                .map(|t| t.settings)
+                .unwrap_or_default();
+            let mut settings = crate::context::Settings::resolve(&team, crate::config::env);
+            if !llm {
+                settings.enrich = false;
+                settings.flows = false;
+                settings.guide = false;
+            }
+            let client = if settings.enrich || settings.flows || settings.guide {
+                let key =
+                    crate::credentials::llm_key(team.name.as_deref(), app.server.as_deref()).0;
+                crate::llm::LlmClient::new(
+                    settings.llm_base_url.as_deref(),
+                    &settings.llm_model,
+                    key.as_deref(),
+                )
+                .ok()
+            } else {
+                None
+            };
+            let scip = settings.scip;
+            let creds = crate::config::git_credentials(app.server.clone());
+            let mut ctx = crate::context::IndexContext::new(
+                root.clone(),
+                settings,
+                job.clone(),
+                crate::config::cache_dir(),
+            )
+            .with_llm(client)
+            .with_git(creds);
+            ctx.cancel = job.cancel.clone();
             let run = async {
                 let sources =
                     crate::pipeline::checkout(&ctx, &crate::config::expanded(&repos)).await?;
@@ -333,7 +360,7 @@ pub(super) async fn begin(
             };
             match run.await {
                 Ok(_) => {
-                    if let Err(e) = app2.reload(&root).await {
+                    if let Err(e) = app.reload(&root).await {
                         ctx.report.error(format!("reload failed: {e:#}"));
                     }
                     Ok(())
@@ -348,8 +375,7 @@ pub(super) async fn begin(
                 }
             }
         })
-    })?;
-    Ok(job.record().id)
+    })
 }
 
 /// What the automatic re-index last found.
@@ -360,7 +386,7 @@ pub(super) struct Watch {
 }
 
 /// With `auto_index` on, check every freshness interval whether a default branch moved on the
-/// remote (`git ls-remote`, no download) and re-index when one did.
+/// remote (`git ls-remote`, no download) and queue a re-index when one did.
 pub(super) async fn watch(app: Shared) {
     loop {
         let fresh = app.config().fresh();
@@ -373,6 +399,8 @@ pub(super) async fn watch(app: Shared) {
             Ok(m) => {
                 let why = format!("Automatic re-index: {} moved", m.join(", "));
                 match begin(&app, false, false, Some(why.clone()), None).await {
+                    Ok(s) if s.coalesced => format!("{why}; a re-index is already queued"),
+                    Ok(s) if s.position.is_some() => format!("{why}; queued"),
                     Ok(_) => why,
                     Err(e) => format!("{why}, not started: {e:#}"),
                 }

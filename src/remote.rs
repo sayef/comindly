@@ -221,7 +221,8 @@ where
     })
 }
 
-/// Start indexing on the server and follow it here; Ctrl-C cancels the job, not just this view.
+/// Start or queue indexing on the server and follow it here; Ctrl-C cancels the job, not just
+/// this view, and a queued one leaves the queue.
 fn index(c: &Client, llm: bool) -> ExitCode {
     use comindly::events::EventSink;
     let run = async {
@@ -235,16 +236,22 @@ fn index(c: &Client, llm: bool) -> ExitCode {
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("the server did not say which job started"))?
             .to_string();
-        comindly::ui::note(&format!("indexing on {} (job {id})", c.base()));
+        match started["position"].as_u64() {
+            Some(_) => comindly::ui::note(&format!(
+                "waiting on {} (job {id}); it starts when the jobs before it end",
+                c.base()
+            )),
+            None => comindly::ui::note(&format!("indexing on {} (job {id})", c.base())),
+        }
         let out = comindly::ui::Terminal::new();
         let follow = c.follow(&id, |e| out.emit(e));
         tokio::pin!(follow);
         tokio::select! {
             r = &mut follow => r?,
             _ = tokio::signal::ctrl_c() => {
-                comindly::ui::warn("cancelling the job on the server; work already saved stays");
-                let _: serde_json::Value =
+                let r: serde_json::Value =
                     c.post(&format!("/api/v1/jobs/{id}/cancel"), &json!({})).await?;
+                comindly::ui::warn(r["message"].as_str().unwrap_or("cancelling the job on the server"));
                 follow.await?;
             }
         }

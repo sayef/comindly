@@ -457,7 +457,7 @@ async fn shutdown(app: Shared) {
         _ = term => {}
     }
     crate::ui::note("stopping");
-    if let Some(job) = app.jobs.running() {
+    if let Some(job) = app.jobs.shutdown() {
         job.cancel.cancel();
         let _ = tokio::time::timeout(std::time::Duration::from_secs(20), job.wait()).await;
     }
