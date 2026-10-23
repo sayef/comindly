@@ -30,6 +30,36 @@ pub fn client(server: Option<&str>, local: bool) -> Option<Client> {
     }
 }
 
+/// Doctor's line for the server: who this machine is signed in as, and whether that still works.
+pub fn sign_in_check(c: &Client) -> comindly::doctor::Check {
+    let me = comindly::rt::block_on(c.get::<serde_json::Value>("/api/v1/auth/me", &[]));
+    let (ok, message) = match me {
+        Ok(m) if m["signed_in"] == true => (
+            true,
+            format!(
+                "signed in to {} as {} ({})",
+                c.base(),
+                m["email"].as_str().unwrap_or("?"),
+                m["role"].as_str().unwrap_or("?")
+            ),
+        ),
+        Ok(m) if m["mode"] == "server" => (
+            false,
+            format!(
+                "not signed in to {0}, or the sign-in has ended: run `comindly login {0}`",
+                c.base()
+            ),
+        ),
+        Ok(_) => (false, format!("{} is not a comindly server", c.base())),
+        Err(e) => (false, format!("{e:#}")),
+    };
+    comindly::doctor::Check {
+        ok,
+        optional: false,
+        message,
+    }
+}
+
 /// Run `cmd` against the server when it is one the server answers; `None` runs it locally.
 pub fn dispatch(c: &Client, cmd: &Cmd) -> Option<ExitCode> {
     let q = |pairs: &[(&'static str, String)]| pairs.to_vec();

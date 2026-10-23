@@ -693,7 +693,10 @@ fn main() -> ExitCode {
             index_dir,
         } => cmd_hook(&agent, &event, index_dir.as_deref()),
         Cmd::InitHooks { agent } => cmd_init_hooks(&agent),
-        Cmd::Doctor { index_dir } => cmd_doctor(index_dir.as_deref()),
+        Cmd::Doctor { index_dir } => cmd_doctor(
+            index_dir.as_deref(),
+            remote::client(cli.server.as_deref(), cli.local),
+        ),
         Cmd::Cache {
             what: CacheWhat::Refresh { index_dir },
         } => {
@@ -2007,7 +2010,7 @@ fn settings_for(from: Option<&str>) -> comindly::context::Settings {
     comindly::rt::block_on(comindly::config::index_settings(&root))
 }
 
-fn cmd_doctor(from: Option<&str>) -> ExitCode {
+fn cmd_doctor(from: Option<&str>, server: Option<comindly::client::Client>) -> ExitCode {
     let cfg = comindly::config::Config::load();
     let root = cfg.index_dir(from);
     comindly::ui::header("comindly doctor");
@@ -2015,7 +2018,8 @@ fn cmd_doctor(from: Option<&str>) -> ExitCode {
     let team = comindly::rt::block_on(comindly::team::load(&root))
         .map(|t| t.settings)
         .unwrap_or_default();
-    let checks = comindly::doctor::run(&team, None, &root);
+    let mut checks = comindly::doctor::run(&team, None, &root);
+    checks.extend(server.map(|c| remote::sign_in_check(&c)));
     for c in &checks {
         if c.ok {
             comindly::ui::ok(&c.message);
