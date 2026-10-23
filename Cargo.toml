@@ -53,7 +53,7 @@ sqlparser = "0.63"
 object_store = { version = "0.13.2", default-features = false, features = ["fs"] }
 uuid = { version = "1.24", features = ["v4", "v7", "serde", "v5"] }
 # Server mode: members, sessions and encrypted tokens in SQLite; sign-in links by email.
-chacha20poly1305 = "0.10"
+chacha20poly1305 = "0.11"
 getrandom = "0.3"
 lettre = { version = "0.11.23", default-features = false, features = ["smtp-transport", "builder", "hostname", "tokio1", "tokio1-rustls", "aws-lc-rs", "webpki-roots"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

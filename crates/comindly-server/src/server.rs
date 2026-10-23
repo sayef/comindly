@@ -348,7 +348,7 @@ fn seal(key: &str, name: &str, value: &str) -> Result<(Vec<u8>, Vec<u8>)> {
         aad: name.as_bytes(),
     };
     let sealed = cipher(key)
-        .encrypt(XNonce::from_slice(&nonce), payload)
+        .encrypt(&XNonce::from(nonce), payload)
         .map_err(|_| anyhow::anyhow!("encryption failed"))?;
     Ok((sealed, nonce.to_vec()))
 }
@@ -359,7 +359,7 @@ fn open(key: &str, name: &str, sealed: &[u8], nonce: &[u8]) -> Option<String> {
         aad: name.as_bytes(),
     };
     let plain = cipher(key)
-        .decrypt(XNonce::from_slice(nonce), payload)
+        .decrypt(&XNonce::try_from(nonce).ok()?, payload)
         .ok()?;
     String::from_utf8(plain).ok()
 }
