@@ -517,6 +517,7 @@ enum ConfigAction {
 }
 
 fn main() -> ExitCode {
+    let _telemetry = comindly::telemetry::init();
     let matches = Cli::command().get_matches();
     // An older config.toml is imported once; a server keeps its settings in its database.
     if std::env::var_os("COMINDLY_PUBLIC_URL").is_none() {

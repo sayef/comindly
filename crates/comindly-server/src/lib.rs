@@ -12,5 +12,6 @@ pub mod doctor;
 pub mod jobs;
 pub mod mcp;
 pub mod server;
+pub mod telemetry;
 pub mod ui;
 pub mod web;

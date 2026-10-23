@@ -253,11 +253,13 @@ pub(super) struct IndexQ {
 
 pub(super) async fn start(
     who: super::Member,
+    rid: Option<axum::Extension<super::RequestId>>,
     State(app): State<Shared>,
     Json(q): Json<IndexQ>,
 ) -> impl IntoResponse {
     let by = who.map(|w| w.email.clone());
-    match begin(&app, q.llm, q.drop_unlisted, None, by).await {
+    let rid = rid.map(|r| r.0 .0);
+    match begin(&app, q.llm, q.drop_unlisted, None, by, rid).await {
         Ok(s) => {
             let message = match (s.position, s.coalesced) {
                 (None, _) => "indexing started".to_string(),
@@ -284,6 +286,7 @@ pub(super) async fn begin(
     drop_unlisted: bool,
     why: Option<String>,
     by: Option<String>,
+    request_id: Option<String>,
 ) -> anyhow::Result<crate::jobs::Submitted> {
     let session = app.current.read().await.clone();
     session.data.root.clone().context("read-only UI")?;
@@ -306,7 +309,7 @@ pub(super) async fn begin(
     }
     let app = app.clone();
     let key = format!("llm={llm} drop_unlisted={drop_unlisted}");
-    app.clone().jobs.submit("index", &key, by, move |job| {
+    app.clone().jobs.submit("index", &key, by, request_id, move |job| {
         Box::pin(async move {
             if let Some(w) = why {
                 job.emit(Event::new(Level::Info, Kind::Note, w));
@@ -398,7 +401,7 @@ pub(super) async fn watch(app: Shared) {
             Ok(m) if m.is_empty() => "every default branch is indexed".to_string(),
             Ok(m) => {
                 let why = format!("Automatic re-index: {} moved", m.join(", "));
-                match begin(&app, false, false, Some(why.clone()), None).await {
+                match begin(&app, false, false, Some(why.clone()), None, None).await {
                     Ok(s) if s.coalesced => format!("{why}; a re-index is already queued"),
                     Ok(s) if s.position.is_some() => format!("{why}; queued"),
                     Ok(_) => why,

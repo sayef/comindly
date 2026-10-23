@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use console::style;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
+use tracing::Level;
 
 /// One JSON object per line instead of styled text, for platform logs (`COMINDLY_LOG_FORMAT=json`).
 pub fn json_logs() -> bool {
@@ -34,25 +35,75 @@ fn usage_now() -> &'static Mutex<Option<Usage>> {
     USAGE.get_or_init(Default::default)
 }
 
-/// A structured event as one JSON line: `level` (info, warn, error), `kind` (step, done, note,
-/// warning, error, progress), the current step, the message and any `fields`.
-pub fn event(level: &str, kind: &str, message: &str, fields: serde_json::Value) {
-    let mut e = serde_json::json!({
-        "timestamp": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-        "level": level,
-        "kind": kind,
-        "message": message,
-    });
-    let step = current_step().lock().map(|s| s.clone()).unwrap_or_default();
-    if !step.is_empty() {
-        e["step"] = step.into();
-    }
-    if let serde_json::Value::Object(f) = fields {
-        for (k, v) in f {
-            e[k] = v;
+/// The fields a log line may carry besides its level, kind and message.
+#[derive(Default)]
+struct Extra {
+    step: Option<String>,
+    job_id: Option<String>,
+    done: Option<u64>,
+    total: Option<u64>,
+    tokens_in: Option<u64>,
+    tokens_out: Option<u64>,
+    usd: Option<f64>,
+}
+
+impl Extra {
+    fn here() -> Self {
+        let step = current_step().lock().map(|s| s.clone()).unwrap_or_default();
+        Extra {
+            step: (!step.is_empty()).then_some(step),
+            ..Default::default()
         }
     }
-    eprintln!("{e}");
+}
+
+/// One log line as a `tracing` event, rendered by [`crate::telemetry`]; `line` is its readable
+/// form. Without a subscriber (tests, embedders) the line is written to stderr directly.
+fn emit(level: Level, kind: &str, message: &str, x: Extra, line: impl FnOnce() -> String) {
+    let line = (!json_logs()).then(line);
+    let routed = tracing::dispatcher::get_default(|d| !d.is::<tracing::subscriber::NoSubscriber>());
+    if !routed {
+        let mut f = serde_json::Map::new();
+        f.insert("kind".into(), kind.into());
+        f.insert("message".into(), message.into());
+        let opt = |f: &mut serde_json::Map<_, _>, k: &str, v: Option<serde_json::Value>| {
+            if let Some(v) = v {
+                f.insert(k.to_string(), v);
+            }
+        };
+        opt(&mut f, "step", x.step.map(Into::into));
+        opt(&mut f, "job_id", x.job_id.map(Into::into));
+        opt(&mut f, "done", x.done.map(Into::into));
+        opt(&mut f, "total", x.total.map(Into::into));
+        opt(&mut f, "tokens_in", x.tokens_in.map(Into::into));
+        opt(&mut f, "tokens_out", x.tokens_out.map(Into::into));
+        opt(&mut f, "usd", x.usd.map(Into::into));
+        opt(&mut f, "line", line.map(Into::into));
+        eprintln!("{}", crate::telemetry::render(level, f, json_logs()));
+        return;
+    }
+    macro_rules! at {
+        ($l:expr) => {
+            tracing::event!(
+                $l,
+                kind,
+                step = x.step.as_deref(),
+                job_id = x.job_id.as_deref(),
+                done = x.done,
+                total = x.total,
+                tokens_in = x.tokens_in,
+                tokens_out = x.tokens_out,
+                usd = x.usd,
+                line = line.as_deref(),
+                "{message}"
+            )
+        };
+    }
+    match level {
+        Level::ERROR => at!(Level::ERROR),
+        Level::WARN => at!(Level::WARN),
+        _ => at!(Level::INFO),
+    }
 }
 
 /// Bold section header.
@@ -61,68 +112,62 @@ pub fn header(title: &str) {
         if let Ok(mut s) = current_step().lock() {
             *s = title.to_string();
         }
-        return event("info", "step", title, serde_json::Value::Null);
     }
-    eprintln!("\n{}", style(title).bold().cyan());
+    emit(Level::INFO, "step", title, Extra::here(), || {
+        format!("\n{}", style(title).bold().cyan())
+    });
 }
 
 /// Success line (`✓`).
 pub fn ok(msg: &str) {
-    if json_logs() {
-        return event("info", "done", msg, serde_json::Value::Null);
-    }
-    eprintln!("{} {msg}", style("✓").green().bold());
+    emit(Level::INFO, "done", msg, Extra::here(), || {
+        format!("{} {msg}", style("✓").green().bold())
+    });
 }
 
 /// Warning line (`!`).
 pub fn warn(msg: &str) {
-    if json_logs() {
-        return event("warn", "warning", msg, serde_json::Value::Null);
-    }
-    eprintln!("{} {msg}", style("!").yellow().bold());
+    emit(Level::WARN, "warning", msg, Extra::here(), || {
+        format!("{} {msg}", style("!").yellow().bold())
+    });
 }
 
 /// Error line (`✗`).
 pub fn err(msg: &str) {
-    if json_logs() {
-        return event("error", "error", msg, serde_json::Value::Null);
-    }
-    eprintln!("{} {msg}", style("✗").red().bold());
+    emit(Level::ERROR, "error", msg, Extra::here(), || {
+        format!("{} {msg}", style("✗").red().bold())
+    });
 }
 
 /// In-progress step (`→`).
 pub fn step(msg: &str) {
-    if json_logs() {
-        return event("info", "note", msg, serde_json::Value::Null);
-    }
-    eprintln!("{} {msg}", style("→").cyan().bold());
+    emit(Level::INFO, "note", msg, Extra::here(), || {
+        format!("{} {msg}", style("→").cyan().bold())
+    });
 }
 
 /// Dim, indented detail line.
 pub fn note(msg: &str) {
-    if json_logs() {
-        return event("info", "note", msg, serde_json::Value::Null);
-    }
-    eprintln!("  {}", style(msg).dim());
+    emit(Level::INFO, "note", msg, Extra::here(), || {
+        format!("  {}", style(msg).dim())
+    });
 }
 
 /// Dim `label:` followed by a value.
 pub fn field(label: &str, value: &str) {
-    if json_logs() {
-        return event(
-            "info",
-            "note",
-            &format!("{label}: {value}"),
-            serde_json::Value::Null,
-        );
-    }
-    eprintln!("  {} {value}", style(format!("{label}:")).dim());
+    emit(
+        Level::INFO,
+        "note",
+        &format!("{label}: {value}"),
+        Extra::here(),
+        || format!("  {} {value}", style(format!("{label}:")).dim()),
+    );
 }
 
 /// Indeterminate spinner on stderr with a steady tick.
 pub fn spinner(msg: &str) -> ProgressBar {
     if json_logs() {
-        event("info", "note", msg, serde_json::Value::Null);
+        note(msg);
         return ProgressBar::hidden();
     }
     let pb = ProgressBar::with_draw_target(None, ProgressDrawTarget::stderr());
@@ -179,19 +224,19 @@ pub fn progress(len: u64, msg: &str) -> ProgressBar {
                 break;
             };
             let (done, total) = (p.position(), p.length().unwrap_or(0));
-            if json_logs() {
-                let mut f = serde_json::json!({"done": done, "total": total});
-                if let Some((i, o, usd)) = *usage_now().lock().unwrap_or_else(|e| e.into_inner()) {
-                    f["tokens_in"] = i.into();
-                    f["tokens_out"] = o.into();
-                    if let Some(u) = usd {
-                        f["usd"] = ((u * 10_000.0).round() / 10_000.0).into();
-                    }
-                }
-                event("info", "progress", &msg, f);
-            } else {
-                eprintln!("  {msg}: {done}/{total} · {}", p.message());
+            let mut x = Extra {
+                done: Some(done),
+                total: Some(total),
+                ..Extra::here()
+            };
+            if let Some((i, o, usd)) = *usage_now().lock().unwrap_or_else(|e| e.into_inner()) {
+                x.tokens_in = Some(i);
+                x.tokens_out = Some(o);
+                x.usd = usd.map(|u| (u * 10_000.0).round() / 10_000.0);
             }
+            emit(Level::INFO, "progress", &msg, x, || {
+                format!("  {msg}: {done}/{total} · {}", p.message())
+            });
         });
     }
     pb
@@ -241,14 +286,6 @@ impl crate::events::EventSink for Terminal {
         if e.kind != Kind::Progress {
             self.finish_bar();
         }
-        if json_logs() {
-            if e.kind != Kind::Progress || self.due() {
-                if let Ok(line) = serde_json::to_string(&e) {
-                    eprintln!("{line}");
-                }
-            }
-            return;
-        }
         let usage = e.tokens_in.map(|i| {
             crate::events::Usage {
                 tokens_in: i,
@@ -257,21 +294,50 @@ impl crate::events::EventSink for Terminal {
             }
             .to_string()
         });
+        let level = match e.level {
+            crate::events::Level::Info => Level::INFO,
+            crate::events::Level::Warn => Level::WARN,
+            crate::events::Level::Error => Level::ERROR,
+        };
+        let kind = serde_json::to_value(e.kind)
+            .ok()
+            .and_then(|k| k.as_str().map(str::to_string))
+            .unwrap_or_default();
+        let x = Extra {
+            step: e.step.clone(),
+            job_id: e.job_id.clone(),
+            done: e.done,
+            total: e.total,
+            tokens_in: e.tokens_in,
+            tokens_out: e.tokens_out,
+            usd: e.usd,
+        };
+        let m = &e.message;
+        let tty = std::io::IsTerminal::is_terminal(&std::io::stderr());
         match e.kind {
-            Kind::Step => eprintln!("\n{}", style(&e.message).bold().cyan()),
-            Kind::Done => eprintln!("{} {}", style("✓").green().bold(), e.message),
-            Kind::Note => eprintln!("  {}", style(&e.message).dim()),
-            Kind::Warning => eprintln!("{} {}", style("!").yellow().bold(), e.message),
-            Kind::Error => eprintln!("{} {}", style("✗").red().bold(), e.message),
+            Kind::Step => emit(level, &kind, m, x, || {
+                format!("\n{}", style(m).bold().cyan())
+            }),
+            Kind::Done => emit(level, &kind, m, x, || {
+                format!("{} {m}", style("✓").green().bold())
+            }),
+            Kind::Note => emit(level, &kind, m, x, || format!("  {}", style(m).dim())),
+            Kind::Warning => emit(level, &kind, m, x, || {
+                format!("{} {m}", style("!").yellow().bold())
+            }),
+            Kind::Error => emit(level, &kind, m, x, || {
+                format!("{} {m}", style("✗").red().bold())
+            }),
             Kind::Progress => {
                 let (done, total) = (e.done.unwrap_or(0), e.total.unwrap_or(0));
-                if !std::io::IsTerminal::is_terminal(&std::io::stderr()) {
+                if json_logs() || !tty {
                     if self.due() {
-                        eprintln!(
-                            "  {}: {done}/{total}{}",
-                            e.message,
-                            usage.map(|u| format!(" · {u}")).unwrap_or_default()
-                        );
+                        emit(level, &kind, m, x, || {
+                            format!(
+                                "  {m}: {done}/{total}{}",
+                                usage.map(|u| format!(" · {u}")).unwrap_or_default()
+                            )
+                        });
                     }
                     return;
                 }

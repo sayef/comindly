@@ -175,11 +175,12 @@ pub(super) async fn guard(
             .authenticate(session.as_deref(), token.as_deref())
             .unwrap_or(None)
     });
-    if let Some((w, _)) = &found {
+    let signed = found.as_ref().map(|(w, _)| w.clone());
+    if let Some(w) = &signed {
         req.extensions_mut().insert(w.clone());
     }
     if open {
-        return next.run(req).await;
+        return by(next.run(req).await, signed);
     }
     let Some((who, via)) = found else {
         if token.is_some() && session.is_none() {
@@ -215,7 +216,15 @@ pub(super) async fn guard(
         };
         return fail(StatusCode::FORBIDDEN, msg);
     }
-    next.run(req).await
+    by(next.run(req).await, signed)
+}
+
+/// Tells the access log who made the request.
+fn by(mut res: Response, who: Option<Who>) -> Response {
+    if let Some(w) = who {
+        res.extensions_mut().insert(w);
+    }
+    res
 }
 
 /// The names this server answers to: its public address, and localhost for checks on the host.

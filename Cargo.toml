@@ -13,7 +13,7 @@ authors = ["Saiful Islam"]
 
 [workspace.dependencies]
 comindly-core = { path = "crates/comindly-core", version = "0.3.4" }
-comindly-server = { path = "crates/comindly-server", version = "0.3.4" }
+comindly-server = { path = "crates/comindly-server", version = "0.3.4", default-features = false }
 comindly-ui = { path = "ui", version = "0.3.4" }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
@@ -60,8 +60,16 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 ratatui = { version = "0.30.2", default-features = false, features = ["crossterm_0_29", "layout-cache", "underline-color"] }
 crossterm = "0.29"
 globset = "0.4"
-axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio", "matched-path"] }
 tower-http = { version = "0.6", default-features = false, features = ["compression-gzip"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "registry"] }
+# OTLP trace export, behind the server's `otel` feature.
+opentelemetry = { version = "0.33", default-features = false, features = ["trace"] }
+opentelemetry_sdk = { version = "0.33", default-features = false, features = ["trace"] }
+opentelemetry-otlp = { version = "0.33", default-features = false, features = ["http-proto", "reqwest-blocking-client", "trace"] }
+tracing-opentelemetry = { version = "0.34", default-features = false }
+tower = { version = "0.5", default-features = false, features = ["util"] }
 yaml-rust2 = "0.13"
 hcl-rs = "0.19"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "query", "gzip"] }
@@ -98,8 +106,13 @@ path = "src/lib.rs"
 name = "comindly"
 path = "src/main.rs"
 
+[features]
+default = ["otel"]
+# OTLP trace export when OTEL_EXPORTER_OTLP_ENDPOINT is set.
+otel = ["comindly-server/otel"]
+
 [dependencies]
-comindly-server.workspace = true
+comindly-server = { workspace = true, default-features = false }
 anyhow.workspace = true
 clap.workspace = true
 comfy-table.workspace = true

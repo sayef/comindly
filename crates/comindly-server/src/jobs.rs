@@ -41,6 +41,9 @@ pub struct JobRecord {
     pub started: Option<String>,
     pub finished: Option<String>,
     pub error: Option<String>,
+    /// The request that started it, as in its `X-Request-Id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
 }
 
 /// Events kept per job.
@@ -92,6 +95,8 @@ pub struct Running {
     done: CancellationToken,
     /// Where events also go: the terminal or the server's log.
     out: Arc<dyn EventSink>,
+    /// The job's span, for its log lines and trace; closed when the job ends.
+    span: Mutex<tracing::Span>,
 }
 
 impl Running {
@@ -141,6 +146,8 @@ impl EventSink for Running {
         }
         drop(events);
         let _ = self.live.send(e.clone());
+        let span = self.span.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        let _in = span.enter();
         self.out.emit(e);
     }
 }
@@ -277,6 +284,7 @@ impl Jobs {
         kind: &str,
         key: &str,
         started_by: Option<String>,
+        request_id: Option<String>,
         work: impl FnOnce(Arc<Running>) -> BoxFuture<'static, Result<()>> + Send + 'static,
     ) -> Result<Submitted> {
         let mut line = self.line();
@@ -297,9 +305,22 @@ impl Jobs {
             !busy || line.queue.len() < MAX_QUEUED,
             "{MAX_QUEUED} jobs are already waiting; try again when one has run"
         );
+        let id = uuid::Uuid::new_v4().simple().to_string();
+        // Its own trace, linked to the request that started it.
+        let span = tracing::info_span!(
+            parent: None,
+            "job",
+            otel.name = %format!("job {kind}"),
+            job_id = %id,
+            kind,
+            request_id = request_id.as_deref(),
+            status = tracing::field::Empty,
+            otel.status_code = tracing::field::Empty,
+        );
+        span.follows_from(tracing::Span::current());
         let job = Arc::new(Running {
             record: Mutex::new(JobRecord {
-                id: uuid::Uuid::new_v4().simple().to_string(),
+                id,
                 kind: kind.to_string(),
                 started_by,
                 status: if busy {
@@ -311,12 +332,14 @@ impl Jobs {
                 started: (!busy).then(now),
                 finished: None,
                 error: None,
+                request_id,
             }),
             events: Default::default(),
             live: broadcast::channel(256).0,
             cancel: CancellationToken::new(),
             done: CancellationToken::new(),
             out: self.inner.out.clone(),
+            span: Mutex::new(span),
         });
         let work: Work = Box::new(work);
         let position = if busy {
@@ -386,8 +409,9 @@ const NOT_RUN: &str = "the server stopped before this job ran; start it again";
 
 /// Run `job` in the background; when it ends, the next waiting job starts.
 fn launch(inner: Arc<Inner>, job: Arc<Running>, work: Work) {
-    let run = work(job.clone());
-    tokio::spawn(async move {
+    let span = job.span.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let run = span.in_scope(|| work(job.clone()));
+    let task = async move {
         let s = inner.store.clone();
         save(&s, &job);
         let ticker = tokio::spawn({
@@ -414,11 +438,26 @@ fn launch(inner: Arc<Inner>, job: Arc<Running>, work: Work) {
                 }
             };
         }
+        close(&job);
         let saved = job.clone();
         let _ = tokio::task::spawn_blocking(move || save(&s, &saved)).await;
         job.done.cancel();
         next(inner);
-    });
+    };
+    tokio::spawn(tracing::Instrument::instrument(task, span));
+}
+
+/// Record how the job ended on its span and close it.
+fn close(job: &Running) {
+    let status = job.record().status;
+    let span = std::mem::replace(
+        &mut *job.span.lock().unwrap_or_else(|e| e.into_inner()),
+        tracing::Span::none(),
+    );
+    span.record("status", format!("{status:?}").to_lowercase());
+    if status == Status::Failed {
+        span.record("otel.status_code", "ERROR");
+    }
 }
 
 /// Start the next waiting job, if any.
@@ -449,6 +488,7 @@ fn end(store: &Arc<dyn JobStore>, job: &Running, status: Status, error: Option<S
         r.finished = Some(now());
         r.error = error;
     }
+    close(job);
     save(store, job);
     job.done.cancel();
 }
@@ -505,13 +545,13 @@ mod tests {
         let jobs = jobs(Default::default());
         let ran = Arc::new(Mutex::new(Vec::new()));
         let a = jobs
-            .submit("index", "a", None, blocking(ran.clone(), "a"))
+            .submit("index", "a", None, None, blocking(ran.clone(), "a"))
             .unwrap();
         let b = jobs
-            .submit("index", "b", None, blocking(ran.clone(), "b"))
+            .submit("index", "b", None, None, blocking(ran.clone(), "b"))
             .unwrap();
         let c = jobs
-            .submit("index", "c", None, blocking(ran.clone(), "c"))
+            .submit("index", "c", None, None, blocking(ran.clone(), "c"))
             .unwrap();
         assert_eq!(
             (a.position, b.position, c.position),
@@ -543,23 +583,23 @@ mod tests {
         let jobs = jobs(Default::default());
         let ran = Arc::new(Mutex::new(Vec::new()));
         let a = jobs
-            .submit("index", "x", None, blocking(ran.clone(), "a"))
+            .submit("index", "x", None, None, blocking(ran.clone(), "a"))
             .unwrap();
         // The running job does not absorb a new request: its input may already be stale.
         let b = jobs
-            .submit("index", "x", None, blocking(ran.clone(), "b"))
+            .submit("index", "x", None, None, blocking(ran.clone(), "b"))
             .unwrap();
         let again = jobs
-            .submit("index", "x", None, blocking(ran.clone(), "b2"))
+            .submit("index", "x", None, None, blocking(ran.clone(), "b2"))
             .unwrap();
         assert!(!b.coalesced && again.coalesced);
         assert_eq!(again.job.record().id, b.job.record().id);
         for k in 1..MAX_QUEUED {
-            jobs.submit("index", &k.to_string(), None, blocking(ran.clone(), "k"))
+            jobs.submit("index", &k.to_string(), None, None, blocking(ran.clone(), "k"))
                 .unwrap();
         }
         assert!(jobs
-            .submit("index", "full", None, blocking(ran.clone(), "f"))
+            .submit("index", "full", None, None, blocking(ran.clone(), "f"))
             .is_err());
         assert_eq!(jobs.queued().len(), MAX_QUEUED);
         jobs.shutdown();
@@ -575,10 +615,10 @@ mod tests {
         let jobs = jobs(Default::default());
         let ran = Arc::new(Mutex::new(Vec::new()));
         let a = jobs
-            .submit("index", "a", None, blocking(ran.clone(), "a"))
+            .submit("index", "a", None, None, blocking(ran.clone(), "a"))
             .unwrap();
         let b = jobs
-            .submit("index", "b", None, blocking(ran.clone(), "b"))
+            .submit("index", "b", None, None, blocking(ran.clone(), "b"))
             .unwrap();
         let (a, b) = (a.job.record().id, b.job.record().id);
         assert_eq!(jobs.cancel(&b), Some(Status::Queued));
@@ -589,6 +629,30 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         assert_eq!(*ran.lock().unwrap(), ["a"]);
         assert_eq!(jobs.cancel(&a), None);
+    }
+
+    #[test]
+    fn records_from_before_request_ids_still_read() {
+        let old = r#"{"id":"a","kind":"index","started_by":null,"status":"succeeded",
+            "created":"2026-01-01T00:00:00Z","finished":null,"error":null}"#;
+        let rec: JobRecord = serde_json::from_str(old).unwrap();
+        assert_eq!(rec.request_id, None);
+        assert!(!serde_json::to_string(&rec).unwrap().contains("request_id"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_job_keeps_the_request_that_started_it() {
+        let jobs = Jobs::new(
+            Arc::new(MemoryJobs::default()),
+            Arc::new(crate::events::Discard),
+        );
+        let s = jobs
+            .submit("index", "k", None, Some("req-1".into()), |_| {
+                Box::pin(async { Ok(()) })
+            })
+            .unwrap();
+        s.job.wait().await;
+        assert_eq!(s.job.record().request_id.as_deref(), Some("req-1"));
     }
 
     #[test]
@@ -604,6 +668,7 @@ mod tests {
                 started: None,
                 finished: None,
                 error: None,
+                request_id: None,
             };
             store.save(&rec, &[]).unwrap();
         }

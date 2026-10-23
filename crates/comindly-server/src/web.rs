@@ -400,6 +400,7 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
         .route("/health", get(health))
         .route("/ready", get(ready))
         .fallback(get(asset));
+    let local = matches!(access, Access::Local(_));
     let app = match access {
         Access::Local(token) => app
             .layer(axum::middleware::from_fn_with_state(Arc::new(token), guard))
@@ -436,7 +437,8 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
             })
             .layer(axum::middleware::from_fn_with_state(server, auth::guard)),
     }
-    .with_state(state.clone());
+    .with_state(state.clone())
+    .layer(axum::middleware::from_fn_with_state(local, traced));
     let stopping = state;
     listener.set_nonblocking(true)?;
     rt.block_on(async move {
@@ -474,8 +476,95 @@ async fn shutdown(app: Shared) {
     // Open event streams and agent sessions do not hold the process.
     tokio::spawn(async {
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        crate::telemetry::flush();
         std::process::exit(0);
     });
+}
+
+/// The id that ties a request's log lines, the job it starts and its trace together.
+#[derive(Clone)]
+pub(crate) struct RequestId(pub String);
+
+/// A caller's `X-Request-Id` is kept when it is a short token of letters, digits, `-`, `_`, `.`.
+fn safe_request_id(id: &str) -> bool {
+    (1..=64).contains(&id.len())
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+}
+
+/// Gives each request an id and a span, and logs one access line for it: method, path without
+/// the query, status, time and the member's email. Locally, and for health checks, at debug.
+async fn traced(
+    State(local): State<bool>,
+    mut req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use tracing::Instrument;
+    let id = req
+        .headers()
+        .get("x-request-id")
+        .and_then(|v| v.to_str().ok())
+        .filter(|v| safe_request_id(v))
+        .map(str::to_string)
+        .unwrap_or_else(new_token);
+    req.extensions_mut().insert(RequestId(id.clone()));
+    let method = req.method().clone();
+    let path = req.uri().path().to_string();
+    let route = req
+        .extensions()
+        .get::<axum::extract::MatchedPath>()
+        .map_or("/*", |m| m.as_str())
+        .to_string();
+    let span = tracing::info_span!(
+        "request",
+        otel.name = %format!("{method} {route}"),
+        otel.kind = "server",
+        otel.status_code = tracing::field::Empty,
+        request_id = %id,
+        http.request.method = %method,
+        http.route = %route,
+        url.path = %path,
+        http.response.status_code = tracing::field::Empty,
+    );
+    let start = std::time::Instant::now();
+    let mut res = next.run(req).instrument(span.clone()).await;
+    let status = res.status().as_u16();
+    span.record("http.response.status_code", status);
+    if status >= 500 {
+        span.record("otel.status_code", "ERROR");
+    }
+    let ms = start.elapsed().as_millis() as u64;
+    let email = res
+        .extensions()
+        .get::<crate::server::Who>()
+        .map(|w| w.email.clone());
+    span.in_scope(|| {
+        let quiet = local || path == "/health" || path == "/ready";
+        macro_rules! access {
+            ($l:expr) => {
+                tracing::event!(
+                    $l,
+                    kind = "access",
+                    method = %method,
+                    path = %path,
+                    status,
+                    duration_ms = ms,
+                    email = email.as_deref(),
+                    "{method} {path} {status} {ms} ms"
+                )
+            };
+        }
+        if quiet {
+            access!(tracing::Level::DEBUG)
+        } else {
+            access!(tracing::Level::INFO)
+        }
+    });
+    if let Ok(v) = header::HeaderValue::from_str(&id) {
+        res.headers_mut().insert("x-request-id", v);
+    }
+    res
 }
 
 /// The one error shape, `{"error": {"code", "message"}}`, with a status that means what it says.
@@ -1356,6 +1445,95 @@ async fn erase(Cur(s): Cur, Json(b): Json<EraseBody>) -> impl IntoResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A router behind `traced` whose log lines, as JSON, land in the returned buffer.
+    fn traced_app() -> (Router, Arc<std::sync::Mutex<Vec<String>>>) {
+        let lines: Arc<std::sync::Mutex<Vec<String>>> = Default::default();
+        let app = Router::new()
+            .route(
+                "/api/v1/thing",
+                get(|rid: axum::Extension<RequestId>| async move {
+                    crate::ui::warn("something odd");
+                    let mut res = rid.0 .0.into_response();
+                    res.extensions_mut().insert(crate::server::Who {
+                        email: "member@example.com".into(),
+                        role: crate::server::Role::Member,
+                    });
+                    res
+                }),
+            )
+            .layer(axum::middleware::from_fn_with_state(false, traced));
+        (app, lines)
+    }
+
+    async fn call(app: Router, req: axum::http::Request<axum::body::Body>) -> (String, String) {
+        use tower::ServiceExt;
+        let res = app.oneshot(req).await.unwrap();
+        let id = res.headers()["x-request-id"].to_str().unwrap().to_string();
+        let body = axum::body::to_bytes(res.into_body(), 1 << 16)
+            .await
+            .unwrap();
+        (id, String::from_utf8_lossy(&body).into_owned())
+    }
+
+    #[tokio::test]
+    async fn requests_get_an_id_and_one_access_line_without_credentials() {
+        use tracing_subscriber::layer::SubscriberExt;
+        let (app, lines) = traced_app();
+        let out = lines.clone();
+        let sub = tracing_subscriber::registry()
+            .with(crate::telemetry::Lines::to(true, move |l| {
+                out.lock().unwrap().push(l.to_string())
+            }));
+        let _g = tracing::subscriber::set_default(sub);
+
+        let req = axum::http::Request::get("/api/v1/thing?token=query-secret")
+            .header("x-request-id", "abc-123.x_y")
+            .header(header::AUTHORIZATION, "Bearer bearer-secret")
+            .header(header::COOKIE, "comindly_session=cookie-secret")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let (id, seen) = call(app.clone(), req).await;
+        assert_eq!(id, "abc-123.x_y");
+        assert_eq!(seen, id, "the handler sees the same id");
+
+        let lines = lines.lock().unwrap().clone();
+        let all = lines.join("\n");
+        for secret in ["query-secret", "bearer-secret", "cookie-secret", "token="] {
+            assert!(!all.contains(secret), "{secret} leaked: {all}");
+        }
+        let parsed: Vec<Value> = lines
+            .iter()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let warn = parsed.iter().find(|v| v["kind"] == "warning").unwrap();
+        assert_eq!(warn["request_id"], "abc-123.x_y");
+        let access: Vec<&Value> = parsed.iter().filter(|v| v["kind"] == "access").collect();
+        assert_eq!(access.len(), 1);
+        let a = access[0];
+        assert_eq!(a["level"], "info");
+        assert_eq!(a["method"], "GET");
+        assert_eq!(a["path"], "/api/v1/thing");
+        assert_eq!(a["status"], 200);
+        assert_eq!(a["request_id"], "abc-123.x_y");
+        assert_eq!(a["email"], "member@example.com");
+        assert!(a["duration_ms"].is_u64());
+
+        for bad in ["has space", "semi;colon", &"x".repeat(65)] {
+            let req = axum::http::Request::get("/api/v1/thing")
+                .header("x-request-id", bad)
+                .body(axum::body::Body::empty())
+                .unwrap();
+            let (id, _) = call(app.clone(), req).await;
+            assert_ne!(id, bad);
+            assert!(safe_request_id(&id));
+        }
+        let req = axum::http::Request::get("/api/v1/thing")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let (id, _) = call(app, req).await;
+        assert!(safe_request_id(&id));
+    }
 
     fn n(id: &str, repo: &str) -> Node {
         Node {
