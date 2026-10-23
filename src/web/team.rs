@@ -94,7 +94,7 @@ pub(super) async fn save(
         let format_changed = next.format != current.settings.format;
         match who.as_deref() {
             Some(w) => team::save_as(&root, &next, b.version, &w.email).await?,
-            None => team::save(&root, &next, b.version).await?,
+            None => crate::config::save_team(&root, &next, b.version).await?,
         };
         app.set_team(next);
         if format_changed {
@@ -196,7 +196,7 @@ pub(super) async fn create(State(app): State<Shared>, Json(b): Json<Create>) -> 
             name: Some(name.clone()),
             ..Default::default()
         };
-        team::save(&root, &settings, None).await?;
+        crate::config::save_team(&root, &settings, None).await?;
         use_location(&app, &root, settings).await?;
         anyhow::Ok(name)
     };

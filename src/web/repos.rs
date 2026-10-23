@@ -292,7 +292,7 @@ pub(super) async fn begin(
         .await
         .map(|t| t.settings)
         .unwrap_or_default();
-    let mut settings = crate::context::Settings::resolve(&team);
+    let mut settings = crate::context::Settings::resolve(&team, crate::config::env);
     if !llm {
         settings.enrich = false;
         settings.flows = false;
@@ -327,7 +327,7 @@ pub(super) async fn begin(
         ctx.cancel = job.cancel.clone();
         Box::pin(async move {
             let run = async {
-                let sources = crate::pipeline::checkout(&ctx, &repos).await?;
+                let sources = crate::pipeline::checkout(&ctx, &crate::config::expanded(&repos)).await?;
                 crate::pipeline::link(&ctx, sources, true, scip).await
             };
             match run.await {
@@ -424,7 +424,7 @@ pub(super) async fn watch_state(State(app): State<Shared>) -> Json<Value> {
 
 /// A clone URL reduced to host and path, so HTTPS and SSH forms of one repository compare equal.
 fn same_repo(url: &str) -> String {
-    crate::hosting::managed_path(url)
+    crate::hosting::managed_path(Path::new(&crate::config::data_dir()), url)
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|_| url.to_string())
 }
@@ -556,7 +556,7 @@ pub(super) async fn remote_add(
         let mut list = app.repos();
         let mut added = 0;
         for url in &q.urls {
-            let path = crate::hosting::managed_path(url)?
+            let path = crate::hosting::managed_path(Path::new(&crate::config::data_dir()), url)?
                 .to_string_lossy()
                 .into_owned();
             if !list.iter().any(|r| r.path == path) {
@@ -584,7 +584,7 @@ pub(super) async fn remote_add(
                 }
             }
             if shared > 0 {
-                crate::team::save(&root, &settings, stored.version).await?;
+                crate::config::save_team(&root, &settings, stored.version).await?;
                 app.set_team(settings);
             }
         }

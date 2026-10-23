@@ -67,7 +67,6 @@ pub fn build_sections(
          "Dominant docstring style (Google/NumPy/reST/JSDoc) and when docs are expected (public API?), comment density/placement. Quote a real docstring. Don't demand docs the repo doesn't write.",
          ev_docstrings),
     ];
-    let debug = crate::config::env("COMINDLY_DEBUG_EVIDENCE").is_some();
     specs
         .iter()
         .filter_map(|(title, guidance, f)| {
@@ -79,9 +78,6 @@ pub fn build_sections(
             if evidence.len() > SECTION_BUDGET {
                 evidence.truncate(SECTION_BUDGET);
                 evidence.push_str("\n…(truncated)");
-            }
-            if debug {
-                eprintln!("\n----- evidence: {title} -----\n{evidence}\n-----");
             }
             Some(Section {
                 title: title.to_string(),

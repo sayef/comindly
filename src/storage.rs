@@ -110,6 +110,11 @@ fn redact(s: &str) -> String {
     out
 }
 
+/// An index in object storage (`s3://`, `gs://`, `az://`), not a folder on this machine.
+pub fn is_remote(index_root: &str) -> bool {
+    index_root.contains("://")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -60,5 +60,6 @@ pub mod styleguide;
 pub mod mcp;
 
 pub mod tui;
+pub mod view;
 pub mod ui;
 pub mod web;

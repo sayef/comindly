@@ -18,7 +18,7 @@ pub fn run(
     server: Option<&crate::server::Server>,
     root: &str,
 ) -> Vec<Check> {
-    let resolved = crate::context::Settings::resolve(team);
+    let resolved = crate::context::Settings::resolve(team, crate::config::env);
     let set = |k: &str| std::env::var(k).is_ok_and(|v| !v.is_empty());
     let mut out = Vec::new();
     let mut check = |good: bool, optional: bool, ok: &str, bad: &str| {

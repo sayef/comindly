@@ -20,9 +20,7 @@ struct Meta {
     versions: Option<(u64, u64)>,
 }
 
-pub fn is_remote(index_root: &str) -> bool {
-    index_root.contains("://")
-}
+pub use crate::storage::is_remote;
 
 /// Cache directory for a remote index root.
 pub fn dir(index_root: &str) -> Option<PathBuf> {

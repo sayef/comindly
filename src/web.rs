@@ -16,7 +16,7 @@ use tokio::sync::{OnceCell, RwLock};
 
 use crate::graph::{Node, Zoom};
 use crate::ledger::{Entry, Provenance, Record, RelationKind, Status};
-use crate::tui::Data;
+use crate::view::Data;
 
 mod answers;
 mod auth;
@@ -238,7 +238,7 @@ impl AppState {
 
     /// The settings the loaded index runs with here.
     fn settings(&self) -> crate::context::Settings {
-        crate::context::Settings::resolve(&self.team())
+        crate::context::Settings::resolve(&self.team(), crate::config::env)
     }
 
     /// The repositories this app indexes: the server's, else this machine's in `config.toml`.
@@ -259,7 +259,7 @@ impl AppState {
     /// Load the index at `root` and make it the one every request sees.
     async fn reload(&self, root: &str) -> Result<()> {
         let owned = root.to_string();
-        let data = tokio::task::spawn_blocking(move || Data::load_or_empty(&owned)).await?;
+        let data = tokio::task::spawn_blocking(move || Data::load_or_empty(&owned, &crate::config::local_verifier())).await?;
         let fresh = self.config().fresh();
         let team = crate::team::load(root)
             .await

@@ -118,7 +118,7 @@ pub fn run(root: String) -> anyhow::Result<()> {
 
     std::thread::spawn(move || {
         let started = (|| {
-            let data = crate::tui::Data::load_or_empty(&root);
+            let data = crate::view::Data::load_or_empty(&root, &crate::config::local_verifier());
             let listener = TcpListener::bind("127.0.0.1:0")?;
             let port = listener.local_addr()?.port();
             let token = crate::web::new_token();

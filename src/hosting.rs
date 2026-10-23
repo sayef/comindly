@@ -315,7 +315,7 @@ fn gitlab_repo(v: &serde_json::Value) -> Option<RemoteRepo> {
 }
 
 /// Where comindly keeps its own clone of `clone_url`: `<data>/repos/<host>/<path>`.
-pub fn managed_path(clone_url: &str) -> Result<std::path::PathBuf> {
+pub fn managed_path(data_dir: &std::path::Path, clone_url: &str) -> Result<std::path::PathBuf> {
     let rest = clone_url
         .trim_start_matches("https://")
         .trim_start_matches("http://")
@@ -330,7 +330,7 @@ pub fn managed_path(clone_url: &str) -> Result<std::path::PathBuf> {
         !host.is_empty() && !path.is_empty() && !path.contains(".."),
         "cannot tell the repository from {clone_url}"
     );
-    Ok(std::path::PathBuf::from(crate::config::data_dir())
+    Ok(data_dir
         .join("repos")
         .join(host.split(':').next().unwrap_or(host))
         .join(path))
@@ -339,6 +339,8 @@ pub fn managed_path(clone_url: &str) -> Result<std::path::PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const DATA: &str = "/data/comindly";
 
     #[test]
     fn reads_org_and_group_urls() {
@@ -400,18 +402,18 @@ mod tests {
 
     #[test]
     fn managed_paths_follow_host_and_group() {
-        let p = managed_path("https://gitlab.com/acme/platform/payments.git").unwrap();
+        let p = managed_path(std::path::Path::new(DATA), "https://gitlab.com/acme/platform/payments.git").unwrap();
         assert!(
             p.ends_with("repos/gitlab.com/acme/platform/payments"),
             "{}",
             p.display()
         );
-        let s = managed_path("git@github.com:acme/orders.git").unwrap();
+        let s = managed_path(std::path::Path::new(DATA), "git@github.com:acme/orders.git").unwrap();
         assert!(
             s.ends_with("repos/github.com/acme/orders"),
             "{}",
             s.display()
         );
-        assert!(managed_path("https://github.com/../etc").is_err());
+        assert!(managed_path(std::path::Path::new(DATA), "https://github.com/../etc").is_err());
     }
 }

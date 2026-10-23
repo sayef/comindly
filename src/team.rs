@@ -80,19 +80,7 @@ pub async fn load(root: &str) -> Result<Stored> {
     })
 }
 
-/// Save `settings` if nobody saved since `expected` (the version they were loaded at).
-pub async fn save(root: &str, settings: &TeamSettings, expected: Option<u64>) -> Result<u64> {
-    let me = crate::config::local_identity();
-    save_as(
-        root,
-        settings,
-        expected,
-        me.name.as_deref().unwrap_or(&me.actor),
-    )
-    .await
-}
-
-/// [`save`], recorded as changed by `by`.
+/// Save `settings` as `by` if nobody saved since `expected` (the version they were loaded at).
 pub async fn save_as(
     root: &str,
     settings: &TeamSettings,
@@ -121,14 +109,14 @@ mod tests {
             llm_model: Some("m1".into()),
             ..Default::default()
         };
-        let v1 = save(root, &first, None).await.unwrap();
+        let v1 = save_as(root, &first, None, "t").await.unwrap();
         assert_eq!(load(root).await.unwrap().settings, first);
         let second = TeamSettings {
             llm_model: Some("m2".into()),
             ..Default::default()
         };
-        save(root, &second, Some(v1)).await.unwrap();
-        assert!(save(root, &first, Some(v1)).await.is_err(), "stale version");
+        save_as(root, &second, Some(v1), "t").await.unwrap();
+        assert!(save_as(root, &first, Some(v1), "t").await.is_err(), "stale version");
         assert_eq!(
             load(root).await.unwrap().settings.llm_model.as_deref(),
             Some("m2")

@@ -1305,6 +1305,7 @@ fn cmd_remember(
         comindly::config::local_signing_key(),
     ) {
         Ok(()) => {
+            comindly::cache::invalidate(&cfg.index_dir(from));
             comindly::ui::ok(&format!(
                 "recorded {} `{}` ({})",
                 kind.as_str(),
@@ -1358,6 +1359,7 @@ fn cmd_review(id: &str, action: &str, reason: &str, from: Option<&str>) -> ExitC
     });
     match put {
         Ok(()) => {
+            comindly::cache::invalidate(&root);
             comindly::ui::ok(&format!("{action}: `{}`", target.title));
             ExitCode::SUCCESS
         }
@@ -1471,8 +1473,11 @@ fn cmd_ui(from: Option<&str>, web: Option<(String, u16)>, open: bool) -> ExitCod
     use anyhow::Context as _;
     let root = comindly::config::Config::load().index_dir(from);
     let load = match web {
-        Some(_) => Ok(comindly::tui::Data::load_or_empty(&root)),
-        None => comindly::tui::Data::load(&root),
+        Some(_) => Ok(comindly::view::Data::load_or_empty(
+            &root,
+            &comindly::config::local_verifier(),
+        )),
+        None => comindly::view::Data::load(&root, &comindly::config::local_verifier()),
     };
     let run = load.and_then(|data| match web {
         Some((host, port)) => {
@@ -1557,7 +1562,7 @@ fn cmd_repo_list(what: Option<ReposWhat>, from: Option<&str>) -> ExitCode {
         Some(ReposWhat::Add { paths }) => {
             for p in paths {
                 let entry = if p.contains("://") || p.starts_with("git@") {
-                    match comindly::hosting::managed_path(&p) {
+                    match comindly::hosting::managed_path(Path::new(&comindly::config::data_dir()), &p) {
                         Ok(dest) => RepoEntry {
                             path: dest.to_string_lossy().into_owned(),
                             remote: Some(p.clone()),
@@ -1807,7 +1812,7 @@ fn team_run(what: Option<TeamWhat>, root: &str) -> anyhow::Result<()> {
             }
         }
     }
-    comindly::rt::block_on(team::save(root, &s, stored.version))?;
+    comindly::rt::block_on(comindly::config::save_team(root, &s, stored.version))?;
     comindly::ui::ok("team settings saved; everyone using this index gets them");
     Ok(())
 }
@@ -2687,7 +2692,7 @@ where
             .await
             .map(|s| s.settings)
             .unwrap_or_default();
-        let mut settings = comindly::context::Settings::resolve(&team);
+        let mut settings = comindly::context::Settings::resolve(&team, comindly::config::env);
         settings.embed = steps.embed;
         settings.enrich = steps.enrich;
         settings.flows = steps.flows;
@@ -2749,7 +2754,7 @@ fn cmd_link(
     };
     let report = run_indexing(&root, steps, |ctx| async move {
         let sources = if repos.is_empty() {
-            comindly::pipeline::checkout(&ctx, &cfg.repos).await?
+            comindly::pipeline::checkout(&ctx, &comindly::config::expanded(&cfg.repos)).await?
         } else {
             repos.iter().map(comindly::pipeline::Source::at).collect()
         };

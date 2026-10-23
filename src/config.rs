@@ -47,13 +47,17 @@ pub const KEYS: [&str; 7] = [
     "repos",
 ];
 
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-pub struct RepoEntry {
-    /// The clone comindly indexes: yours, or its own under the data folder.
-    pub path: String,
-    /// Clone URL for a repository comindly keeps itself; cloned into `path` when missing.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub remote: Option<String>,
+pub use crate::pipeline::RepoEntry;
+
+/// `repos` with `~` in their paths expanded.
+pub fn expanded(repos: &[RepoEntry]) -> Vec<RepoEntry> {
+    repos
+        .iter()
+        .map(|r| RepoEntry {
+            path: expand_tilde(&r.path),
+            remote: r.remote.clone(),
+        })
+        .collect()
 }
 
 const TABLE: &str = "preferences";
@@ -252,7 +256,7 @@ pub async fn index_settings(root: &str) -> crate::context::Settings {
         .await
         .map(|s| s.settings)
         .unwrap_or_default();
-    crate::context::Settings::resolve(&team)
+    crate::context::Settings::resolve(&team, crate::config::env)
 }
 
 /// An LLM client for `settings`, with the key for `team` from this machine or `server`.
@@ -552,4 +556,14 @@ pub fn adopt_file() {
         )),
         Err(e) => crate::ui::warn(&format!("could not import {}: {e:#}", path.display())),
     }
+}
+
+/// Save an index's shared settings as you, if nobody saved since `expected`.
+pub async fn save_team(
+    root: &str,
+    settings: &crate::team::TeamSettings,
+    expected: Option<u64>,
+) -> Result<u64> {
+    let me = local_identity();
+    crate::team::save_as(root, settings, expected, me.name.as_deref().unwrap_or(&me.actor)).await
 }

@@ -33,8 +33,9 @@ pub struct Settings {
 }
 
 impl Settings {
-    pub fn resolve(team: &TeamSettings) -> Settings {
-        let env = |k: &str| crate::config::env(k).filter(|v| !v.is_empty());
+    /// `env` looks up overrides such as `COMINDLY_LLM_MODEL`.
+    pub fn resolve(team: &TeamSettings, env: impl Fn(&str) -> Option<String>) -> Settings {
+        let env = |k: &str| env(k).filter(|v| !v.is_empty());
         Settings {
             llm_model: team
                 .llm_model

@@ -407,7 +407,7 @@ pub(crate) fn suspicious(text: &str) -> Option<&'static str> {
 /// An object store rooted at `<index_root>/<sub>` (local directory or remote prefix).
 pub(crate) fn sub_store(index_root: &str, sub: &str) -> Result<(Arc<dyn ObjectStore>, ObjPath)> {
     let root = index_root.trim_end_matches('/');
-    if crate::cache::is_remote(root) {
+    if crate::storage::is_remote(root) {
         return crate::storage::open(&format!("{root}/{sub}"));
     }
     let dir = std::path::Path::new(root).join(sub);
@@ -664,9 +664,7 @@ pub fn put_blocking(
     signer: Option<std::path::PathBuf>,
 ) -> Result<()> {
     let ledger = Ledger::open(index_root)?.signed_by(signer);
-    crate::rt::block_on(ledger.put(rec))?;
-    crate::cache::invalidate(index_root);
-    Ok(())
+    crate::rt::block_on(ledger.put(rec))
 }
 
 pub fn compact_blocking(index_root: &str) -> Result<(usize, usize)> {

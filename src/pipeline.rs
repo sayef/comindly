@@ -15,6 +15,16 @@ use crate::context::{Cancelled, IndexContext};
 use crate::events::Usage;
 use crate::model::{Edge, EdgeKind, GlobalSymbolId, Symbol, SymbolKind};
 
+
+/// A repository to index: the folder of its clone and, for one comindly keeps itself, the URL it
+/// is cloned from when the folder is missing.
+#[derive(Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct RepoEntry {
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote: Option<String>,
+}
+
 /// A repository to index: its name and the folder holding its checkout.
 #[derive(Debug, Clone)]
 pub struct Source {
@@ -67,7 +77,7 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> 
 /// Bring each configured repository to its default branch in comindly's own checkout.
 pub fn checkout<'a>(
     ctx: &'a IndexContext,
-    repos: &'a [crate::config::RepoEntry],
+    repos: &'a [RepoEntry],
 ) -> futures::future::BoxFuture<'a, Result<Vec<Source>>> {
     Box::pin(async move {
         anyhow::ensure!(
@@ -79,7 +89,7 @@ pub fn checkout<'a>(
         let mut out = Vec::new();
         for repo in repos {
             ctx.check()?;
-            let path = PathBuf::from(crate::config::expand_tilde(&repo.path));
+            let path = PathBuf::from(&repo.path);
             if let Some(url) = repo.remote.clone() {
                 if !path.exists() {
                     r.note(format!("cloning {url}"));
