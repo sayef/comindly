@@ -2296,7 +2296,7 @@ fn cmd_packages(from: Option<&str>, skew: bool) -> ExitCode {
 fn render_packages(deps: &[comindly::manifests::InternalDep]) -> ExitCode {
     let mut table = comfy_table::Table::new();
     table
-        .load_preset(comfy_table::presets::UTF8_FULL)
+        .load_style(comfy_table::presets::UTF8_FULL)
         .set_header(vec![
             "package",
             "published by",
@@ -2356,7 +2356,7 @@ fn render_contracts(c: &comindly::answers::Contracts) -> ExitCode {
     };
     let mut table = comfy_table::Table::new();
     table
-        .load_preset(comfy_table::presets::UTF8_FULL)
+        .load_style(comfy_table::presets::UTF8_FULL)
         .set_header(vec!["contract", "provided by", "used by"]);
     for v in &c.views {
         table.add_row(vec![
@@ -2390,7 +2390,7 @@ fn cmd_eval_graph(fixture: &str, verbose: bool, scip: Option<&str>, repos: &[Str
     let pct = |x: f64| format!("{:.0}%", x * 100.0);
     let mut kinds = comfy_table::Table::new();
     kinds
-        .load_preset(comfy_table::presets::UTF8_FULL)
+        .load_style(comfy_table::presets::UTF8_FULL)
         .set_header(vec![
             "kind",
             "found",
@@ -2413,7 +2413,7 @@ fn cmd_eval_graph(fixture: &str, verbose: bool, scip: Option<&str>, repos: &[Str
     println!("{kinds}");
     let mut cases = comfy_table::Table::new();
     cases
-        .load_preset(comfy_table::presets::UTF8_FULL)
+        .load_style(comfy_table::presets::UTF8_FULL)
         .set_header(vec!["case", "found / expected"]);
     for (case, (found, expected)) in &r.by_case {
         cases.add_row(vec![case.clone(), format!("{found} / {expected}")]);

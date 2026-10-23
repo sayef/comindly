@@ -183,7 +183,7 @@ pub fn spinner(msg: &str) -> ProgressBar {
 /// A preset unicode table that wraps to the terminal width. Add rows, then print it.
 pub fn table(headers: &[&str]) -> comfy_table::Table {
     let mut t = comfy_table::Table::new();
-    t.load_preset(comfy_table::presets::UTF8_FULL)
+    t.load_style(comfy_table::presets::UTF8_FULL)
         .set_content_arrangement(comfy_table::ContentArrangement::Dynamic)
         .set_header(headers.to_vec());
     t
