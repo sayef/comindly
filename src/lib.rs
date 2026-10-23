@@ -29,6 +29,7 @@ pub mod pipeline;
 pub mod preflight;
 pub mod recipes;
 pub mod resolve;
+pub mod rt;
 pub mod scip;
 pub mod server;
 pub mod storage;

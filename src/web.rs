@@ -224,7 +224,7 @@ pub enum Access {
 
 /// Serve the UI on `listener` until the process ends.
 pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Result<()> {
-    let rt = tokio::runtime::Runtime::new()?;
+    let rt = crate::rt::shared();
     let root = data.root.clone();
     let server = matches!(access, Access::Server);
     let state = Arc::new(AppState {

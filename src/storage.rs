@@ -14,17 +14,9 @@ pub fn connect(uri: &str) -> lancedb::connection::ConnectBuilder {
 
 /// The object store and path for a remote `uri`, with the same credentials LanceDB uses.
 pub fn open(uri: &str) -> Result<(Arc<dyn ObjectStore>, ObjPath)> {
-    let owned = uri.to_string();
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()?;
-        let (store, path) = rt.block_on(lance_io::object_store::ObjectStore::from_uri(&owned))?;
-        anyhow::Ok((store.inner.clone(), path))
-    })
-    .join()
-    .map_err(|_| anyhow::anyhow!("opening {uri} failed"))?
-    .with_context(|| format!("open {uri}"))
+    let (store, path) = crate::rt::block_on(lance_io::object_store::ObjectStore::from_uri(uri))
+        .with_context(|| format!("open {uri}"))?;
+    Ok((store.inner.clone(), path))
 }
 
 /// `text` with any `user:password@` removed from URLs in it.

@@ -262,11 +262,11 @@ impl Store {
 }
 
 pub fn manual_blocking(index_root: &str) -> Result<Vec<Manual>> {
-    crate::ledger::runtime()?.block_on(Store::open(index_root)?.all())
+    crate::rt::block_on(Store::open(index_root)?.all())
 }
 
 pub fn write_blocking(index_root: &str, w: &Write) -> Result<()> {
-    crate::ledger::runtime()?.block_on(Store::open(index_root)?.write(w))
+    crate::rt::block_on(Store::open(index_root)?.write(w))
 }
 
 /// External libraries commonly wrapped by internal modules.

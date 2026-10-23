@@ -1210,16 +1210,7 @@ fn cmd_serve(from: Option<&str>, markdown: bool) -> ExitCode {
     let uri = comindly::config::Config::load().graph_dir(from);
     let uri = uri.as_str();
     comindly::ui::step(&format!("loading graph from {uri}"));
-    let rt = match tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-    {
-        Ok(rt) => rt,
-        Err(e) => {
-            comindly::ui::err(&format!("runtime: {e}"));
-            return ExitCode::FAILURE;
-        }
-    };
+    let rt = comindly::rt::shared();
     match rt.block_on(comindly::mcp::serve_stdio(uri, markdown)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
@@ -1658,8 +1649,7 @@ fn cmd_team(what: Option<TeamWhat>, from: Option<&str>) -> ExitCode {
 fn team_run(what: Option<TeamWhat>, root: &str) -> anyhow::Result<()> {
     use anyhow::Context as _;
     use comindly::team;
-    let rt = comindly::ledger::runtime()?;
-    let stored = rt.block_on(team::load(root))?;
+    let stored = comindly::rt::block_on(team::load(root))?;
     let mut s = stored.settings.clone();
     match what {
         None => {
@@ -1810,7 +1800,7 @@ fn team_run(what: Option<TeamWhat>, root: &str) -> anyhow::Result<()> {
             }
         }
     }
-    rt.block_on(team::save(root, &s, stored.version))?;
+    comindly::rt::block_on(team::save(root, &s, stored.version))?;
     comindly::ui::ok("team settings saved; everyone using this index gets them");
     Ok(())
 }
@@ -1818,11 +1808,10 @@ fn team_run(what: Option<TeamWhat>, root: &str) -> anyhow::Result<()> {
 fn cmd_join(index: &str) -> ExitCode {
     let root = comindly::config::expand_tilde(index.trim());
     let run = || -> anyhow::Result<()> {
-        let rt = comindly::ledger::runtime()?;
         let graph = format!("{}/_graph", root.trim_end_matches('/'));
-        let versions = rt.block_on(comindly::index::graph_versions(&graph))?;
+        let versions = comindly::rt::block_on(comindly::index::graph_versions(&graph))?;
         anyhow::ensure!(!versions.is_empty(), "no index at {root}");
-        let stored = rt.block_on(comindly::team::load(&root))?;
+        let stored = comindly::rt::block_on(comindly::team::load(&root))?;
         comindly::config::update(&[("index_dir", comindly::config::Setting::Text(root.clone()))])?;
         let name = stored.settings.name.clone();
         comindly::ui::ok(&format!("joined {}", name.as_deref().unwrap_or(&root)));
@@ -2539,16 +2528,7 @@ where
     F: FnOnce(comindly::context::IndexContext) -> Fut,
     Fut: std::future::Future<Output = anyhow::Result<T>>,
 {
-    let rt = match tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-    {
-        Ok(rt) => rt,
-        Err(e) => {
-            comindly::ui::err(&format!("runtime: {e}"));
-            return None;
-        }
-    };
+    let rt = comindly::rt::shared();
     rt.block_on(async {
         let cfg = comindly::config::Config::load();
         let team = comindly::team::load(root)

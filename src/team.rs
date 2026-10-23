@@ -143,7 +143,7 @@ pub fn current() -> Option<TeamSettings> {
 
 /// Use the team settings of the index at `root` in this process.
 pub fn apply(root: &str) -> Result<()> {
-    let stored = crate::ledger::runtime()?.block_on(load(root))?;
+    let stored = crate::rt::block_on(load(root))?;
     set_current(stored.settings);
     Ok(())
 }

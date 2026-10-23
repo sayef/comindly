@@ -460,11 +460,11 @@ async fn versions_of(s: &lancedb::Table, e: &lancedb::Table) -> Result<Vec<(u64,
 }
 
 pub fn graph_versions_blocking(uri: &str) -> Result<Vec<(u64, u64, String)>> {
-    runtime()?.block_on(graph_versions(uri))
+    crate::rt::block_on(graph_versions(uri))
 }
 
 pub fn read_graph_blocking(uri: &str) -> Result<(Vec<Symbol>, Vec<Edge>)> {
-    runtime()?.block_on(read_graph(uri))
+    crate::rt::block_on(read_graph(uri))
 }
 
 /// Read back `(symbol_count, edge_count)` — proves the persisted tables are queryable.
@@ -488,17 +488,17 @@ pub async fn count_rows(uri: &str) -> Result<(usize, usize)> {
 /// Blocking wrapper so the (sync) CLI can persist without an async main.
 /// Returns the new `(symbols, edges)` Lance versions.
 pub fn write_graph_blocking(uri: &str, symbols: &[Symbol], edges: &[Edge]) -> Result<(u64, u64)> {
-    runtime()?.block_on(write_graph(uri, symbols, edges))
+    crate::rt::block_on(write_graph(uri, symbols, edges))
 }
 
 /// Blocking wrapper for the read-back count.
 pub fn count_rows_blocking(uri: &str) -> Result<(usize, usize)> {
-    runtime()?.block_on(count_rows(uri))
+    crate::rt::block_on(count_rows(uri))
 }
 
 /// Blocking wrapper for the current `(symbols, edges)` versions.
 pub fn latest_versions_blocking(uri: &str) -> Result<(u64, u64)> {
-    runtime()?.block_on(latest_versions(uri))
+    crate::rt::block_on(latest_versions(uri))
 }
 
 // ---- embeddings (semantic search vectors) -----------------------------------------------
@@ -541,7 +541,7 @@ pub async fn read_repo_meta(uri: &str) -> Result<Option<String>> {
 
 /// Blocking wrapper for [`write_repo_meta`].
 pub fn write_repo_meta_blocking(uri: &str, repo: &str, commit: &str) -> Result<()> {
-    runtime()?.block_on(write_repo_meta(uri, repo, commit))
+    crate::rt::block_on(write_repo_meta(uri, repo, commit))
 }
 
 /// Record the indexed commit for *several* repos (multi-row `repo_meta`) — used by the org
@@ -620,17 +620,17 @@ pub async fn read_repo_commits(uri: &str) -> Result<std::collections::HashMap<St
 
 /// Blocking wrapper for [`write_repo_commits`].
 pub fn write_repo_commits_blocking(uri: &str, repos: &[IndexedRepo]) -> Result<()> {
-    runtime()?.block_on(write_repo_commits(uri, repos))
+    crate::rt::block_on(write_repo_commits(uri, repos))
 }
 
 /// Blocking wrapper for [`read_repo_commits`].
 pub fn read_repo_commits_blocking(uri: &str) -> Result<std::collections::HashMap<String, String>> {
-    runtime()?.block_on(read_repo_commits(uri))
+    crate::rt::block_on(read_repo_commits(uri))
 }
 
 /// Blocking wrapper for [`read_repo_meta`].
 pub fn read_repo_meta_blocking(uri: &str) -> Result<Option<String>> {
-    runtime()?.block_on(read_repo_meta(uri))
+    crate::rt::block_on(read_repo_meta(uri))
 }
 
 // ---- hybrid search table (BM25 FTS + vector, native LanceDB fusion) ---------------------
@@ -829,10 +829,10 @@ impl Tables {
 
 /// Blocking wrappers.
 pub fn write_search_table_blocking(uri: &str, rows: &[SearchRow]) -> Result<u64> {
-    runtime()?.block_on(write_search_table(uri, rows))
+    crate::rt::block_on(write_search_table(uri, rows))
 }
 pub fn read_search_vectors_blocking(uri: &str) -> Result<Option<Vec<VectorRow>>> {
-    runtime()?.block_on(read_search_vectors(uri))
+    crate::rt::block_on(read_search_vectors(uri))
 }
 pub fn hybrid_search_blocking(
     uri: &str,
@@ -840,7 +840,7 @@ pub fn hybrid_search_blocking(
     vector: Vec<f32>,
     k: usize,
 ) -> Result<Vec<(String, f32)>> {
-    runtime()?.block_on(hybrid_search(uri, text, vector, k))
+    crate::rt::block_on(hybrid_search(uri, text, vector, k))
 }
 
 // ---- LLM enrichment (summaries + generated queries) -------------------------------------
@@ -904,12 +904,12 @@ pub async fn read_enrichment(uri: &str) -> Result<Option<Vec<TextRow>>> {
 
 /// Blocking wrapper for [`write_enrichment`].
 pub fn write_enrichment_blocking(uri: &str, rows: &[TextRow]) -> Result<u64> {
-    runtime()?.block_on(write_enrichment(uri, rows))
+    crate::rt::block_on(write_enrichment(uri, rows))
 }
 
 /// Blocking wrapper for [`read_enrichment`].
 pub fn read_enrichment_blocking(uri: &str) -> Result<Option<Vec<TextRow>>> {
-    runtime()?.block_on(read_enrichment(uri))
+    crate::rt::block_on(read_enrichment(uri))
 }
 
 /// What each generated text was written from, as `(id, fingerprint)` in `table`; same fingerprint,
@@ -950,14 +950,11 @@ pub async fn read_keys(uri: &str, table: &str) -> Result<HashMap<String, String>
 }
 
 pub fn write_keys_blocking(uri: &str, table: &str, keys: &[(String, String)]) -> Result<u64> {
-    runtime()?.block_on(write_keys(uri, table, keys))
+    crate::rt::block_on(write_keys(uri, table, keys))
 }
 
 pub fn read_keys_blocking(uri: &str, table: &str) -> HashMap<String, String> {
-    runtime()
-        .ok()
-        .and_then(|rt| rt.block_on(read_keys(uri, table)).ok())
-        .unwrap_or_default()
+    crate::rt::block_on(read_keys(uri, table)).unwrap_or_default()
 }
 
 fn flows_schema() -> Arc<Schema> {
@@ -1014,10 +1011,10 @@ pub async fn read_flows(uri: &str) -> Result<Option<Vec<TextRow>>> {
 
 /// Blocking wrappers.
 pub fn write_flows_blocking(uri: &str, rows: &[TextRow]) -> Result<u64> {
-    runtime()?.block_on(write_flows(uri, rows))
+    crate::rt::block_on(write_flows(uri, rows))
 }
 pub fn read_flows_blocking(uri: &str) -> Result<Option<Vec<TextRow>>> {
-    runtime()?.block_on(read_flows(uri))
+    crate::rt::block_on(read_flows(uri))
 }
 
 /// Persist the inferred repo style guide (single-row `style_guide` table).
@@ -1062,12 +1059,12 @@ pub async fn read_style_guide(uri: &str) -> Result<Vec<(String, String)>> {
 
 /// Blocking wrapper for [`write_style_guide`].
 pub fn write_style_guide_blocking(uri: &str, rows: &[(String, String)]) -> Result<()> {
-    runtime()?.block_on(write_style_guide(uri, rows))
+    crate::rt::block_on(write_style_guide(uri, rows))
 }
 
 /// Blocking wrapper for [`read_style_guide`].
 pub fn read_style_guide_blocking(uri: &str) -> Result<Vec<(String, String)>> {
-    runtime()?.block_on(read_style_guide(uri))
+    crate::rt::block_on(read_style_guide(uri))
 }
 
 /// Persist per-file parse facts (JSON per file) so incremental runs can re-resolve everything.
@@ -1160,11 +1157,11 @@ pub async fn read_recipes(uri: &str) -> Result<Vec<crate::conventions::Conventio
 }
 
 pub fn write_recipes_blocking(uri: &str, rows: &[crate::conventions::Convention]) -> Result<()> {
-    runtime()?.block_on(write_recipes(uri, rows))
+    crate::rt::block_on(write_recipes(uri, rows))
 }
 
 pub fn read_recipes_blocking(uri: &str) -> Result<Vec<crate::conventions::Convention>> {
-    runtime()?.block_on(read_recipes(uri))
+    crate::rt::block_on(read_recipes(uri))
 }
 
 /// Persist manifest/lockfile package rows (JSON per row).
@@ -1210,26 +1207,19 @@ pub async fn read_packages(uri: &str) -> Result<Vec<crate::manifests::PackageRow
 }
 
 pub fn write_packages_blocking(uri: &str, rows: &[crate::manifests::PackageRow]) -> Result<()> {
-    runtime()?.block_on(write_packages(uri, rows))
+    crate::rt::block_on(write_packages(uri, rows))
 }
 
 pub fn read_packages_blocking(uri: &str) -> Result<Vec<crate::manifests::PackageRow>> {
-    runtime()?.block_on(read_packages(uri))
+    crate::rt::block_on(read_packages(uri))
 }
 
 pub fn write_facts_blocking(uri: &str, facts: &[FileFacts]) -> Result<()> {
-    runtime()?.block_on(write_facts(uri, facts))
+    crate::rt::block_on(write_facts(uri, facts))
 }
 
 pub fn read_facts_blocking(uri: &str) -> Result<Option<Vec<FileFacts>>> {
-    runtime()?.block_on(read_facts(uri))
-}
-
-fn runtime() -> Result<tokio::runtime::Runtime> {
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .context("build tokio runtime")
+    crate::rt::block_on(read_facts(uri))
 }
 
 #[cfg(test)]

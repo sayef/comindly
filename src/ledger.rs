@@ -554,7 +554,7 @@ impl Ledger {
 
     /// Records matching `pick`, plus relations about them; deleted (and compacted away) when
     /// `apply`, otherwise only listed.
-    pub async fn erase(&self, pick: impl Fn(&Record) -> bool, apply: bool) -> Result<Vec<Record>> {
+    pub async fn erase(&self, pick: impl Fn(&Record) -> bool + Send + Sync, apply: bool) -> Result<Vec<Record>> {
         let all = self.keyed().await?;
         let mut ids: std::collections::HashSet<&str> = all
             .iter()
@@ -671,23 +671,23 @@ impl Ledger {
 /// Blocking helpers for the CLI.
 pub fn put_blocking(index_root: &str, rec: &Record) -> Result<()> {
     let ledger = Ledger::open(index_root)?;
-    runtime()?.block_on(ledger.put(rec))?;
+    crate::rt::block_on(ledger.put(rec))?;
     crate::cache::invalidate(index_root);
     Ok(())
 }
 
 pub fn compact_blocking(index_root: &str) -> Result<(usize, usize)> {
     let ledger = Ledger::open(index_root)?;
-    runtime()?.block_on(ledger.compact())
+    crate::rt::block_on(ledger.compact())
 }
 
 pub fn erase_blocking(
     index_root: &str,
-    pick: impl Fn(&Record) -> bool,
+    pick: impl Fn(&Record) -> bool + Send + Sync,
     apply: bool,
 ) -> Result<Vec<Record>> {
     let ledger = Ledger::open(index_root)?;
-    runtime()?.block_on(ledger.erase(pick, apply))
+    crate::rt::block_on(ledger.erase(pick, apply))
 }
 
 fn strings<'a>(
@@ -699,14 +699,7 @@ fn strings<'a>(
 
 pub fn all_blocking(index_root: &str) -> Result<Vec<Record>> {
     let ledger = Ledger::open(index_root)?;
-    runtime()?.block_on(ledger.all())
-}
-
-pub fn runtime() -> Result<tokio::runtime::Runtime> {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .context("build tokio runtime")
+    crate::rt::block_on(ledger.all())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]

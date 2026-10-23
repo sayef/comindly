@@ -387,24 +387,11 @@ const KINDS: [&str; 9] = [
     "user", "invite", "link", "session", "token", "secret", "code", "seen", "config",
 ];
 
-/// LanceDB work on its own runtime, so callers may be async or not.
+/// LanceDB work from the store's synchronous methods.
 fn run<T: Send + 'static>(
     f: impl std::future::Future<Output = Result<T>> + Send + 'static,
 ) -> Result<T> {
-    static RT: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
-    let rt = RT.get_or_init(|| {
-        tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(1)
-            .thread_name("comindly-server-store")
-            .enable_all()
-            .build()
-            .expect("server store runtime")
-    });
-    let (tx, rx) = std::sync::mpsc::channel();
-    rt.spawn(async move {
-        let _ = tx.send(f.await);
-    });
-    rx.recv().context("server store stopped")?
+    crate::rt::block_on(f)
 }
 
 fn schema() -> Arc<Schema> {
