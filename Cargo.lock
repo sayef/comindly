@@ -1563,7 +1563,7 @@ dependencies = [
 
 [[package]]
 name = "comindly"
-version = "0.3.4"
+version = "0.4.0-beta.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -1590,7 +1590,7 @@ dependencies = [
 
 [[package]]
 name = "comindly-core"
-version = "0.3.4"
+version = "0.4.0-beta.1"
 dependencies = [
  "anyhow",
  "blake3",
@@ -1630,7 +1630,7 @@ dependencies = [
 
 [[package]]
 name = "comindly-server"
-version = "0.3.4"
+version = "0.4.0-beta.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -1667,7 +1667,7 @@ dependencies = [
 
 [[package]]
 name = "comindly-ui"
-version = "0.3.4"
+version = "0.4.0-beta.1"
 
 [[package]]
 name = "compact_str"
