@@ -2470,7 +2470,7 @@ fn cmd_login(url: &str) -> ExitCode {
                     "this sign-in lasts until {day}; then run `comindly login {url}` again"
                 ));
             }
-            comindly::ui::note("find, search, explore, why, ledger, flow, stats, contracts, packages, conventions, preflight, remember, review and link now ask the server; --local uses the index here");
+            comindly::ui::note("find, search, explore, why, ledger, flow, stats, contracts, packages, conventions, preflight, remember, review, link, ui and app now ask the server; --local uses the index here");
             ExitCode::SUCCESS
         }
         Err(e) => {

@@ -1077,6 +1077,10 @@ pub fn git_secret(host: &str) -> String {
 pub const LLM_SECRET: &str = "llm_api_key";
 
 impl crate::backends::AccountStore for Store {
+    fn tidy(&self) {
+        self.prune();
+    }
+
     /// The member `email`, with deployment admins always present and admin.
     fn member(&self, email: &str) -> Result<Option<Who>> {
         let email = normalize(email);

@@ -11,6 +11,8 @@ use crate::server::{
 
 /// Members, invitations, sign-in links and codes, sessions and personal access tokens.
 pub trait AccountStore: Send + Sync {
+    /// Drop what has expired (links, sessions, tokens); called now and then by a running server.
+    fn tidy(&self) {}
     /// The member `email`; deployment admins are always present and admin.
     fn member(&self, email: &str) -> Result<Option<Who>>;
     fn members(&self) -> Result<Vec<Member>>;

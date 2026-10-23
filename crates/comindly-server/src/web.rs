@@ -342,6 +342,15 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
         state.reload_mcp(&root);
     }
     rt.spawn(repos::watch(state.clone()));
+    if let Some(s) = state.server.clone() {
+        rt.spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(6 * 3600)).await;
+                let s = s.clone();
+                let _ = tokio::task::spawn_blocking(move || s.accounts.tidy()).await;
+            }
+        });
+    }
     let app = Router::new()
         .route("/api/v1/overview", get(overview))
         .route("/api/v1/orgmap", get(orgmap))
