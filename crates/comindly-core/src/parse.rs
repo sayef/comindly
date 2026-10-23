@@ -913,7 +913,14 @@ mod tests {
 
     #[test]
     fn python_facts_capture_imports_types_and_refs() {
-        let out = parse_repo(Path::new("tests/fixtures/org/service-a"), "service-a").unwrap();
+        let out = parse_repo(
+            Path::new(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../tests/fixtures/org/service-a"
+            )),
+            "service-a",
+        )
+        .unwrap();
         let users = out
             .facts
             .iter()
@@ -959,7 +966,14 @@ mod tests {
 
     #[test]
     fn typescript_facts_capture_reexports_and_heritage() {
-        let kit = parse_repo(Path::new("tests/fixtures/org/ui-kit"), "ui-kit").unwrap();
+        let kit = parse_repo(
+            Path::new(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../tests/fixtures/org/ui-kit"
+            )),
+            "ui-kit",
+        )
+        .unwrap();
         let index = kit.facts.iter().find(|f| f.path == "src/index.ts").unwrap();
         assert_eq!(index.imports.len(), 3);
         assert!(index
@@ -967,7 +981,14 @@ mod tests {
             .iter()
             .any(|i| i.module == "./button" && i.items == vec![crate::facts::ImportItem::All]));
 
-        let app = parse_repo(Path::new("tests/fixtures/org/web-app"), "web-app").unwrap();
+        let app = parse_repo(
+            Path::new(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../tests/fixtures/org/web-app"
+            )),
+            "web-app",
+        )
+        .unwrap();
         let f = app.facts.iter().find(|f| f.path == "src/app.ts").unwrap();
         assert!(f
             .refs

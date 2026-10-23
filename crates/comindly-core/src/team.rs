@@ -116,7 +116,10 @@ mod tests {
             ..Default::default()
         };
         save_as(root, &second, Some(v1), "t").await.unwrap();
-        assert!(save_as(root, &first, Some(v1), "t").await.is_err(), "stale version");
+        assert!(
+            save_as(root, &first, Some(v1), "t").await.is_err(),
+            "stale version"
+        );
         assert_eq!(
             load(root).await.unwrap().settings.llm_model.as_deref(),
             Some("m2")

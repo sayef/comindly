@@ -402,7 +402,11 @@ mod tests {
 
     #[test]
     fn managed_paths_follow_host_and_group() {
-        let p = managed_path(std::path::Path::new(DATA), "https://gitlab.com/acme/platform/payments.git").unwrap();
+        let p = managed_path(
+            std::path::Path::new(DATA),
+            "https://gitlab.com/acme/platform/payments.git",
+        )
+        .unwrap();
         assert!(
             p.ends_with("repos/gitlab.com/acme/platform/payments"),
             "{}",

@@ -15,7 +15,6 @@ use crate::context::{Cancelled, IndexContext};
 use crate::events::Usage;
 use crate::model::{Edge, EdgeKind, GlobalSymbolId, Symbol, SymbolKind};
 
-
 /// A repository to index: the folder of its clone and, for one comindly keeps itself, the URL it
 /// is cloned from when the folder is missing.
 #[derive(Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize)]

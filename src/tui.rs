@@ -10,10 +10,10 @@ use ratatui::widgets::{Block, List, ListItem, ListState, Paragraph, Tabs, Wrap};
 use ratatui::Frame;
 
 use crate::conventions::ORG;
-pub use crate::view::Data;
 use crate::graph::{ContractView, Node};
 use crate::ledger::{Entry, Status, Trust};
 use crate::manifests::InternalDep;
+pub use crate::view::Data;
 
 const TABS: [&str; 6] = [
     "Overview",

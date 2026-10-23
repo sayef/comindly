@@ -327,7 +327,8 @@ pub(super) async fn begin(
         ctx.cancel = job.cancel.clone();
         Box::pin(async move {
             let run = async {
-                let sources = crate::pipeline::checkout(&ctx, &crate::config::expanded(&repos)).await?;
+                let sources =
+                    crate::pipeline::checkout(&ctx, &crate::config::expanded(&repos)).await?;
                 crate::pipeline::link(&ctx, sources, true, scip).await
             };
             match run.await {

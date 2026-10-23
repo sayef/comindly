@@ -15,6 +15,33 @@ git_tag_name = "v{{ version }}"
 git_release_enable = true
 git_release_name = "v{{ version }}"
 
+# The four crates share one version and are released together; only `comindly` carries the tag,
+# the GitHub release and the changelog.
+[[package]]
+name = "comindly"
+version_group = "comindly"
+
+[[package]]
+name = "comindly-core"
+version_group = "comindly"
+changelog_update = false
+git_tag_enable = false
+git_release_enable = false
+
+[[package]]
+name = "comindly-server"
+version_group = "comindly"
+changelog_update = false
+git_tag_enable = false
+git_release_enable = false
+
+[[package]]
+name = "comindly-ui"
+version_group = "comindly"
+changelog_update = false
+git_tag_enable = false
+git_release_enable = false
+
 [changelog]
 header = """# Changelog
 

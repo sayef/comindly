@@ -1,0 +1,17 @@
+[package]
+name = "comindly-ui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "comindly's web app, built and embedded."
+documentation = "https://docs.rs/comindly-ui"
+build = "build.rs"
+# An allowlist, so the git-ignored `dist` (built before publishing) ships in the crate.
+include = ["/build.rs", "/lib.rs", "/dist/**", "/Cargo.toml"]
+
+[lib]
+path = "lib.rs"

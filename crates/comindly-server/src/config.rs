@@ -565,5 +565,11 @@ pub async fn save_team(
     expected: Option<u64>,
 ) -> Result<u64> {
     let me = local_identity();
-    crate::team::save_as(root, settings, expected, me.name.as_deref().unwrap_or(&me.actor)).await
+    crate::team::save_as(
+        root,
+        settings,
+        expected,
+        me.name.as_deref().unwrap_or(&me.actor),
+    )
+    .await
 }

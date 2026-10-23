@@ -36,8 +36,7 @@ impl Data {
         conventions.extend(crate::index::read_recipes_blocking(&dir).unwrap_or_default());
         let manual = crate::conventions::manual_blocking(root).unwrap_or_default();
         let records = crate::ledger::all_blocking(root).unwrap_or_default();
-        let mut entries =
-            crate::ledger::derive(&records, &symbols, verifier);
+        let mut entries = crate::ledger::derive(&records, &symbols, verifier);
         let packages = crate::index::read_packages_blocking(&dir).unwrap_or_default();
         let findings = crate::checks::run(&entries, &symbols, &edges, &packages);
         crate::checks::promote(&mut entries, &findings);
@@ -78,4 +77,3 @@ impl Data {
         Data::load(root, verifier).unwrap_or_else(|e| Data::empty(root, format!("{e:#}")))
     }
 }
-

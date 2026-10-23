@@ -403,7 +403,14 @@ mod tests {
             "rs-lib",
             "rs-app",
         ] {
-            rows.extend(scan(&Path::new("tests/fixtures/org").join(repo), repo));
+            rows.extend(scan(
+                &Path::new(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../tests/fixtures/org"
+                ))
+                .join(repo),
+                repo,
+            ));
         }
         let deps = internal(&rows);
         let pairs: Vec<(&str, &str, &str)> = deps

@@ -465,7 +465,10 @@ mod tests {
 
     #[test]
     fn fixture_module_names() {
-        let common = RepoPackages::discover(Path::new("tests/fixtures/org/pkg-common"));
+        let common = RepoPackages::discover(Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/org/pkg-common"
+        )));
         assert_eq!(
             common.module_names("src/acme/common/http.py", &Language::Python),
             vec!["acme.common.http"]
@@ -475,13 +478,19 @@ mod tests {
             vec!["acme.common"]
         );
 
-        let svc = RepoPackages::discover(Path::new("tests/fixtures/org/service-a"));
+        let svc = RepoPackages::discover(Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/org/service-a"
+        )));
         assert_eq!(
             svc.module_names("service_a/users.py", &Language::Python),
             vec!["service_a.users"]
         );
 
-        let kit = RepoPackages::discover(Path::new("tests/fixtures/org/ui-kit"));
+        let kit = RepoPackages::discover(Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/org/ui-kit"
+        )));
         assert_eq!(
             kit.module_names("src/index.ts", &Language::TypeScript),
             vec!["@acme/ui-kit/src/index", "@acme/ui-kit/src", "@acme/ui-kit"]

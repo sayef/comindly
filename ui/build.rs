@@ -1,11 +1,11 @@
-//! Embeds the web UI (`ui/dist`, built with `npm run build` in `ui/`) into the binary. Without a
-//! build, a short page explains how to make one.
+//! Embeds the built web app (`dist`, from `npm run build`). Without a build, a short page explains
+//! how to make one.
 
 use std::path::{Path, PathBuf};
 
 fn main() {
-    let dist = Path::new("ui/dist");
-    println!("cargo:rerun-if-changed=ui/dist");
+    let dist = Path::new("dist");
+    println!("cargo:rerun-if-changed=dist");
     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap());
     let mut files = Vec::new();
     if dist.join("index.html").is_file() {

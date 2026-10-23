@@ -1562,7 +1562,10 @@ fn cmd_repo_list(what: Option<ReposWhat>, from: Option<&str>) -> ExitCode {
         Some(ReposWhat::Add { paths }) => {
             for p in paths {
                 let entry = if p.contains("://") || p.starts_with("git@") {
-                    match comindly::hosting::managed_path(Path::new(&comindly::config::data_dir()), &p) {
+                    match comindly::hosting::managed_path(
+                        Path::new(&comindly::config::data_dir()),
+                        &p,
+                    ) {
                         Ok(dest) => RepoEntry {
                             path: dest.to_string_lossy().into_owned(),
                             remote: Some(p.clone()),
