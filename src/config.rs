@@ -424,6 +424,37 @@ pub fn local_allowed_signers() -> Option<PathBuf> {
 }
 
 /// Signature checks with this machine's `allowed_signers`.
+/// The deployment's token for `host`: `GH_TOKEN`/`GITHUB_TOKEN` for github.com, `GITLAB_TOKEN` for
+/// gitlab.com and the hosts in `COMINDLY_GITLAB_HOSTS` (or their `_FILE`).
+pub fn env_token(host: &str) -> Option<String> {
+    let host = host.to_ascii_lowercase();
+    let gitlab = host == "gitlab.com"
+        || crate::server::env_secret("COMINDLY_GITLAB_HOSTS").is_some_and(|hosts| {
+            hosts
+                .split([',', ' '])
+                .any(|h| h.trim().eq_ignore_ascii_case(&host))
+        });
+    let vars: &[&str] = if host == "github.com" {
+        &["GH_TOKEN", "GITHUB_TOKEN"]
+    } else if gitlab {
+        &["GITLAB_TOKEN"]
+    } else {
+        &[]
+    };
+    vars.iter().find_map(|v| crate::server::env_secret(v))
+}
+
+/// Git tokens for indexing: the deployment's, then on a server the ones stored there.
+pub fn git_credentials() -> std::sync::Arc<dyn crate::worktree::Credentials> {
+    std::sync::Arc::new(|host: &str| {
+        env_token(host).or_else(|| {
+            crate::server::enabled()
+                .then(|| crate::server::git_token(host))
+                .flatten()
+        })
+    })
+}
+
 pub fn local_verifier() -> crate::signing::Verifier {
     let cache = std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache/comindly/verified"));
     crate::signing::Verifier::new(local_allowed_signers(), cache)

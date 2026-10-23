@@ -84,15 +84,15 @@ pub fn checkout<'a>(
                 if !path.exists() {
                     r.note(format!("cloning {url}"));
                 }
-                let dest = path.clone();
+                let (dest, git) = (path.clone(), ctx.git.clone());
                 blocking(move || {
-                    crate::worktree::ensure_clone(&url, &dest)
+                    crate::worktree::ensure_clone(&url, &dest, git.as_ref())
                         .map_err(|e| anyhow::anyhow!("{url}: {e:#}"))
                 })
                 .await??;
             }
-            let dir = path.clone();
-            let c = blocking(move || crate::worktree::prepare(&dir))
+            let (dir, git) = (path.clone(), ctx.git.clone());
+            let c = blocking(move || crate::worktree::prepare(&dir, git.as_ref()))
                 .await?
                 .with_context(|| path.display().to_string())?;
             r.done(format!(

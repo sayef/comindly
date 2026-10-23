@@ -9,6 +9,7 @@ use crate::config::Config;
 use crate::events::{EventSink, Reporter};
 use crate::llm::LlmClient;
 use crate::team::TeamSettings;
+use crate::worktree::{Credentials, NoCredentials};
 
 /// Settings resolved once at the edge: shared settings first, then the environment, then
 /// `config.toml`, then comindly's defaults.
@@ -80,6 +81,8 @@ pub struct IndexContext {
     pub settings: Settings,
     /// Absent: the LLM steps are skipped, and say so.
     pub llm: Option<Arc<LlmClient>>,
+    /// Tokens for cloning and fetching over HTTPS.
+    pub git: Arc<dyn Credentials>,
     pub report: Reporter,
     pub cancel: CancellationToken,
 }
@@ -90,6 +93,7 @@ impl IndexContext {
             root: root.into(),
             settings,
             llm: None,
+            git: Arc::new(NoCredentials),
             report: Reporter::new(events),
             cancel: CancellationToken::new(),
         }
@@ -97,6 +101,11 @@ impl IndexContext {
 
     pub fn with_llm(mut self, llm: Option<LlmClient>) -> Self {
         self.llm = llm.map(Arc::new);
+        self
+    }
+
+    pub fn with_git(mut self, git: Arc<dyn Credentials>) -> Self {
+        self.git = git;
         self
     }
 

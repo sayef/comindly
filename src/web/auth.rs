@@ -501,7 +501,7 @@ fn deployment(name: &str) -> Option<String> {
         return server::env_secret("OPENAI_API_KEY");
     }
     let host = name.strip_prefix("git:")?;
-    crate::worktree::env_token(host)
+    crate::config::env_token(host)
 }
 
 fn label(name: &str) -> String {

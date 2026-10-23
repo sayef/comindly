@@ -369,8 +369,9 @@ pub(super) async fn begin(
         None
     };
     let scip = cfg.scip();
-    let mut ctx =
-        crate::context::IndexContext::new(root.clone(), settings, log.clone()).with_llm(client);
+    let mut ctx = crate::context::IndexContext::new(root.clone(), settings, log.clone())
+        .with_llm(client)
+        .with_git(crate::config::git_credentials());
     ctx.cancel = cancel;
     let app2 = app.clone();
     tokio::spawn(async move {
@@ -442,6 +443,7 @@ async fn moved(app: &Shared) -> anyhow::Result<Vec<String>> {
         .await
         .unwrap_or_default();
     let repos = Config::load().repos;
+    let creds = crate::config::git_credentials();
     tokio::task::spawn_blocking(move || {
         let mut out = Vec::new();
         for r in &repos {
@@ -451,7 +453,7 @@ async fn moved(app: &Shared) -> anyhow::Result<Vec<String>> {
                 out.push(name);
                 continue;
             }
-            let (_, head) = worktree::remote_default(p)?;
+            let (_, head) = worktree::remote_default(p, creds.as_ref())?;
             if indexed
                 .get(&name)
                 .is_none_or(|c| !head.starts_with(c.as_str()) && !c.starts_with(&head))
@@ -507,7 +509,20 @@ pub(super) async fn remote_list(
         let host = source.host.clone();
         let auth = match given.clone() {
             Some(a) => Some(a),
-            None => tokio::task::spawn_blocking(move || worktree::stored_auth(&host)).await?,
+            None => {
+                tokio::task::spawn_blocking(move || {
+                    let token = crate::config::git_credentials().token(&host);
+                    match token {
+                        Some(token) => Some(worktree::Auth {
+                            username: worktree::token_user(&host).into(),
+                            token,
+                        }),
+                        None if crate::server::enabled() => None,
+                        None => worktree::helper_auth(&host),
+                    }
+                })
+                .await?
+            }
         };
         let repos = crate::hosting::list(&source, auth.as_ref()).await?;
         let mut warning = None;

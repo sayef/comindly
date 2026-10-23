@@ -57,47 +57,30 @@ pub fn token_user(host: &str) -> &'static str {
     }
 }
 
-/// A token for `url`'s host from the environment: `GH_TOKEN`/`GITHUB_TOKEN` for GitHub, `GITLAB_TOKEN` for GitLab.
-pub fn env_auth(url: &str) -> Option<Auth> {
-    let host = https_host(url)?;
-    let token = env_token(&host)?;
-    Some(Auth {
-        username: token_user(&host).into(),
-        token,
-    })
+/// Access tokens for HTTPS remotes by host; without one, git's own credential helper answers.
+pub trait Credentials: Send + Sync {
+    fn token(&self, host: &str) -> Option<String>;
 }
 
-/// The deployment's token for `host`: `GH_TOKEN`/`GITHUB_TOKEN` for github.com, `GITLAB_TOKEN` for
-/// gitlab.com and the hosts in `COMINDLY_GITLAB_HOSTS` (or their `_FILE`).
-pub fn env_token(host: &str) -> Option<String> {
-    let host = host.to_ascii_lowercase();
-    let gitlab = host == "gitlab.com"
-        || crate::server::env_secret("COMINDLY_GITLAB_HOSTS").is_some_and(|hosts| {
-            hosts
-                .split([',', ' '])
-                .any(|h| h.trim().eq_ignore_ascii_case(&host))
-        });
-    let vars: &[&str] = if host == "github.com" {
-        &["GH_TOKEN", "GITHUB_TOKEN"]
-    } else if gitlab {
-        &["GITLAB_TOKEN"]
-    } else {
-        &[]
-    };
-    vars.iter().find_map(|v| crate::server::env_secret(v))
+/// No tokens: git's credential helper and SSH keys only.
+pub struct NoCredentials;
+
+impl Credentials for NoCredentials {
+    fn token(&self, _: &str) -> Option<String> {
+        None
+    }
 }
 
-/// A token for cloning or fetching `url` without asking: the deployment's, else on a server the
-/// one stored there. Elsewhere git's own credential helper answers.
-pub fn auth_for(url: &str) -> Option<Auth> {
-    if let Some(a) = env_auth(url) {
-        return Some(a);
+impl<F: Fn(&str) -> Option<String> + Send + Sync> Credentials for F {
+    fn token(&self, host: &str) -> Option<String> {
+        self(host)
     }
-    if !crate::server::enabled() {
-        return None;
-    }
+}
+
+/// A token for cloning or fetching `url` without asking.
+pub fn auth_for(url: &str, creds: &dyn Credentials) -> Option<Auth> {
     let host = https_host(url)?;
-    crate::server::git_token(&host).map(|token| Auth {
+    creds.token(&host).map(|token| Auth {
         username: token_user(&host).into(),
         token,
     })
@@ -197,8 +180,8 @@ pub fn default_branch(repo: &Path) -> Result<String> {
 }
 
 /// The remote's default branch and its commit, asked from the remote; also records it as `origin/HEAD`.
-pub fn remote_default(repo: &Path) -> Result<(String, String)> {
-    let auth = remote_url(repo).and_then(|u| auth_for(&u));
+pub fn remote_default(repo: &Path, creds: &dyn Credentials) -> Result<(String, String)> {
+    let auth = remote_url(repo).and_then(|u| auth_for(&u, creds));
     let out = git_auth(
         repo,
         &["ls-remote", "--symref", "origin", "HEAD"],
@@ -246,13 +229,13 @@ fn worktree_dir(repo: &Path) -> Result<PathBuf> {
 
 /// Fetch the remote's default branch and check it out in comindly's worktree, detached, so your
 /// folder and branches are never touched. Offline, the last known default branch is used.
-pub fn prepare(repo: &Path) -> Result<Checkout> {
+pub fn prepare(repo: &Path, creds: &dyn Credentials) -> Result<Checkout> {
     if !repo.join(".git").exists() {
         bail!("{} is not a git repository", repo.display());
     }
     let mut stale = None;
     let branch = if has_origin(repo) {
-        match remote_default(repo) {
+        match remote_default(repo, creds) {
             Ok((b, _)) => b,
             Err(e) => {
                 stale = Some(format!("{e:#}"));
@@ -266,7 +249,7 @@ pub fn prepare(repo: &Path) -> Result<Checkout> {
     let auth = has_origin(repo)
         .then(|| git(repo, &["remote", "get-url", "origin"]).ok())
         .flatten()
-        .and_then(|u| auth_for(&u));
+        .and_then(|u| auth_for(&u, creds));
     let target = if has_origin(repo) {
         let target = format!("origin/{branch}");
         if let Err(e) = git_auth(
@@ -349,13 +332,13 @@ pub fn scan(dir: &Path, depth: usize) -> Vec<PathBuf> {
 /// Clone `url` into `parent/<name>` with your git credentials; returns the new folder.
 /// comindly's own copy of `url` at `dest`: cloned once, without a checkout (indexing uses its worktree)
 /// and without file contents until needed; later runs only fetch.
-pub fn ensure_clone(url: &str, dest: &Path) -> Result<()> {
+pub fn ensure_clone(url: &str, dest: &Path, creds: &dyn Credentials) -> Result<()> {
     if dest.join(".git").exists() || dest.join("HEAD").exists() {
         return Ok(());
     }
     let parent = dest.parent().context("clone folder")?;
     std::fs::create_dir_all(parent)?;
-    let auth = auth_for(url);
+    let auth = auth_for(url, creds);
     let d = dest.to_string_lossy();
     let args = [
         "clone",
@@ -376,17 +359,8 @@ pub fn ensure_clone(url: &str, dest: &Path) -> Result<()> {
     Ok(())
 }
 
-/// A token for `host`: the environment, the server's stored tokens, or your git credential helper.
-pub fn stored_auth(host: &str) -> Option<Auth> {
-    if let Some(a) = env_auth(&format!("https://{host}/")) {
-        return Some(a);
-    }
-    if crate::server::enabled() {
-        return crate::server::git_token(host).map(|token| Auth {
-            username: token_user(host).into(),
-            token,
-        });
-    }
+/// What your git credential helper holds for `host`.
+pub fn helper_auth(host: &str) -> Option<Auth> {
     let input = format!("protocol=https\nhost={host}\n\n");
     let out = credential("fill", &input)?;
     let field = |k: &str| {
@@ -471,7 +445,7 @@ mod tests {
         g(&origin, &["add", "."]);
         g(&origin, &["commit", "--quiet", "-m", "two"]);
 
-        let c = prepare(&mine).unwrap();
+        let c = prepare(&mine, &NoCredentials).unwrap();
         assert_eq!(c.target, "origin/main");
         assert!(
             c.dir.join("b.py").exists(),
@@ -481,7 +455,10 @@ mod tests {
         assert_eq!(current_branch(&mine).as_deref(), Some("feature"));
         assert!(mine.join("wip.py").exists(), "your folder is untouched");
         g(&mine, &["checkout", "--quiet", "main"]);
-        assert!(prepare(&mine).is_ok(), "a second run reuses the worktree");
+        assert!(
+            prepare(&mine, &NoCredentials).is_ok(),
+            "a second run reuses the worktree"
+        );
         remove(&mine).unwrap();
         assert!(!c.dir.exists());
         assert_eq!(scan(&base, 1).len(), 2);
@@ -502,11 +479,11 @@ mod tests {
         g(&origin, &["commit", "--quiet", "-m", "one"]);
         let url = format!("file://{}", origin.display());
         let mine = base.join("managed").join("origin");
-        ensure_clone(&url, &mine).unwrap();
-        ensure_clone(&url, &mine).unwrap();
-        let (branch, commit) = remote_default(&mine).unwrap();
+        ensure_clone(&url, &mine, &NoCredentials).unwrap();
+        ensure_clone(&url, &mine, &NoCredentials).unwrap();
+        let (branch, commit) = remote_default(&mine, &NoCredentials).unwrap();
         assert_eq!(branch, "trunk");
-        let c = prepare(&mine).unwrap();
+        let c = prepare(&mine, &NoCredentials).unwrap();
         assert_eq!(c.target, "origin/trunk");
         assert_eq!(c.commit, commit[..c.commit.len()]);
         assert!(c.dir.join("a.py").exists());

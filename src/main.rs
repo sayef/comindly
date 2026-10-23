@@ -2563,7 +2563,8 @@ where
             settings,
             Arc::new(comindly::ui::Terminal::new()),
         )
-        .with_llm(llm);
+        .with_llm(llm)
+        .with_git(comindly::config::git_credentials());
         let cancel = ctx.cancel.clone();
         tokio::spawn(async move {
             if tokio::signal::ctrl_c().await.is_ok() {
