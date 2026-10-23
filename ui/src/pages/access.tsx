@@ -94,7 +94,7 @@ export function MembersPage() {
 
       <Section
         title="Members"
-        description="Admins manage repositories, indexing, members and the server's tokens. Members use everything else."
+        description="Admins named by the deployment are always admins; change anyone else's role here."
       >
         <Table>
           <thead>

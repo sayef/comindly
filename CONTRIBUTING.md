@@ -18,13 +18,14 @@ brew install protobuf cmake                          # macOS
 sudo apt-get install -y protobuf-compiler cmake      # Debian/Ubuntu
 
 git clone https://github.com/sayef/comindly && cd comindly
-cargo test
+cargo test --workspace
 cargo run -q -- eval graph -v                        # resolver quality on the fixture org
 ```
 
 Tests that need a bucket or an LLM key are opt-in; everything else runs offline.
 
-The web UI lives in `ui/` (React, TypeScript, Vite) and is embedded into the binary at build time. Without
+The web UI lives in `ui/` (React, TypeScript, Vite), which is also the `comindly-ui` crate that embeds its
+build into the binary. Without
 a build, `comindly ui --web` serves a placeholder page. With Node 24:
 
 ```sh
@@ -35,7 +36,7 @@ cd ui && npm run dev                                 # hot reload on 127.0.0.1:5
 
 ## Checklist for a pull request
 
-- `cargo fmt --all` and `cargo clippy --all-targets -- -D warnings` are clean.
+- `cargo fmt --all` and `cargo clippy --workspace --all-targets -- -D warnings` are clean.
 - UI changes build with `npm run build` in `ui/` (type-checked).
 - `cargo deny check` passes (licences, advisories and sources; install with `cargo install cargo-deny --locked`).
 - New behaviour has tests. Resolver, contract and infrastructure changes add cases to
@@ -53,9 +54,16 @@ cd ui && npm run dev                                 # hot reload on 127.0.0.1:5
 
 ## Project layout
 
-One crate: a library with one module per pipeline stage, and the `comindly` binary
-(see [ARCHITECTURE.md](ARCHITECTURE.md)). Language support lives in `src/lang/` behind the `LangSpec`
-trait; contract linking in `src/resolve/contracts.rs`.
+A cargo workspace (see [ARCHITECTURE.md](ARCHITECTURE.md)):
+
+- `crates/comindly-core`: the engine, one module per pipeline stage. It reads no environment or files of
+  its own; anything it needs is passed in. Language support lives in `src/lang/` behind the `LangSpec`
+  trait; contract linking in `src/resolve/contracts.rs`.
+- `crates/comindly-server`: the web app's API, MCP, jobs, accounts and roles, and this machine's
+  preferences and credentials.
+- `ui/`: the web app, and the `comindly-ui` crate that embeds it.
+- The root: the `comindly` command, the terminal UI and the macOS window. Integration tests, fixtures,
+  benches and examples live here too.
 
 ## Style
 
@@ -71,8 +79,9 @@ trait; contract linking in `src/resolve/contracts.rs`.
 
 Every push to `main` opens or updates a release pull request (version bump and changelog entry). Merging
 it publishes nothing. To release, run the **Release-plz** workflow by hand (Actions → Release-plz → Run
-workflow, or `gh workflow run release-plz.yml`): it publishes the crate, tags `v<version>`, creates the
-GitHub release, and the Release workflow attaches the binaries.
+workflow, or `gh workflow run release-plz.yml`): it publishes the four crates at one version, in
+dependency order, tags `v<version>`, creates the GitHub release, and the Release workflow attaches the
+binaries.
 
 ## Commit messages
 

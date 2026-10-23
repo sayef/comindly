@@ -87,21 +87,25 @@ e.g.  scip-python  pip  acme  1.4.0  `acme/foo`/bar().
 
 ## Layers
 
-comindly is three layers in one repository. Each depends only on the one below it.
+comindly is four crates in one cargo workspace. Each depends only on those below it, and the compiler
+enforces the boundaries.
 
 ```
-  comindly (CLI)      clap facade: local single-user mode, `comindly server`, and a client of a running
-                      server (`--server <url>`, `comindly login`). Terminal rendering, the TUI, the desktop app.
+  comindly            the command: local mode, the web app's local server, and a client of a running
+                      server (`comindly login`, `--server`). The terminal UI and the macOS window.
         │
-  comindly-server     axum: the versioned HTTP API, MCP over HTTP, the web app, sign-in, the job runner.
-                      Builds a context per request and per job and hands it to core.
-        │
-  comindly-core       the engine as an async library: parsing, binding, contracts, flows, the graph,
-                      search, LLM steps, the ledger, index storage. No environment, no config files,
-                      no process-wide state, no terminal output: everything it needs is passed in.
+  comindly-server     axum: `/api/v1`, MCP over HTTP and stdio, the web app, sign-in and roles, jobs,
+                      the backends; and this machine's preferences, credentials and checks, since the
+                      local app runs on it too.
+        │         ╲
+  comindly-core     comindly-ui
+  the engine as an  the web app (React, in `ui/`), built and embedded
+  async library
 ```
 
-The layers are crates in one cargo workspace, so the compiler enforces the boundaries.
+`comindly-core` reads no environment, no files of its own and no process-wide state, and prints
+nothing: everything a call needs is passed in. The `comindly` library re-exports the server, which
+re-exports core, so `comindly::graph` is `comindly_core::graph`.
 
 ### comindly-core
 
@@ -111,56 +115,58 @@ The layers are crates in one cargo workspace, so the compiler enforces the bound
 | Binding and contracts | `resolve`, `resolve/contracts` |
 | Derived knowledge | `conventions`, `recipes`, `checks`, `preflight`, `eval` |
 | Index storage | `index` (Lance tables, versions, incremental change detection), `storage` (folder, `s3://`, `gs://`, `az://`) |
-| Queries | `graph` (ripple, thread, zoom, flows, ranking), `embed` (Model2Vec + code-aware ranking), `search` |
+| Queries | `graph` (ripple, thread, zoom, flows, ranking), `embed` (Model2Vec + code-aware ranking), `search`, `answers` (what the read commands answer), `view` (what the apps show of an index) |
 | LLM steps | `llm` (summaries, flow walkthroughs, style guides), `styleguide` |
 | Ledger | `ledger`, `signing` |
-| Sources | `worktree` (comindly's own checkouts), `hosting` (listing GitHub organisations and GitLab groups), `git` |
-| Indexing pipeline | `pipeline`: the steps from checkout to style guides as one async `Indexer` |
-| Context and events | `context` (what a call needs), `events` (what it reports) |
+| Sources | `worktree` (comindly's own checkouts, git credentials as a trait), `hosting` (listing GitHub organisations and GitLab groups), `git` |
+| Indexing | `pipeline`: checkout, link and single-repo indexing as async, cancellable steps |
+| Settings | `team` (an index's shared settings), `docstore` (a versioned settings document in LanceDB) |
+| Plumbing | `context` (what a call needs), `events` (what it reports), `rt` (the process's one runtime) |
 
 ### comindly-server
 
 | Area | Modules |
 |---|---|
-| HTTP | `api` (`/api/v1`), `web` (the embedded React app), `mcp_http` (MCP over streamable HTTP) |
-| Access | `auth` (sessions, personal access tokens, sign-in by email or code), `backends` (the default stores) |
-| Work | `jobs` (queue, runner, cancellation, events, history) |
-| Process | `config` (`ServerConfig`), `health`, graceful shutdown |
+| HTTP | `web` and `web/*` (`/api/v1`, the embedded app, `/health`, `/ready`, graceful shutdown), `mcp` (the tools, over streamable HTTP and stdio) |
+| Access | `server` (`ServerConfig`, roles, the default account store), `backends` (the traits and SMTP) |
+| Work | `jobs` (runner, cancellation, records, live events) |
+| This machine | `config` (preferences, identity and signing), `credentials` (API keys and the server sign-in), `doctor`, `cache` (the hooks' local mirror), `ui` (events as terminal lines or JSON logs) |
 
-### comindly (CLI)
+### comindly
 
-`main`, `commands/` (one module per command group), `client` (the typed `/api/v1` client), `render`
-(terminal output of core events: colours, progress bars, tables), `tui`, `app` (desktop window),
-`doctor`, `credentials`.
+`main` (commands), `remote` (commands answered by a server), `client` (the typed `/api/v1` client and
+sign-in by browser approval), `tui`, `app` (macOS).
 
 ## Contexts, not globals
 
-Core never asks "what is the current team" or reads `config.toml`. A call receives what it needs:
+Core never asks "what is the current team" or reads a settings file. A call receives what it needs:
 
 ```rust
 pub struct IndexContext {
-    pub storage: Storage,                 // where the index lives, with its object store
-    pub settings: Settings,               // models, LLM steps, limits, prices: resolved once
-    pub llm: Option<Arc<dyn LlmClient>>,  // absent: LLM steps are skipped and say so
-    pub embedder: Arc<Embedder>,
-    pub secrets: Arc<dyn SecretStore>,    // git and LLM tokens, by name
-    pub events: Arc<dyn EventSink>,       // progress, results, warnings
+    pub root: String,                     // where the index lives: a folder or a bucket location
+    pub settings: Settings,               // models, LLM steps, limits, prices, SCIP: resolved once
+    pub llm: Option<Arc<LlmClient>>,      // absent: LLM steps are skipped and say so
+    pub git: Arc<dyn Credentials>,        // tokens for cloning and fetching over HTTPS
+    pub report: Reporter,                 // events: steps, results, warnings, progress
     pub cancel: CancellationToken,
+    pub cache: PathBuf,                   // comindly's checkouts of each repository
 }
 ```
 
-The server builds one per request or job from its `ServerConfig` and its stores; the CLI builds one from
-the command line, the environment and `config.toml`. Reads share an `IndexReader`: the loaded graph,
-search index and ledger behind an `Arc`, swapped atomically when a new index version appears.
+The server builds one per job from its settings and stores; the command line builds one from its
+flags, the environment and the preferences. Ledger writes take the signer and the writer's identity as
+arguments, and reads take the verifier. The web app holds the loaded index (`view::Data`) behind an
+`Arc` and swaps it when a new version is indexed.
 
 ## Async model
 
-- One Tokio multi-thread runtime per process, created in `main`. Core's API is `async`; no function
-  builds its own runtime, and nothing blocks inside async code.
-- CPU-bound work (parsing, binding, graph building, embeddings) runs on a bounded blocking pool
-  (`spawn_blocking`), so request handling stays responsive while a large index builds.
+- One Tokio multi-thread runtime per process (`rt::shared`). Core's API is `async`; no function builds
+  its own runtime. Synchronous callers block through `rt::block_on`, which hands the worker's other
+  tasks over while it waits.
+- CPU-bound work (parsing, binding, graph building, embeddings) runs on the blocking pool
+  (`spawn_blocking`), so requests stay responsive while a large index builds.
 - I/O (object storage, LLM requests, git hosting APIs) is async. LLM requests share one client with a
-  per-call concurrency limit from the settings.
+  concurrency limit from the settings, and stop when the job is cancelled.
 - Cloning, fetching and checkouts use the `git` program on the blocking pool: partial clones
   (`--filter=blob:none`) and the machine's credential helpers need it. Cancellation takes effect
   between repositories. `ssh-keygen` is used only for optional record signing.
@@ -169,79 +175,81 @@ search index and ledger behind an `Arc`, swapped atomically when a new index ver
 
 Indexing runs inside the server as a job, not as a child process.
 
-- **Queue and runner.** Jobs are queued and run with bounded concurrency; one indexing job per index at
-  a time. A job has an id, a kind, who started it, a status (queued, running, succeeded, failed,
-  cancelled, interrupted) and its events.
+- **One at a time.** A job has an id, a kind, who started it, a status (running, succeeded, failed,
+  cancelled, interrupted) and its events. Starting another while one runs is refused.
 - **Cancellation.** A `CancellationToken` checked between units of work; cancelling stops LLM requests
   in flight and leaves everything already saved in place.
 - **Resumable steps.** Summaries, flow walkthroughs and style guides are saved as they are written and
   reused while their input is unchanged, so a cancelled or interrupted job continues where it stopped.
-- **Events.** Each job's events go to its `EventSink`: kept with the job, streamed to the app
-  (`/api/v1/jobs/{id}/events`, server-sent events) and written to the log as JSON.
-- **Restarts.** A job running when the process stops is marked interrupted at start-up and can be run
-  again; nothing is lost that was already saved.
+- **Events.** Each job's events are kept with its record (the last 400; progress replaces earlier
+  progress of the same step), streamed live (`/api/v1/jobs/{id}/events`, server-sent events) and
+  written to the log. The record is saved when the job starts, every 15 seconds and when it ends.
+- **Restarts.** A job still marked running at start-up was cut off and is marked interrupted.
 
-The CLI runs the same `Indexer` in the foreground and renders its events in the terminal.
+The command line runs the same pipeline in the foreground and renders its events in the terminal; with
+a server, `comindly link` starts the server's job and follows its events instead.
 
 ## Backends
 
-What the server stores and how it authenticates are traits, with comindly's defaults behind them:
+What the server stores and how it signs people in are traits, with comindly's defaults behind them:
 
 | Trait | Default |
 |---|---|
-| `AccountStore` (members, sessions, codes, personal access tokens) | signed LanceDB table at the index location |
+| `AccountStore` (members, roles, invitations, sessions, codes, personal access tokens) | signed LanceDB table at the index location (`_server`) |
+| `Authenticator` (session cookie or bearer token → who) | the same table, plus the deployment's admin token |
+| `DeviceSignIn` (command-line sign-in approved in the browser) | the same table; the issued token sealed until collected |
 | `SecretStore` (git and LLM tokens) | the same table, values encrypted with `COMINDLY_SECRET_KEY` |
-| `SettingsStore` (shared settings, repository list) | the same table |
-| `JobStore` (job records and their events) | the same table, events capped per job |
-| `Authenticator` (request → who, or refusal) | session cookie, personal access token, admin token |
+| `SettingsStore` (the repositories the server indexes) | the same table |
+| `JobStore` (job records and their events) | the same table; the local app keeps them in memory |
 | `Mailer` | SMTP (`COMINDLY_SMTP_URL`) |
-| `EventSink` | the job's record, the app's event stream and JSON logs |
 
-Other implementations, for example a relational database or single sign-on, plug in without changes to
-core or to the HTTP layer.
+Rows in the table are signed with a key derived from `COMINDLY_SECRET_KEY`, so rows written by anyone
+else are ignored. Other implementations, for example a relational database or single sign-on, plug in
+without changes to core or to the HTTP layer.
+
+## Roles
+
+Admin, member and viewer. Viewers read; members also write to the ledger and conventions; admins also
+manage people, repositories, settings, secrets and indexing. The HTTP layer checks the role a request
+needs, the account store checks who may change whom, and MCP tools that write check the role of the
+person whose token the agent uses.
 
 ## API
 
-- `/api/v1`: JSON, with request and response types defined once in Rust and shared by the server and
-  the CLI's client. The web app uses the same API.
+- `/api/v1`: JSON. The web app and the command line use it. The answers the read commands print
+  (`/api/v1/answer/*`) are the types in `comindly_core::answers`, computed by the same functions locally
+  and on a server, so `--server` prints what a local run does.
 - Errors: one shape, `{ "error": { "code", "message" } }`, with HTTP status codes that mean what they say.
 - `/mcp`: MCP over streamable HTTP for agents, with a personal access token.
-- `/health` (alive) and `/ready` (the index is loaded and the stores answer).
+- `/health` (alive) and `/ready` (an index is loaded and the accounts can be read).
 
 ## Configuration
 
-The server reads its configuration once at start into a `ServerConfig`: `COMINDLY_*` variables, each
-also accepted as `*_FILE`, with defaults. Nothing below `main` reads the environment. Shared settings
-changed in the app go through the `SettingsStore` and reach running code through a watch channel.
+| Whose | Where | Read |
+|---|---|---|
+| The deployment's | `COMINDLY_*` variables, each also as `*_FILE` | once at start into `ServerConfig`, checked |
+| A server's own | the `SettingsStore` | when used |
+| An index's shared settings | `<index>/_team`, a versioned document | when an index is loaded, and after each save |
+| One person's preferences | a versioned document in the config folder; TOML files are imported and exported | the app re-reads them every few seconds |
 
-The CLI keeps `config.toml` for one person's preferences and credentials.
+API keys and the server sign-in stay in a credentials file readable only by its owner.
 
 ## Observability
 
 - Every message is an event: timestamp, level, kind, step, message and fields (counts, tokens, cost).
   `COMINDLY_LOG_FORMAT=json` writes one JSON object per line; otherwise readable lines.
-- Requests and jobs carry ids (`request_id`, `job_id`) through their events.
-- Graceful shutdown: stop accepting requests, cancel running jobs at their next checkpoint, flush.
+- A job's events carry its `job_id`.
+- Graceful shutdown: on SIGTERM or Ctrl-C, stop accepting requests, let a running job stop at its next
+  checkpoint and save its record.
 
-## Moving to this (0.4.0)
+## What 0.4.0 changed
 
-0.4.0 ships all of it at once. The order of work:
-
-1. **Pipeline into core.** Move indexing (`cmd_link` and the `run_*` steps, now in the CLI binary) into
-   `core::pipeline` as an async `Indexer` that reports events and honours cancellation.
-2. **One runtime.** Replace the `*_blocking` wrappers (33 functions, each building a runtime) with async
-   calls; CPU work moves to the blocking pool.
-3. **Contexts.** Introduce `IndexContext` and `ServerConfig`; remove `team::current()`, the store
-   singletons and `Config::load()` / environment reads below `main` (today in `llm`, `ledger`, `signing`,
-   `embed`, `mcp`, `server`, `web`).
-4. **Backends.** Put the stores, authentication and mail behind the traits above, the current behaviour
-   as the defaults.
-5. **Jobs.** The job runner replaces the child process and signals; events stream to the app.
-6. **API.** `/api/v1` with shared types; the web app and a new CLI client use it; `--server` and
-   `comindly login` in the CLI.
-7. **Crates.** Split into `comindly-core`, `comindly-server` and `comindly`.
-
-Deployments keep the same image, environment variables and storage layout; no re-indexing.
+0.4.0 rebuilt comindly as described above, in one release: indexing moved into core as an async,
+cancellable pipeline; one runtime per process; contexts instead of process-wide state; the stores,
+sign-in and mail behind traits; indexing as jobs inside the server; `/api/v1` with one error shape;
+roles; the command line as a client; settings moved to where they belong; and the crates above.
+Deployments keep the same image, environment variables and storage layout; settings an older server
+kept move over on first start, and nothing is re-indexed.
 
 ## Competitive landscape
 

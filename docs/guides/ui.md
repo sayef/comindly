@@ -58,12 +58,16 @@ new one.
   comindly indexes all repositories together so cross-repo links stay complete, so **Index now** waits
   until every indexed repository has a folder here, unless you choose to drop the missing ones. With
   **Re-index automatically** on (`auto_index`), the app checks every freshness interval whether a default
-  branch moved on the remote and re-indexes without LLM steps when one did.
-- **Settings**: the index location (with a connection test), the team settings (shared LLM and
-  embedding model), your own API key, your name on ledger records, and how often to check for a
-  new index version. Changing the index location switches the UI without a restart.
-  On a team server, Settings also has **Members** and **Integrations** (admins) and **Your access**
-  (your sign-in code, personal access tokens and how to connect an agent).
+  branch moved on the remote and re-indexes without LLM steps when one did; it is one of the index's
+  shared settings.
+- **Settings**: the index location (with a connection test), the index's shared settings (LLM
+  endpoint and model, embedding model, LLM steps, limits and prices), your own API key, your name on
+  ledger records, and how often to check for a new index version. Changing the index location switches
+  the UI without a restart. On a team server, Settings also has **Members** and **Integrations**
+  (admins) and **Your access** (your sign-in code, personal access tokens and how to connect an agent);
+  viewers see everything read-only.
+- **Approving a command line**: `comindly login` opens `/device?code=…`; the page shows which machine
+  asks to act as you and the code its terminal shows, with **Approve** and **Deny**.
 - **Get started**: checks of this setup (as `comindly doctor`), how to register the MCP server with
   Claude Code, Cursor, Codex or VS Code with this index's path filled in, hooks, and every MCP tool
   with a question that uses it.
@@ -137,7 +141,8 @@ Get started: register the MCP server with your agent
 ///
 
 What is running shows in the header's corner (indexing with its current step, or any action in
-progress), with **Cancel** where it can be stopped; indexing stops with every process it started. Finished actions appear as toasts in the bottom-right corner.
+progress), with **Cancel** where it can be stopped; indexing stops at its next checkpoint and keeps
+what it already saved. Finished actions appear as toasts in the bottom-right corner.
 
 Press <kbd>⌘K</kbd> (<kbd>Ctrl K</kbd>) anywhere to search: by name, and by describing what you are
 looking for ("where do we retry HTTP calls"), which uses the same hybrid search as the MCP `search`

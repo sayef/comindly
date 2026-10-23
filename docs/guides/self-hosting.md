@@ -7,14 +7,15 @@ all work the same way, with the image `ghcr.io/sayef/comindly` (amd64 and arm64,
 
 ## Settings
 
-The server reads everything from its environment. Each secret can instead be a file named by the
+The server reads its settings from its environment once, when it starts, and refuses to start with a
+message when one is missing or wrong. Each secret can instead be a file named by the
 same variable with `_FILE` (Docker and Kubernetes secrets, Vault, AWS Secrets Manager or Google
 Secret Manager mounts), so rotating one is a change in your secret store and a restart.
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `COMINDLY_PUBLIC_URL` | yes | The address members open, e.g. `https://comindly.example.com`. Setting it turns server mode on. |
-| `COMINDLY_ADMIN_EMAILS` | yes | Comma-separated admins. Always admins; they cannot be removed in the app. |
+| `COMINDLY_ADMIN_EMAILS` | yes | Comma-separated admins. Always admins; they cannot be removed or demoted in the app. |
 | `COMINDLY_ADMIN_TOKEN` | recommended | Your own key, at least 32 random characters: API access as the first admin, and sign-in when email is unavailable. |
 | `COMINDLY_SECRET_KEY` | yes | Encrypts tokens and keys saved in the app and signs every account record, so records added to the bucket by anyone else are ignored. Keep it in your secret store. |
 | `COMINDLY_SECRET_KEY_PREVIOUS` | when rotating | The old key: on start, stored secrets and records are re-encrypted and re-signed with the new one. |
@@ -28,8 +29,10 @@ Secret Manager mounts), so rotating one is a change in your secret store and a r
 | `COMINDLY_LOG_FORMAT` | the image sets it | `json`: one JSON event per line (timestamp, level, step, message, counts, tokens, cost) for Datadog, CloudWatch or Loki. Unset: readable lines. |
 | `COMINDLY_TRUST_PROXY` | behind a proxy | `true` when a proxy you run sets `X-Forwarded-For`, so sign-in limits apply per client. |
 
-Members, sessions, personal tokens and stored secrets live next to the index, in `_server` at the
-index location, so a container keeps nothing it needs on its own disk. Token values are never
+Members, sessions, personal tokens, stored secrets, the repositories the server indexes and the record
+of each indexing job live next to the index, in `_server` at the index location, so a container keeps
+nothing it needs on its own disk. The index's shared settings (models, LLM steps, limits) live with the
+index itself. A server keeps no configuration file. Token values are never
 stored, only their hashes; saved git and LLM keys are encrypted with `COMINDLY_SECRET_KEY`. Email
 addresses, roles and token names are readable to anyone who can read the bucket, like the index.
 
@@ -50,6 +53,17 @@ address for 15 minutes from the same client only, so nobody can lock someone els
 
 **In both**: admins named in `COMINDLY_ADMIN_EMAILS` can always sign in with the admin token too;
 sessions last 30 days; removing a member ends their sessions, codes and tokens.
+
+## Roles
+
+| Role | Can |
+| --- | --- |
+| Viewer | Read everything: the app, the API and agents' tools. Keeps their own access tokens. |
+| Member | Also add to the ledger and the conventions, in the app, from the command line and through agents. |
+| Admin | Also invite, change and remove people, and manage repositories, settings, the server's tokens and indexing. |
+
+Admins named in `COMINDLY_ADMIN_EMAILS` are always admins. An agent works with the role of the person
+whose token it uses.
 
 ![Settings → Members on a server](../assets/screenshots/members.webp#only-light)
 ![Settings → Members on a server](../assets/screenshots/members-dark.webp#only-dark)
@@ -73,10 +87,25 @@ indexed. Nothing is installed on the developer's machine, and no storage credent
 personal access token is for agents and scripts: it reads and writes the index and the ledger, but
 cannot manage the account, its tokens, members or the server's secrets; that needs signing in.
 Records an agent writes say which member it works for; after each re-index, agents get the new
-index without reconnecting.
+index without reconnecting. Ledger records written in the app carry the member's address.
 
-Admins manage repositories, indexing, members and the server's tokens; members use everything
-else. Ledger records written in the app carry the member's address.
+## The command line
+
+Developers point their `comindly` command at the server:
+
+```sh
+comindly login https://comindly.example.com
+```
+
+It prints an address and a short code and opens the browser; once signed in there, the member checks
+the code and approves. The command line then has its own personal access token, named after the
+machine, and `find`, `search`, `why`, `ledger`, `flow`, `contracts`, `conventions`, `remember`,
+`review` and `link` ask the server ([Command line](../reference/cli.md#against-a-server)). Admins can
+start indexing with `comindly link` and follow it in the terminal. `comindly logout` forgets the
+sign-in on that machine; the token can be revoked under Settings → Your access.
+
+![Approving a command line's sign-in](../assets/screenshots/device.webp#only-light)
+![Approving a command line's sign-in](../assets/screenshots/device-dark.webp#only-dark)
 
 ## Tokens and keys
 
@@ -88,8 +117,14 @@ with `read_repository` and `read_api`, or a fine-grained GitHub token with Conte
 ## Deploying
 
 The image listens on port 7878. Give it its settings and secrets, access to the index location,
-and HTTPS in front. `GET /health` answers `200` without signing in, for load balancer and
-orchestrator health checks. It keeps clones of repositories under `/data`; a volume there saves cloning
+and HTTPS in front. Without signing in, `GET /health` answers `200` while the process serves requests,
+and `GET /ready` answers `200` once an index is loaded and the accounts can be read (`503` with the
+reason until then).
+
+Indexing runs inside the server as a job. On SIGTERM the server stops taking requests, lets a running
+job stop at its next checkpoint and saves its record; a job cut off by a crash shows as interrupted after
+the restart. Summaries and walkthroughs already written are kept either way, so the next run continues
+where it stopped. It keeps clones of repositories under `/data`; a volume there saves cloning
 them again after a restart but is not required.
 
 ### Docker
@@ -105,7 +140,7 @@ docker run -d --name comindly -p 127.0.0.1:7878:7878 \
   ghcr.io/sayef/comindly:latest
 ```
 
-Pin a version tag (`ghcr.io/sayef/comindly:0.3.4`) for anything you rely on. Generate the two
+Pin a version tag (`ghcr.io/sayef/comindly:0.4.0`) for anything you rely on. Generate the two
 secrets once, for example with `openssl rand -base64 32`, and keep them in your secret store.
 
 ### Kubernetes
@@ -123,7 +158,7 @@ spec:
       serviceAccountName: comindly   # its cloud role reads the bucket
       containers:
         - name: comindly
-          image: ghcr.io/sayef/comindly:0.3.4
+          image: ghcr.io/sayef/comindly:0.4.0
           ports: [{ containerPort: 7878 }]
           env:
             - { name: COMINDLY_PUBLIC_URL, value: https://comindly.example.com }
@@ -135,7 +170,7 @@ spec:
           volumeMounts:
             - { name: data, mountPath: /data }   # clones of repositories; scratch is fine
             - { name: secrets, mountPath: /run/secrets, readOnly: true }
-          readinessProbe: { httpGet: { path: /health, port: 7878 } }
+          readinessProbe: { httpGet: { path: /ready, port: 7878 } }
           livenessProbe: { httpGet: { path: /health, port: 7878 } }
       volumes:
         - name: data
@@ -166,7 +201,16 @@ your proxy appends to `X-Forwarded-For`.
 ### Backups and upgrades
 
 Back up the index location (bucket versioning works); it holds the index, the ledger and the
-accounts. To upgrade, start the new image tag with the same settings.
+accounts. To upgrade, start the new image tag with the same settings. A server upgraded from 0.3 moves
+the settings it kept from its configuration file into its database and the index on first start.
+
+## API
+
+The app and the command line use the same JSON API under `/api/v1`, signed in with the session cookie
+or a personal access token (`Authorization: Bearer <token>`). Errors have one shape,
+`{"error": {"code": "…", "message": "…"}}`, with an HTTP status that matches. Indexing jobs are under
+`/api/v1/jobs`: their status, their events, and `/api/v1/jobs/{id}/events` streams a running job's
+events as server-sent events.
 
 ## Trying it locally
 

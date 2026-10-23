@@ -2,7 +2,34 @@
 
 use std::sync::{Arc, RwLock};
 
+use comindly::context::{IndexContext, Settings};
+use comindly::events::{Event, EventSink};
 use comindly::graph::CodeGraph;
+use comindly::pipeline::{self, Source};
+
+/// Where indexing reports its steps, results and progress.
+struct Print;
+
+impl EventSink for Print {
+    fn emit(&self, e: Event) {
+        eprintln!("{:?} {}", e.kind, e.message);
+    }
+}
+
+/// Index two repositories into `root`, cross-repo links included.
+#[allow(dead_code)]
+async fn index(root: &str) -> anyhow::Result<()> {
+    let settings = Settings::resolve(&Default::default(), |_| None);
+    let ctx = IndexContext::new(
+        root,
+        settings,
+        Arc::new(Print),
+        "/tmp/comindly-cache".into(),
+    );
+    let sources = vec![Source::at("../orders"), Source::at("../payments")];
+    pipeline::link(&ctx, sources, false, comindly::scip::Mode::Auto).await?;
+    Ok(())
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -34,8 +61,13 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let ledger = comindly::ledger::Ledger::open(&root)?;
-    for record in ledger.all().await? {
+    let records = ledger.all().await?;
+    for record in &records {
         println!("{:?}: {}", record.kind, record.title);
+    }
+    let verifier = comindly::signing::Verifier::default();
+    for entry in comindly::ledger::derive(&records, &symbols, &verifier) {
+        println!("{:?}: {}", entry.status, entry.record.title);
     }
 
     let fresh = std::time::Duration::from_secs(comindly::cache::DEFAULT_TTL);

@@ -6,6 +6,47 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Roles on a server: admins, members and viewers. Viewers read everything; members also add to the
+  ledger and conventions; admins also manage people, repositories, settings, secrets and indexing. An
+  agent works with the role of the person whose token it uses.
+- `comindly login <url>`: sign the command line in to a server by approving it in the browser (a
+  `/device` page shows the machine and a code to compare); `comindly logout` forgets it. `find`,
+  `search`, `why`, `ledger`, `flow`, `contracts`, `conventions`, `remember`, `review` and `link` then ask
+  the server and print what a local run prints; `link` starts indexing there and follows it, and Ctrl-C
+  cancels it there. `--server <url>`, `COMINDLY_SERVER` and `COMINDLY_TOKEN` (for CI) pick a server for
+  one command; `--local` uses the index on this machine.
+- Indexing jobs on a server keep a record: who started them, their status and their events, also after a
+  restart. `/api/v1/jobs` lists them and `/api/v1/jobs/{id}/events` streams a running job's events.
+  A job cut off by a crash shows as interrupted.
+- `GET /ready` for orchestrators: `200` once an index is loaded and the accounts can be read.
+- `comindly config` shows your preferences; `set`, `import <file> [--override]`, `export [file]` and
+  `history` change them, read and write them as TOML, and list earlier versions.
+- The index's shared settings also hold `scip` and `auto_index`.
+- comindly is also published as `comindly-core` (the engine, including indexing as an async,
+  cancellable pipeline that reports events), `comindly-server` and `comindly-ui`.
+
+### Changed
+
+- The HTTP API moved to `/api/v1`, and every error has one shape, `{"error": {"code", "message"}}`, with
+  a matching status.
+- Your preferences are kept in a versioned table instead of `config.toml`. An existing
+  `config.toml` is imported on the first run and renamed `config.toml.imported`; a later one is not read.
+  Models, LLM steps, limits, the output format, SCIP and automatic re-indexing are the index's shared
+  settings only, and settings from an old `config.toml` move there.
+- A server keeps no configuration file: the repositories it indexes are kept with its accounts, and
+  settings a 0.3 server kept move over on its first start.
+- A server reads and checks its settings when it starts and stops with a message when one is missing or
+  wrong. On SIGTERM it stops taking requests and lets a running job stop at its next checkpoint.
+- Indexing from the app or the server runs inside the process as a job; cancelling stops it at its next
+  checkpoint, LLM requests in flight included.
+- Admins named in `COMINDLY_ADMIN_EMAILS` cannot be demoted in the app.
+
+### Removed
+
+- `comindly config init`; `comindly config export` writes a file to start from.
+
 ## [0.3.4](https://github.com/sayef/comindly/compare/v0.3.3...v0.3.4) - 2026-10-23
 
 ### Fixed
@@ -13,7 +54,6 @@ All notable changes to this project are documented here. The format follows
 - Cancel stops indexing in container images too; it relied on a `kill` program that slim images lack.
 
 ## [0.3.3](https://github.com/sayef/comindly/compare/v0.3.2...v0.3.3) - 2026-10-23
-||||||| parent of 785ad0e (Cancel indexing by signalling the process group directly, which works in slim images)
 
 ### Added
 
@@ -32,8 +72,8 @@ All notable changes to this project are documented here. The format follows
   they are written, so an interrupted indexing run continues where it stopped instead of starting over.
 - A limit always picks the same symbols (ties are broken by id).
 - Team settings saved on a server record the admin who saved them; the separate LLM card is gone there.
+
 ## [0.3.2](https://github.com/sayef/comindly/compare/v0.3.1...v0.3.2) - 2026-10-22
-||||||| parent of b145d1b (Cost controls and resumable LLM steps, structured JSON logs, a step-by-step indexing log, and Add all)
 
 ### Fixed
 

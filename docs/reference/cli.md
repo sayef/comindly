@@ -28,11 +28,27 @@
 | `comindly eval graph [--scip <dir>]` | Graph quality on the gold fixture (precision/recall per edge kind) |
 | `comindly repos [add <folders or clone URLs…> \| remove <names…> \| scan <dir>]` | Indexed repositories, and the list `comindly link` indexes when given no folders |
 | `comindly app [--index-dir <dir>]` | The UI in its own window (macOS) |
-| `comindly team [set k=v… \| key]` | Team settings stored with the index (LLM, embedding model, LLM steps); `key` stores your own API key |
+| `comindly team [set k=v… \| key]` | The index's shared settings (models, LLM steps and limits, prices, format, SCIP, automatic re-indexing); `key` stores your own API key |
 | `comindly join <index>` | Use a team's index on this machine |
 | `comindly ui [--web [--port 7878] [--host <addr>] [--open]] [--index-dir <dir>]` | Terminal UI (incl. a ledger timeline), or the web UI on 127.0.0.1 (overview, contracts, flows, ledger review, explorer with a neighbourhood graph, conventions); with `--host 0.0.0.0` and `COMINDLY_PUBLIC_URL`, a team server |
 | `comindly cache refresh [--index-dir <dir>]` | Refresh the local mirror of a remote index that hooks read |
-| `comindly config <path\|init>` | Show or scaffold the config file |
+| `comindly config [set k=v… \| import <file> [--override] \| export [file] \| history \| path]` | Your preferences on this machine, kept with their history; TOML files in and out ([Configuration](../guides/configuration.md)) |
+| `comindly login <url>` / `comindly logout` | Sign in to a comindly server by approving this command line in the browser, or forget the sign-in |
+
+## Against a server
+
+After `comindly login <url>`, these commands ask the server instead of an index on this machine:
+`find`, `search`, `why`, `ledger`, `flow`, `contracts`, `conventions` (listing and changes),
+`remember`, `review` and `link`. They print what the same command prints locally; writes are recorded
+as you, with your role on the server. `link` starts indexing on the server and shows its progress here;
+Ctrl-C cancels it there. The server indexes its own repository list, so `link` takes no folders and
+`index` is refused.
+
+`--server <url>` (or `COMINDLY_SERVER`) picks a server for one command; `COMINDLY_TOKEN` stands in for
+a sign-in, for CI. `--local`, or an explicit `--index-dir`, uses the index on this machine. Every other
+command always runs locally.
+
+## Flags
 
 Run `comindly <command> --help` for every flag. `--index-dir` is a folder or a bucket location (`s3://`, `gs://`, `az://`) and
 defaults to the configured index location.

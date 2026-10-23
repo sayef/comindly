@@ -186,20 +186,21 @@ ledger, packages and search. Shown here on the example shop in [`examples/acme`]
 | `comindly eval graph [--scip <dir>]` | Graph quality on the gold fixture (precision/recall per edge kind) |
 | `comindly repos [add <folders or clone URLs…> \| remove <names…> \| scan <dir>]` | Indexed repositories, and the list `comindly link` indexes when given no folders |
 | `comindly app [--index-dir <dir>]` | The UI in its own window (macOS) |
-| `comindly team [set k=v… \| key]` | Team settings stored with the index (LLM, embedding model, LLM steps); `key` stores your own API key |
+| `comindly team [set k=v… \| key]` | The index's shared settings (models, LLM steps and limits, prices, format, SCIP, automatic re-indexing); `key` stores your own API key |
 | `comindly join <index>` | Use a team's index on this machine |
 | `comindly ui [--web [--port 7878] [--host <addr>] [--open]] [--index-dir <dir>]` | Terminal UI (incl. a ledger timeline), or the web UI on 127.0.0.1 (overview, contracts, flows, ledger review, explorer with a neighbourhood graph, conventions); with `--host 0.0.0.0` and `COMINDLY_PUBLIC_URL`, a team server |
 | `comindly cache refresh [--index-dir <dir>]` | Refresh the local mirror of a remote index that hooks read |
-| `comindly config <path\|init>` | Show or scaffold the config file |
+| `comindly config [set k=v… \| import <file> [--override] \| export [file] \| history \| path]` | Your preferences on this machine, kept with their history; TOML files in and out |
+| `comindly login <url>` / `comindly logout` | Sign in to a comindly server by approving this command line in the browser; reading and recording commands then ask the server (`--local` for the index here) |
 
 Run `comindly <command> --help` for the full flags of any subcommand.
 
 `--index-dir` is a folder or a bucket location (`s3://`, `gs://`, `az://`); it is optional and defaults to the
 configured index location. **All build steps default on** (`embed`, `enrich`, `flows`, `guide`);
-each has a `config.toml` default and a `--x` / `--no-x` override (CLI wins). Embeddings are local;
+each is one of the index's shared settings (`comindly team set`) with a `--x` / `--no-x` override (CLI wins). Embeddings are local;
 `enrich`/`flows`/`guide` call an LLM (cost + send code, need `OPENAI_API_KEY`) — they **skip
 automatically with a warning when no key is set**, so a keyless `index` still builds the graph +
-search. Cap LLM cost with `max_enrich` / `max_flows` in `config.toml`.
+search. Cap LLM cost with `max_enrich` / `max_flows` (`comindly team set`).
 
 ## How it works
 
@@ -256,15 +257,17 @@ src/main.rs    the comindly binary (CLI)
 
 ## For a team
 
-One container runs comindly as a server for a team: members sign in by email or with codes admins
-hand out, admins invite people and manage the GitHub, GitLab and LLM tokens it uses, and the index
-and the accounts live in your own storage (a folder, S3, Google Cloud Storage or Azure), so the
-container keeps nothing on its own disk. See
-[Self-hosting](https://comindly.pages.dev/guides/self-hosting/); `scripts/docker-local.sh` and
-`docker compose up` try it locally. Agents connect to it over HTTP with a personal token.
+One container runs comindly as a server for a team: people sign in by email or with codes admins
+hand out, as admins, members or viewers; admins invite people and manage the GitHub, GitLab and LLM
+tokens it uses; and the index and the accounts live in your own storage (a folder, S3, Google Cloud
+Storage or Azure), so the container keeps nothing on its own disk. Indexing runs inside it as a job
+you can follow and cancel. See [Self-hosting](https://comindly.pages.dev/guides/self-hosting/);
+`scripts/docker-local.sh` and `docker compose up` try it locally. Agents connect to it over HTTP with
+a personal token, and developers' `comindly` commands after `comindly login`.
 
-The crate is also a library: read an index, follow flows and serve the MCP tools from your own
-service ([Using comindly as a library](https://comindly.pages.dev/guides/library/)).
+comindly is also a library: `comindly-core` (the engine), `comindly-server` (the app, API, MCP and
+jobs) and `comindly` (both, plus the command). Read an index, follow flows and serve the MCP tools from
+your own service ([Using comindly as a library](https://comindly.pages.dev/guides/library/)).
 
 ## CI
 
@@ -276,34 +279,17 @@ consumer reads.
 
 ## Configuration
 
-Persistent, non-secret defaults live in `config.toml` (`comindly config path` shows where; `comindly
-config init` scaffolds it). Precedence, highest first: **CLI flag → environment variable → config
-file → built-in default**.
+Your preferences on this machine (index location, the repositories it indexes, your name and signing)
+are kept with their history: `comindly config` shows them, `comindly config set` changes them, and
+`comindly config import` / `export` read and write them as TOML. Models, LLM steps and their limits
+belong to the index and are shared by everyone using it: `comindly team set`. Precedence, highest
+first: **CLI flag → environment variable → these settings → built-in default**. See
+[Configuration](https://comindly.pages.dev/guides/configuration/).
 
-```toml
-index_dir   = "~/.local/share/comindly"   # default --index-dir (folder, s3://, gs:// or az://)
-llm_model   = "gpt-6-luna"   # any OpenAI-compatible model id
-embed_model = "minishlab/potion-base-8M"
-format      = "md"    # default when --format is absent (search: md|table, serve: md|json)
-embed       = true    # index/link step defaults; CLI --x / --no-x override
-enrich      = true    # LLM per-symbol summaries + queries (cost + sends code)
-flows       = true    # LLM flow walkthroughs (cost + sends code)
-guide       = true    # evidence-based style guide (cost + sends code)
-# llm_base_url = "http://localhost:11434/v1"   # Ollama / vLLM / LiteLLM proxy
-# max_enrich  = 200   # cap --enrich symbols (omit = no cap, whole codebase)
-# max_flows   = 50    # cap --flows narrations (omit = no cap)
-# scip        = "auto"   # auto | require | off
-# cache_ttl_secs = 300   # how often serve/ui check for a new index version; hooks' local mirror
-# signing_key = "~/.ssh/id_ed25519.pub"   # sign ledger records (default: git user.signingkey)
-# allowed_signers = "~/.config/git/allowed_signers"   # verify them (default: git config)
-```
-
-Environment overrides: `COMINDLY_INDEX_DIR`, `COMINDLY_LLM_MODEL`, `COMINDLY_EMBED_MODEL`,
-`COMINDLY_LLM_BASE_URL`, `COMINDLY_FORMAT`.
-
-**Secrets stay in the environment**, never the file: `--enrich`/`--flows` use an LLM via Rig
-(default OpenAI, `OPENAI_API_KEY`; any OpenAI-compatible endpoint via `COMINDLY_LLM_BASE_URL`). An index in a
-bucket (`s3://`, `gs://`, `az://`) is read with the credentials the machine or container already has.
+**Secrets stay out of settings**: `--enrich`/`--flows` use an LLM via Rig (default OpenAI,
+`OPENAI_API_KEY` or `comindly team key`; any OpenAI-compatible endpoint via `llm_base_url`). An index
+in a bucket (`s3://`, `gs://`, `az://`) is read with the credentials the machine or container already
+has.
 
 ## Status
 
@@ -316,9 +302,9 @@ UIs. Progress and open items: [`docs/design/roadmap.md`](docs/design/roadmap.md)
 ## Development
 
 ```bash
-cargo test
+cargo test --workspace
 cargo fmt --all
-cargo clippy --all-targets -- -D warnings
+cargo clippy --workspace --all-targets -- -D warnings
 ```
 
 Pre-commit hooks (fmt + clippy + basic file checks) live in `.pre-commit-config.yaml` — install

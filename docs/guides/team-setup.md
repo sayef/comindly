@@ -38,7 +38,8 @@ comindly init-hooks claude                                # Claude Code hooks to
 Settings everyone on an index must share live with the index (`<index>/_team`, a versioned LanceDB
 table), so every member, CI job and agent runs the same: the LLM endpoint and model, the embedding model
 (an index's vectors only work with the model that made them) and which LLM steps run while indexing. They
-win over personal settings. Your own `config.toml` keeps what is personal: the index location, your name and app preferences.
+are the only place these are set. Your own preferences (`comindly config`) keep what is personal: the
+index location, the repositories your machine indexes, your name and signing.
 
 The team settings hold no secrets. Anyone who can read the index can see them; access to the index is
 the trust boundary.
@@ -62,6 +63,8 @@ second save is refused and asks to reload).
 | `llm_concurrency` | LLM requests at once; lower it if the provider rate-limits | 8 |
 | `llm_price_in`, `llm_price_out` | The model's price in USD per million input and output tokens, so indexing shows its cost | not set |
 | `format` | What agents get as text, `md` or `json`; every answer also carries the data as structured JSON | `md` |
+| `scip` | Compiler-grade resolution: `auto` uses SCIP indexes when present, `require` fails without them, `off` uses tree-sitter only | `auto` |
+| `auto_index` | Re-index when a listed repository's default branch moves on its remote (checked from the app or server, without LLM steps) | off |
 
 Summaries, walkthroughs and style guides are kept and reused while their input is unchanged, and saved as
 they are written (summaries every 500), so an interrupted run continues where it stopped.
@@ -74,7 +77,7 @@ Everyone brings their own LLM API key. comindly looks for it, in order:
 2. the default key in that file,
 3. `OPENAI_API_KEY`.
 
-The file is created readable only by you. Set it from the app (Settings → General, under Your LLM) or the terminal:
+The file is created readable only by you. Set it from the app (Settings → General, under Your LLM key) or the terminal:
 
 ```sh
 comindly team key              # prompts for the key; stored under the team's name
@@ -111,3 +114,9 @@ comindly join s3://bucket/comindly
 or, in the app, **Join a team** on the first screen; this works as soon as
 the team exists, before anything is indexed. For LLM steps they add
 their own API key as above.
+
+### With a team server
+
+When the team runs a [comindly server](self-hosting.md), developers sign their command line in once
+with `comindly login https://<server>`; from then on `find`, `why`, `remember` and the other reading and
+recording commands ask the server, with each person's role ([Command line](../reference/cli.md#against-a-server)).

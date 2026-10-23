@@ -1,13 +1,20 @@
 # Using comindly as a library
 
-The `comindly` crate is the same code the binary runs: reading an index, querying the graph, the
+The library is the same code the binary runs: indexing, reading an index, querying the graph, the
 ledger and the MCP server. Use it to build your own tools on a team's index, or to serve comindly's
-MCP tools from your own service. API reference: [docs.rs/comindly](https://docs.rs/comindly).
+MCP tools from your own service. It comes in three crates:
 
-The library follows the binary's version. Until 1.0, minor versions may change it; pin one.
+| Crate | What it is |
+|---|---|
+| `comindly-core` | The engine: parsing, cross-repo binding, the graph, the index, search, LLM steps, the ledger and indexing as an async pipeline. Reads no environment or files of its own: everything a call needs is passed in. |
+| `comindly-server` | The app and its `/api/v1`, MCP over HTTP, indexing jobs, accounts and roles, and the backends behind them. Re-exports the engine. |
+| `comindly` | Both, plus the command line. `comindly::graph` is `comindly_core::graph`. |
+
+API reference: [docs.rs/comindly](https://docs.rs/comindly). The crates follow the binary's version.
+Until 1.0, minor versions may change them; pin one.
 
 ```sh
-cargo add comindly
+cargo add comindly          # or comindly-core for the engine alone
 ```
 
 Building needs what `cargo install comindly` needs: Rust 1.95+, `protoc` and `cmake`.
@@ -56,13 +63,48 @@ for (entry, repos) in graph.entry_points(10) {
 
 ```rust
 let ledger = comindly::ledger::Ledger::open(root)?;
-for record in ledger.all().await? {
+let records = ledger.all().await?;
+for record in &records {
     println!("{:?}: {}", record.kind, record.title);
+}
+let verifier = comindly::signing::Verifier::default();
+for entry in comindly::ledger::derive(&records, &symbols, &verifier) {
+    println!("{:?}: {}", entry.status, entry.record.title);
 }
 ```
 
-`comindly::ledger::derive(&records, &symbols)` adds each record's status (active, stale, orphaned,
-superseded) against the current code, as the app shows it.
+`derive` adds each record's status (active, stale, orphaned, superseded) against the current code, as
+the app shows it. `Verifier::new(allowed_signers, cache)` also checks records' signatures; the default
+checks none.
+
+## Index repositories
+
+Indexing is an async pipeline that reports its steps, results and progress as events to a sink of
+yours, and stops at its next checkpoint when its cancellation token is cancelled. Without an LLM client
+the LLM steps are skipped, and say so:
+
+```rust
+use std::sync::Arc;
+use comindly::context::{IndexContext, Settings};
+use comindly::events::{Event, EventSink};
+use comindly::pipeline::{self, Source};
+
+struct Print;
+
+impl EventSink for Print {
+    fn emit(&self, e: Event) {
+        eprintln!("{:?} {}", e.kind, e.message);
+    }
+}
+
+let settings = Settings::resolve(&Default::default(), |_| None);
+let ctx = IndexContext::new(root, settings, Arc::new(Print), "/tmp/comindly-cache".into());
+let sources = vec![Source::at("../orders"), Source::at("../payments")];
+pipeline::link(&ctx, sources, false, comindly::scip::Mode::Auto).await?;
+```
+
+`Settings::resolve` takes the index's shared settings (`comindly::team::load(root)`) and a lookup for
+overrides; `IndexContext::with_llm` and `with_git` add an LLM client and git credentials.
 
 ## Serve the MCP tools from your own service
 

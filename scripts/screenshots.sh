@@ -38,8 +38,7 @@ commit inventory "Fulfilment team" "2026-09-05T08:15:00Z"
 commit storefront "Web team" "2026-09-08T11:45:00Z"
 REPOS=("$WORK"/repos/{acme-common,orders,payments,inventory,storefront})
 
-mkdir -p "$XDG_CONFIG_HOME/comindly"
-printf 'index_dir = "%s"\n' "$INDEX" > "$XDG_CONFIG_HOME/comindly/config.toml"
+"$BIN" config set index_dir="$INDEX" >/dev/null
 for r in "${REPOS[@]}"; do "$BIN" repos add "$r" >/dev/null; done
 
 if [ "$LLM" = 1 ]; then
