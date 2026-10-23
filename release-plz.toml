@@ -14,6 +14,8 @@ git_tag_enable = true
 git_tag_name = "v{{ version }}"
 git_release_enable = true
 git_release_name = "v{{ version }}"
+# Versions like 0.4.0-beta.1 become GitHub pre-releases, which "latest" downloads skip.
+git_release_type = "auto"
 
 # The four crates share one version and are released together; only `comindly` carries the tag,
 # the GitHub release and the changelog.

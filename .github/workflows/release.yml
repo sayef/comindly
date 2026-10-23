@@ -127,6 +127,7 @@ jobs:
       - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.tag.outputs.tag }}
+          prerelease: ${{ contains(needs.tag.outputs.tag, '-') }}
           files: dist/comindly-*
 
   # The container image from the Linux binaries above, for amd64 and arm64, on GitHub's registry.
@@ -167,7 +168,7 @@ jobs:
           tags: |
             type=semver,pattern={{version}},value=${{ needs.tag.outputs.tag }}
             type=semver,pattern={{major}}.{{minor}},value=${{ needs.tag.outputs.tag }}
-            type=raw,value=latest
+            type=raw,value=latest,enable=${{ !contains(needs.tag.outputs.tag, '-') }}
       - uses: docker/build-push-action@v7
         with:
           context: .
@@ -178,9 +179,11 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
       # The image starts and answers on both platforms.
       - name: Smoke test
+        env:
+          TAG: ${{ needs.tag.outputs.tag }}
         run: |
           for p in linux/amd64 linux/arm64; do
-            docker run --rm --platform "$p" "ghcr.io/${{ github.repository }}:latest" --version
+            docker run --rm --platform "$p" "ghcr.io/${{ github.repository }}:${TAG#v}" --version
           done
 
   # Installs the published release the way users do; fails the release if that breaks.
