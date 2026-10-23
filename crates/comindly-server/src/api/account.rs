@@ -110,16 +110,21 @@ pub struct Secrets {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum SecretState {
+    Elsewhere(SecretSource),
     Stored {
         #[serde(flatten)]
         info: SecretInfo,
         label: String,
     },
-    Elsewhere {
-        source: String,
-        name: String,
-        label: String,
-    },
+}
+
+/// A secret the deployment provides (`deployment`) or nobody set (`none`).
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SecretSource {
+    pub source: String,
+    pub name: String,
+    pub label: String,
 }
 
 /// `POST /api/v1/secrets`: an empty value removes it.

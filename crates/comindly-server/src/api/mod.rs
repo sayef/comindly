@@ -71,3 +71,39 @@ pub struct Ready {
 pub struct IdRequest {
     pub id: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Reads `json` as `T` and writes it back unchanged, keys in the same order.
+    fn same<T: Serialize + serde::de::DeserializeOwned>(json: &str) {
+        let v: T = serde_json::from_str(json).unwrap();
+        assert_eq!(serde_json::to_string(&v).unwrap(), json);
+    }
+
+    #[test]
+    fn answers_keep_their_wire_shape() {
+        same::<Me>(r#"{"mode":"local"}"#);
+        same::<Me>(
+            r#"{"mode":"server","signed_in":false,"email":null,"role":null,"sign_in":"code","public_url":"http://localhost:1"}"#,
+        );
+        same::<DeviceToken>(r#"{"status":"pending"}"#);
+        same::<DeviceToken>(
+            r#"{"status":"approved","token":"t","email":"a@example.com","expires":null}"#,
+        );
+        same::<Secrets>(
+            r#"{"secrets":[{"source":"deployment","name":"llm_api_key","label":"LLM API key"},{"name":"git:github.com","source":"stored","hint":"…abcd","updated":"2026-01-01T00:00:00+00:00","updated_by":"a@example.com","label":"GitHub token for github.com"}],"can_store":true}"#,
+        );
+        same::<IndexState>(r#"{"running":false,"events":[],"queued":[]}"#);
+        same::<IndexState>(
+            r#"{"id":"j","running":false,"cancelled":false,"ok":true,"status":"succeeded","events":[],"started":"s","finished":"f","queued":[{"id":"k","kind":"index","position":1,"started_by":null,"created":"c"}]}"#,
+        );
+        same::<Jobs>(
+            r#"{"jobs":[{"id":"k","kind":"index","started_by":null,"status":"queued","created":"c","started":null,"finished":null,"error":null,"position":1}]}"#,
+        );
+        same::<Invited>(r#"{"ok":true,"message":"Invitation emailed to a@example.com"}"#);
+        same::<ErrorBody>(r#"{"error":{"code":"not_found","message":"no such job"}}"#);
+        same::<Neighbourhood>(r#"{"nodes":[],"edges":[]}"#);
+    }
+}

@@ -622,10 +622,12 @@ pub(super) async fn secrets(On(server): On) -> Json<api::Secrets> {
     let secrets = names
         .iter()
         .map(|n| {
-            let elsewhere = |source: &str| api::SecretState::Elsewhere {
-                source: source.into(),
-                name: n.clone(),
-                label: label(n),
+            let elsewhere = |source: &str| {
+                api::SecretState::Elsewhere(api::SecretSource {
+                    source: source.into(),
+                    name: n.clone(),
+                    label: label(n),
+                })
             };
             if deployment(&server.config, n).is_some() {
                 elsewhere("deployment")
