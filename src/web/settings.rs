@@ -12,10 +12,7 @@ use super::{Cur, Shared};
 use crate::config::Setting;
 
 fn fail(e: anyhow::Error) -> (StatusCode, Json<Value>) {
-    (
-        StatusCode::BAD_REQUEST,
-        Json(json!({"ok": false, "message": super::error_text(&e)})),
-    )
+    super::error_body(StatusCode::BAD_REQUEST, super::error_text(&e))
 }
 
 pub(super) async fn get(State(app): State<Shared>, Cur(s): Cur) -> Json<Value> {

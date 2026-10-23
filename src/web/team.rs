@@ -11,10 +11,7 @@ use super::Shared;
 use crate::team::{self, TeamSettings};
 
 fn fail(e: anyhow::Error) -> (StatusCode, Json<Value>) {
-    (
-        StatusCode::BAD_REQUEST,
-        Json(json!({"ok": false, "message": super::error_text(&e)})),
-    )
+    super::error_body(StatusCode::BAD_REQUEST, super::error_text(&e))
 }
 
 async fn root(app: &Shared) -> anyhow::Result<String> {

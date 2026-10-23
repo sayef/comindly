@@ -345,42 +345,45 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
     }
     rt.spawn(repos::watch(state.clone()));
     let app = Router::new()
-        .route("/api/overview", get(overview))
-        .route("/api/orgmap", get(orgmap))
-        .route("/api/versions", get(versions))
-        .route("/api/contracts", get(contracts))
-        .route("/api/ledger", get(ledger))
-        .route("/api/conventions", get(conventions).post(change_convention))
-        .route("/api/find", get(find))
-        .route("/api/node", get(node))
-        .route("/api/search", get(search))
-        .route("/api/context", get(context))
-        .route("/api/packages", get(packages))
-        .route("/api/flows", get(flows::list))
-        .route("/api/flow", get(flows::one))
-        .route("/api/source", get(flows::source))
-        .route("/api/setup", get(setup))
-        .route("/api/review", post(review))
-        .route("/api/erase", post(erase))
-        .route("/api/remember", post(remember))
-        .route("/api/settings", get(settings::get).post(settings::save))
-        .route("/api/settings/test", post(settings::test))
-        .route("/api/repos", get(repos::list).post(repos::change))
-        .route("/api/repos/scan", post(repos::scan))
-        .route("/api/repos/remote/list", post(repos::remote_list))
-        .route("/api/repos/remote/add", post(repos::remote_add))
-        .route("/api/index", get(repos::job).post(repos::start))
-        .route("/api/index/cancel", post(repos::cancel))
-        .route("/api/index/watch", get(repos::watch_state))
+        .route("/api/v1/overview", get(overview))
+        .route("/api/v1/orgmap", get(orgmap))
+        .route("/api/v1/versions", get(versions))
+        .route("/api/v1/contracts", get(contracts))
+        .route("/api/v1/ledger", get(ledger))
+        .route(
+            "/api/v1/conventions",
+            get(conventions).post(change_convention),
+        )
+        .route("/api/v1/find", get(find))
+        .route("/api/v1/node", get(node))
+        .route("/api/v1/search", get(search))
+        .route("/api/v1/context", get(context))
+        .route("/api/v1/packages", get(packages))
+        .route("/api/v1/flows", get(flows::list))
+        .route("/api/v1/flow", get(flows::one))
+        .route("/api/v1/source", get(flows::source))
+        .route("/api/v1/setup", get(setup))
+        .route("/api/v1/review", post(review))
+        .route("/api/v1/erase", post(erase))
+        .route("/api/v1/remember", post(remember))
+        .route("/api/v1/settings", get(settings::get).post(settings::save))
+        .route("/api/v1/settings/test", post(settings::test))
+        .route("/api/v1/repos", get(repos::list).post(repos::change))
+        .route("/api/v1/repos/scan", post(repos::scan))
+        .route("/api/v1/repos/remote/list", post(repos::remote_list))
+        .route("/api/v1/repos/remote/add", post(repos::remote_add))
+        .route("/api/v1/index", get(repos::job).post(repos::start))
+        .route("/api/v1/index/cancel", post(repos::cancel))
+        .route("/api/v1/index/watch", get(repos::watch_state))
         .route("/api/v1/jobs", get(jobs::list))
         .route("/api/v1/jobs/{id}", get(jobs::one))
         .route("/api/v1/jobs/{id}/events", get(jobs::events))
         .route("/api/v1/jobs/{id}/cancel", post(jobs::cancel))
-        .route("/api/team", get(team::get).post(team::save))
-        .route("/api/team/key", post(team::key))
-        .route("/api/join", post(team::join))
-        .route("/api/team/create", post(team::create))
-        .route("/api/auth/me", get(auth::me))
+        .route("/api/v1/team", get(team::get).post(team::save))
+        .route("/api/v1/team/key", post(team::key))
+        .route("/api/v1/join", post(team::join))
+        .route("/api/v1/team/create", post(team::create))
+        .route("/api/v1/auth/me", get(auth::me))
         .route("/health", get(health))
         .route("/ready", get(ready))
         .fallback(get(asset));
@@ -389,20 +392,20 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
             .layer(axum::middleware::from_fn_with_state(Arc::new(token), guard))
             .layer(axum::middleware::from_fn(local_only)),
         Access::Server(server) => app
-            .route("/api/auth/link", post(auth::request_link))
-            .route("/api/auth/redeem", post(auth::redeem))
-            .route("/api/auth/code", post(auth::sign_in_code))
-            .route("/api/auth/reset-code", post(auth::reset_own_code))
-            .route("/api/auth/signout", post(auth::sign_out))
-            .route("/api/members", get(auth::members))
-            .route("/api/members/invite", post(auth::invite))
-            .route("/api/members/reset", post(auth::reset_code))
-            .route("/api/members/role", post(auth::set_role))
-            .route("/api/members/remove", post(auth::remove))
-            .route("/api/members/revoke", post(auth::revoke_invite))
-            .route("/api/tokens", get(auth::tokens).post(auth::create_token))
-            .route("/api/tokens/revoke", post(auth::revoke_token))
-            .route("/api/secrets", get(auth::secrets).post(auth::set_secret))
+            .route("/api/v1/auth/link", post(auth::request_link))
+            .route("/api/v1/auth/redeem", post(auth::redeem))
+            .route("/api/v1/auth/code", post(auth::sign_in_code))
+            .route("/api/v1/auth/reset-code", post(auth::reset_own_code))
+            .route("/api/v1/auth/signout", post(auth::sign_out))
+            .route("/api/v1/members", get(auth::members))
+            .route("/api/v1/members/invite", post(auth::invite))
+            .route("/api/v1/members/reset", post(auth::reset_code))
+            .route("/api/v1/members/role", post(auth::set_role))
+            .route("/api/v1/members/remove", post(auth::remove))
+            .route("/api/v1/members/revoke", post(auth::revoke_invite))
+            .route("/api/v1/tokens", get(auth::tokens).post(auth::create_token))
+            .route("/api/v1/tokens/revoke", post(auth::revoke_token))
+            .route("/api/v1/secrets", get(auth::secrets).post(auth::set_secret))
             .merge({
                 let shared = state.mcp.clone().unwrap_or_default();
                 Router::new()
@@ -456,6 +459,26 @@ async fn shutdown(app: Shared) {
     });
 }
 
+/// The one error shape, `{"error": {"code", "message"}}`, with a status that means what it says.
+pub(crate) fn error_body(
+    status: StatusCode,
+    message: impl Into<String>,
+) -> (StatusCode, Json<Value>) {
+    let code = match status {
+        StatusCode::BAD_REQUEST => "bad_request",
+        StatusCode::UNAUTHORIZED => "unauthorized",
+        StatusCode::FORBIDDEN => "forbidden",
+        StatusCode::NOT_FOUND => "not_found",
+        StatusCode::CONFLICT => "conflict",
+        StatusCode::SERVICE_UNAVAILABLE => "unavailable",
+        _ => "error",
+    };
+    (
+        status,
+        Json(json!({"error": {"code": code, "message": message.into()}})),
+    )
+}
+
 /// For load balancers and orchestrators: answers while the process serves requests.
 async fn health() -> Json<Value> {
     Json(json!({"status": "ok", "version": env!("CARGO_PKG_VERSION")}))
@@ -492,7 +515,10 @@ async fn mcp_ready(
         return (
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
             [(axum::http::header::RETRY_AFTER, "60")],
-            Json(json!({"error": "no index yet: an admin indexes repositories first"})),
+            Json(json!({"error": {
+                "code": "unavailable",
+                "message": "no index yet: an admin indexes repositories first",
+            }})),
         )
             .into_response();
     }
@@ -530,8 +556,8 @@ async fn guard(
         )
             .into_response();
     }
-    // `/api/auth/me` only says "local", so the page can always tell where it is.
-    if req.uri().path().starts_with("/api/") && req.uri().path() != "/api/auth/me" {
+    // `/api/v1/auth/me` only says "local", so the page can always tell where it is.
+    if req.uri().path().starts_with("/api/") && req.uri().path() != "/api/v1/auth/me" {
         let want = format!("comindly_token={token}");
         let ok = req
             .headers()
@@ -543,7 +569,7 @@ async fn guard(
         if !ok {
             let msg =
                 "open comindly with the link `comindly ui --web` printed (it carries the access token)";
-            return (StatusCode::FORBIDDEN, Json(json!({ "error": msg }))).into_response();
+            return error_body(StatusCode::FORBIDDEN, msg).into_response();
         }
     }
     next.run(req).await
@@ -582,7 +608,11 @@ async fn asset(uri: axum::http::Uri) -> impl IntoResponse {
     };
     let (name, body) = match find(path) {
         Some(b) if !path.is_empty() => (path, b),
-        _ if path.starts_with("api/") || path.starts_with("assets/") => {
+        _ if path.starts_with("api/") => {
+            return error_body(StatusCode::NOT_FOUND, format!("no such endpoint: /{path}"))
+                .into_response();
+        }
+        _ if path.starts_with("assets/") => {
             return (
                 StatusCode::NOT_FOUND,
                 [(header::CONTENT_TYPE, "text/plain")],
@@ -711,10 +741,7 @@ async fn orgmap(Cur(s): Cur, Query(q): Query<AtQ>) -> impl IntoResponse {
     };
     match past.await {
         Ok(v) => (StatusCode::OK, Json(v)),
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": error_text(&e)})),
-        ),
+        Err(e) => error_body(StatusCode::BAD_REQUEST, error_text(&e)),
     }
 }
 
@@ -849,10 +876,7 @@ async fn change_convention(
 ) -> impl IntoResponse {
     match apply_convention(&s, b, &identity(who.as_deref()).actor).await {
         Ok(msg) => (StatusCode::OK, Json(json!({"ok": true, "message": msg}))),
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"ok": false, "message": error_text(&e)})),
-        ),
+        Err(e) => error_body(StatusCode::BAD_REQUEST, error_text(&e)),
     }
 }
 
@@ -911,10 +935,7 @@ struct NodeQ {
 async fn node(Cur(s): Cur, Query(q): Query<NodeQ>) -> impl IntoResponse {
     let g = &s.data.graph;
     let Some(idx) = g.lookup(&q.focus) else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "no such symbol"})),
-        );
+        return error_body(StatusCode::NOT_FOUND, "no such symbol");
     };
     let z = g.zoom(idx);
     let ripple = g.ripple(idx, 4);
@@ -999,10 +1020,7 @@ async fn search(Cur(s): Cur, Query(q): Query<SearchQ>) -> impl IntoResponse {
     };
     match run.await {
         Ok(v) => (StatusCode::OK, Json(json!(v))),
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": error_text(&e)})),
-        ),
+        Err(e) => error_body(StatusCode::BAD_REQUEST, error_text(&e)),
     }
 }
 
@@ -1166,10 +1184,7 @@ type Member = Option<axum::Extension<crate::server::Who>>;
 async fn review(who: Member, Cur(s): Cur, Json(b): Json<ReviewBody>) -> impl IntoResponse {
     match apply_review(&s, &b, provenance(who.as_deref())).await {
         Ok(msg) => (StatusCode::OK, Json(json!({"ok": true, "message": msg}))),
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"ok": false, "message": error_text(&e)})),
-        ),
+        Err(e) => error_body(StatusCode::BAD_REQUEST, error_text(&e)),
     }
 }
 
@@ -1251,10 +1266,7 @@ async fn remember(who: Member, Cur(s): Cur, Json(b): Json<RememberBody>) -> impl
     };
     match run.await {
         Ok(id) => (StatusCode::OK, Json(json!({"ok": true, "id": id}))),
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"ok": false, "message": error_text(&e)})),
-        ),
+        Err(e) => error_body(StatusCode::BAD_REQUEST, error_text(&e)),
     }
 }
 
@@ -1277,10 +1289,7 @@ async fn erase(Cur(s): Cur, Json(b): Json<EraseBody>) -> impl IntoResponse {
     };
     match run.await {
         Ok(msg) => (StatusCode::OK, Json(json!({"ok": true, "message": msg}))),
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"ok": false, "message": error_text(&e)})),
-        ),
+        Err(e) => error_body(StatusCode::BAD_REQUEST, error_text(&e)),
     }
 }
 

@@ -38,12 +38,7 @@ fn cookie_name(cfg: &ServerConfig) -> &'static str {
 }
 
 fn fail(status: StatusCode, message: impl Into<String>) -> Response {
-    let message = message.into();
-    (
-        status,
-        Json(json!({"ok": false, "message": message, "error": message})),
-    )
-        .into_response()
+    super::error_body(status, message).into_response()
 }
 
 fn bad(e: anyhow::Error) -> Response {
@@ -114,25 +109,30 @@ fn same_site(req: &Request, cfg: &ServerConfig) -> bool {
 
 /// What a personal access token may not do: manage the account, its tokens, members or secrets.
 fn account_only(path: &str) -> bool {
-    ["/api/auth/", "/api/tokens", "/api/members", "/api/secrets"]
-        .iter()
-        .any(|p| path.starts_with(p))
+    [
+        "/api/v1/auth/",
+        "/api/v1/tokens",
+        "/api/v1/members",
+        "/api/v1/secrets",
+    ]
+    .iter()
+    .any(|p| path.starts_with(p))
 }
 
 /// Paths only admins may change (and, for members and secrets, read).
 fn admin_only(method: &Method, path: &str) -> bool {
-    if path.starts_with("/api/members") || path.starts_with("/api/secrets") {
+    if path.starts_with("/api/v1/members") || path.starts_with("/api/v1/secrets") {
         return true;
     }
     method != Method::GET
         && [
-            "/api/settings",
-            "/api/repos",
-            "/api/index",
+            "/api/v1/settings",
+            "/api/v1/repos",
+            "/api/v1/index",
             "/api/v1/jobs",
-            "/api/team",
-            "/api/join",
-            "/api/erase",
+            "/api/v1/team",
+            "/api/v1/join",
+            "/api/v1/erase",
         ]
         .iter()
         .any(|p| path.starts_with(p))
@@ -150,7 +150,7 @@ pub(super) async fn guard(
     }
     let open = matches!(
         path.as_str(),
-        "/api/auth/me" | "/api/auth/link" | "/api/auth/redeem" | "/api/auth/code"
+        "/api/v1/auth/me" | "/api/v1/auth/link" | "/api/v1/auth/redeem" | "/api/v1/auth/code"
     );
     let token = bearer(&req);
     let session = cookie(&req, cookie_name(&server.config));

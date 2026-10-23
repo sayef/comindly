@@ -67,10 +67,7 @@ pub(super) struct OneQ {
 pub(super) async fn one(Cur(s): Cur, Query(q): Query<OneQ>) -> impl IntoResponse {
     let g = &s.data.graph;
     let Some(i) = g.lookup(&q.id) else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "no such symbol"})),
-        );
+        return super::error_body(StatusCode::NOT_FOUND, "no such symbol");
     };
     let entry = g.node(i);
     let extras = s.extras().await;
@@ -128,9 +125,6 @@ pub(super) async fn source(Conf(cfg): Conf, Query(q): Query<SourceQ>) -> impl In
     };
     match run() {
         Ok(v) => (StatusCode::OK, Json(v)),
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": super::error_text(&e)})),
-        ),
+        Err(e) => super::error_body(StatusCode::BAD_REQUEST, super::error_text(&e)),
     }
 }

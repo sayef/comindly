@@ -19,10 +19,7 @@ use crate::jobs::Status;
 use crate::worktree;
 
 fn fail(e: anyhow::Error) -> (StatusCode, Json<Value>) {
-    (
-        StatusCode::BAD_REQUEST,
-        Json(json!({"ok": false, "message": super::error_text(&e)})),
-    )
+    super::error_body(StatusCode::BAD_REQUEST, super::error_text(&e))
 }
 
 fn absolute(p: &str) -> String {
@@ -527,9 +524,12 @@ pub(super) async fn remote_list(
         Err(e) => match e.downcast_ref::<worktree::NeedsToken>() {
             Some(n) => (
                 StatusCode::UNAUTHORIZED,
-                Json(
-                    json!({"ok": false, "message": e.to_string(), "needs_token": {"host": n.host, "username": n.username}}),
-                ),
+                Json(json!({"error": {
+                    "code": "needs_token",
+                    "message": e.to_string(),
+                    "host": n.host,
+                    "username": n.username,
+                }})),
             ),
             None => fail(e),
         },

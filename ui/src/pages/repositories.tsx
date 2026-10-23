@@ -312,7 +312,7 @@ function OrgDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bo
     meta: { inline: true, quiet: true },
     onSuccess: (r) => (setAsked(null), setChecked(new Set(r.repos.filter((x) => !x.archived && !x.listed).map((x) => x.clone_url)))),
     onError: (e) => {
-      const need = e instanceof ApiError ? (e.body.needs_token as NeedsToken | undefined) : undefined;
+      const need = e instanceof ApiError && e.body.code === "needs_token" ? (e.body as unknown as NeedsToken) : undefined;
       if (need) (setAsked(need), setUsername((u) => u || need.username));
     },
   });

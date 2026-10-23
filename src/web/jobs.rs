@@ -82,9 +82,5 @@ fn event(e: crate::events::Event) -> Result<Sse, Infallible> {
 }
 
 fn missing() -> Response {
-    (
-        StatusCode::NOT_FOUND,
-        Json(json!({"ok": false, "message": "no such job"})),
-    )
-        .into_response()
+    super::error_body(StatusCode::NOT_FOUND, "no such job").into_response()
 }
