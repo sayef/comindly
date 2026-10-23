@@ -1,6 +1,7 @@
 # comindly — Rust Architecture
 
-> Polyglot, cross-repo code-intelligence engine. CLI + MCP server, single static binary.
+> Polyglot, cross-repo code-intelligence engine: an async server, an MCP endpoint for agents, and a CLI,
+> in one static binary.
 > Read-heavy / write-rare: the index is a **versioned artifact in your storage**, not a live shared DB.
 
 ## Decisions (locked)
@@ -84,46 +85,162 @@ e.g.  scip-python  pip  acme  1.4.0  `acme/foo`/bar().
 - **Note:** GitHub's `stack-graphs` (which I initially proposed) was **archived Sept 2025**.
   It remains usable as an optional resolver but is unmaintained — SCIP is the safe backbone.
 
-## Module map (single crate)
+## Layers
+
+comindly is three layers in one repository. Each depends only on the one below it.
 
 ```
-src/
-  model.rs    domain model: GlobalSymbolId (SCIP), Symbol, Edge, Language, ranges. No heavy deps.
-  parse.rs    tree-sitter walk: file → symbols, Contains edges, per-file facts (+ fingerprints).
-  lang/       per-language syntax adapters (python, typescript, go, java, kotlin, rust) behind LangSpec;
-              spring.rs holds the shared Spring MVC / Feign / RestTemplate rules for Java and Kotlin.
-  facts.rs    per-file facts: imports, reference paths, type hints (persisted for incremental).
-  packages.rs importable module names: pyproject, package.json, tsconfig paths, go.mod, Cargo.toml.
-  manifests.rs published packages + dependencies (requirement, locked version) for version skew.
-  conventions.rs measured conventions per repo + org baseline (counts, exemplars, deviations).
-  recipes.rs  change recipes from commit history (what changes together when adding code).
-  ledger.rs   reasoning ledger: typed, symbol-anchored records in the user's store; derived status/trust.
-  infra.rs    Terraform: queues, topics, buckets and topic→queue subscriptions as contract facts.
-  configvals.rs values from repo YAML config files, stored as facts for settings-path fallback.
-  signing.rs  optional SSH signatures on ledger records; verification against allowed_signers.
-  cache.rs    local mirror of a remote (S3) index for hooks, refreshed in the background.
-  checks.rs   compiled constraint checks (graph edge rules, dependency rules), T4 promotion, revivals.
-  preflight.rs before-change report: ledger, failing checks, contracts, blast radius, missing companions.
-  tui.rs      `comindly ui`: overview, contracts, ledger, explorer, conventions (ratatui).
-  web.rs      `comindly ui --web`: axum JSON API + the React app from ui/ (embedded by build.rs), 127.0.0.1 only.
-  resolve.rs  binder: resolves reference paths through imports, re-exports, classes, types.
-  resolve/contracts.rs  contract graph: HTTP routes ↔ clients, queues, topics, buckets, tables.
-  eval.rs     graph-quality eval against a gold fixture (`comindly eval graph`).
-  index.rs    Lance/object_store writers + readers; versioning; incremental change detection.
-  graph.rs    petgraph load + traversal: ripple (blast radius), thread (exec trace), zoom.
-  embed.rs    Model2Vec local embeddings + code-aware ranking (embed/rank.rs).
-  llm.rs      wiki / style-guide / query-association generation via Rig (provider-agnostic).
-  mcp.rs      rmcp server: search/suggest/repos/find/zoom/ripple/thread/flow/context_pack/guide.
-  ui.rs       styled stderr output (indicatif progress + console + comfy-table tables).
-  config.rs   config.toml + defaults (index dir, models, format, caps); precedence resolver.
-  git.rs      git2 change detection for incremental indexing.
-  main.rs     clap binary: `comindly index|link|explore|search|flow|changed|serve|config`. The single distributable.
+  comindly (CLI)      clap facade: local single-user mode, `comindly server`, and a client of a running
+                      server (`--server <url>`, `comindly login`). Terminal rendering, the TUI, the desktop app.
+        │
+  comindly-server     axum: the versioned HTTP API, MCP over HTTP, the web app, sign-in, the job runner.
+                      Builds a context per request and per job and hands it to core.
+        │
+  comindly-core       the engine as an async library: parsing, binding, contracts, flows, the graph,
+                      search, LLM steps, the ledger, index storage. No environment, no config files,
+                      no process-wide state, no terminal output: everything it needs is passed in.
 ```
 
-One crate, one module per stage; `main.rs` uses the library as `comindly::<module>`. (Earlier phases
-below were built as a `cargo` workspace of `comindly-*` crates and later consolidated into this single crate.)
+The layers are crates in one cargo workspace, so the compiler enforces the boundaries.
 
-MCP verb semantics follow a design proven in the original Python implementation.
+### comindly-core
+
+| Area | Modules |
+|---|---|
+| Model and parsing | `model`, `parse`, `lang/`, `facts`, `packages`, `manifests`, `infra`, `configvals`, `scip` |
+| Binding and contracts | `resolve`, `resolve/contracts` |
+| Derived knowledge | `conventions`, `recipes`, `checks`, `preflight`, `eval` |
+| Index storage | `index` (Lance tables, versions, incremental change detection), `storage` (folder, `s3://`, `gs://`, `az://`) |
+| Queries | `graph` (ripple, thread, zoom, flows, ranking), `embed` (Model2Vec + code-aware ranking), `search` |
+| LLM steps | `llm` (summaries, flow walkthroughs, style guides), `styleguide` |
+| Ledger | `ledger`, `signing` |
+| Sources | `worktree` (comindly's own checkouts), `hosting` (listing GitHub organisations and GitLab groups), `git` |
+| Indexing pipeline | `pipeline`: the steps from checkout to style guides as one async `Indexer` |
+| Context and events | `context` (what a call needs), `events` (what it reports) |
+
+### comindly-server
+
+| Area | Modules |
+|---|---|
+| HTTP | `api` (`/api/v1`), `web` (the embedded React app), `mcp_http` (MCP over streamable HTTP) |
+| Access | `auth` (sessions, personal access tokens, sign-in by email or code), `backends` (the default stores) |
+| Work | `jobs` (queue, runner, cancellation, events, history) |
+| Process | `config` (`ServerConfig`), `health`, graceful shutdown |
+
+### comindly (CLI)
+
+`main`, `commands/` (one module per command group), `client` (the typed `/api/v1` client), `render`
+(terminal output of core events: colours, progress bars, tables), `tui`, `app` (desktop window),
+`doctor`, `credentials`.
+
+## Contexts, not globals
+
+Core never asks "what is the current team" or reads `config.toml`. A call receives what it needs:
+
+```rust
+pub struct IndexContext {
+    pub storage: Storage,                 // where the index lives, with its object store
+    pub settings: Settings,               // models, LLM steps, limits, prices: resolved once
+    pub llm: Option<Arc<dyn LlmClient>>,  // absent: LLM steps are skipped and say so
+    pub embedder: Arc<Embedder>,
+    pub secrets: Arc<dyn SecretStore>,    // git and LLM tokens, by name
+    pub events: Arc<dyn EventSink>,       // progress, results, warnings
+    pub cancel: CancellationToken,
+}
+```
+
+The server builds one per request or job from its `ServerConfig` and its stores; the CLI builds one from
+the command line, the environment and `config.toml`. Reads share an `IndexReader`: the loaded graph,
+search index and ledger behind an `Arc`, swapped atomically when a new index version appears.
+
+## Async model
+
+- One Tokio multi-thread runtime per process, created in `main`. Core's API is `async`; no function
+  builds its own runtime, and nothing blocks inside async code.
+- CPU-bound work (parsing, binding, graph building, embeddings) runs on a bounded blocking pool
+  (`spawn_blocking`), so request handling stays responsive while a large index builds.
+- I/O (object storage, LLM requests, git hosting APIs) is async. LLM requests share one client with a
+  per-call concurrency limit from the settings.
+- Git operations use git2 on the blocking pool instead of the `git` program, so cloning, fetching and
+  checkouts need nothing installed. `ssh-keygen` remains only for optional record signing.
+
+## Jobs
+
+Indexing runs inside the server as a job, not as a child process.
+
+- **Queue and runner.** Jobs are queued and run with bounded concurrency; one indexing job per index at
+  a time. A job has an id, a kind, who started it, a status (queued, running, succeeded, failed,
+  cancelled, interrupted) and its events.
+- **Cancellation.** A `CancellationToken` checked between units of work; cancelling stops LLM requests
+  in flight and leaves everything already saved in place.
+- **Resumable steps.** Summaries, flow walkthroughs and style guides are saved as they are written and
+  reused while their input is unchanged, so a cancelled or interrupted job continues where it stopped.
+- **Events.** Each job's events go to its `EventSink`: kept with the job, streamed to the app
+  (`/api/v1/jobs/{id}/events`, server-sent events) and written to the log as JSON.
+- **Restarts.** A job running when the process stops is marked interrupted at start-up and can be run
+  again; nothing is lost that was already saved.
+
+The CLI runs the same `Indexer` in the foreground and renders its events in the terminal.
+
+## Backends
+
+What the server stores and how it authenticates are traits, with comindly's defaults behind them:
+
+| Trait | Default |
+|---|---|
+| `AccountStore` (members, sessions, codes, personal access tokens) | signed LanceDB table at the index location |
+| `SecretStore` (git and LLM tokens) | the same table, values encrypted with `COMINDLY_SECRET_KEY` |
+| `SettingsStore` (shared settings, repository list) | the same table |
+| `JobStore` (job records and their events) | the same table, events capped per job |
+| `Authenticator` (request → who, or refusal) | session cookie, personal access token, admin token |
+| `Mailer` | SMTP (`COMINDLY_SMTP_URL`) |
+| `EventSink` | the job's record, the app's event stream and JSON logs |
+
+Other implementations, for example a relational database or single sign-on, plug in without changes to
+core or to the HTTP layer.
+
+## API
+
+- `/api/v1`: JSON, with request and response types defined once in Rust and shared by the server and
+  the CLI's client. The web app uses the same API.
+- Errors: one shape, `{ "error": { "code", "message" } }`, with HTTP status codes that mean what they say.
+- `/mcp`: MCP over streamable HTTP for agents, with a personal access token.
+- `/health` (alive) and `/ready` (the index is loaded and the stores answer).
+
+## Configuration
+
+The server reads its configuration once at start into a `ServerConfig`: `COMINDLY_*` variables, each
+also accepted as `*_FILE`, with defaults. Nothing below `main` reads the environment. Shared settings
+changed in the app go through the `SettingsStore` and reach running code through a watch channel.
+
+The CLI keeps `config.toml` for one person's preferences and credentials.
+
+## Observability
+
+- Every message is an event: timestamp, level, kind, step, message and fields (counts, tokens, cost).
+  `COMINDLY_LOG_FORMAT=json` writes one JSON object per line; otherwise readable lines.
+- Requests and jobs carry ids (`request_id`, `job_id`) through their events.
+- Graceful shutdown: stop accepting requests, cancel running jobs at their next checkpoint, flush.
+
+## Moving to this (0.4.0)
+
+0.4.0 ships all of it at once. The order of work:
+
+1. **Pipeline into core.** Move indexing (`cmd_link` and the `run_*` steps, now in the CLI binary) into
+   `core::pipeline` as an async `Indexer` that reports events and honours cancellation.
+2. **One runtime.** Replace the `*_blocking` wrappers (33 functions, each building a runtime) with async
+   calls; CPU work moves to the blocking pool; git2 replaces the `git` program.
+3. **Contexts.** Introduce `IndexContext` and `ServerConfig`; remove `team::current()`, the store
+   singletons and `Config::load()` / environment reads below `main` (today in `llm`, `ledger`, `signing`,
+   `embed`, `mcp`, `server`, `web`).
+4. **Backends.** Put the stores, authentication and mail behind the traits above, the current behaviour
+   as the defaults.
+5. **Jobs.** The job runner replaces the child process and signals; events stream to the app.
+6. **API.** `/api/v1` with shared types; the web app and a new CLI client use it; `--server` and
+   `comindly login` in the CLI.
+7. **Crates.** Split into `comindly-core`, `comindly-server` and `comindly`.
+
+Deployments keep the same image, environment variables and storage layout; no re-indexing.
 
 ## Competitive landscape
 
