@@ -113,6 +113,8 @@ struct AppState {
     watch: tokio::sync::Mutex<repos::Watch>,
     /// Members, sign-in and stored secrets, in server mode.
     server: Option<Arc<crate::server::Server>>,
+    /// `config.toml` as last read, with the file's modification time.
+    config: std::sync::Mutex<(Arc<crate::config::Config>, Option<std::time::SystemTime>)>,
     /// What agents reach at `/mcp` on a server.
     mcp: Option<crate::mcp::Shared>,
     mcp_generation: Arc<std::sync::atomic::AtomicU64>,
@@ -131,6 +133,20 @@ impl axum::extract::FromRequestParts<Shared> for Cur {
         app: &Shared,
     ) -> std::result::Result<Self, Self::Rejection> {
         Ok(Cur(app.current.read().await.clone()))
+    }
+}
+
+/// `config.toml`, as the request found it.
+struct Conf(Arc<crate::config::Config>);
+
+impl axum::extract::FromRequestParts<Shared> for Conf {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(
+        _: &mut axum::http::request::Parts,
+        app: &Shared,
+    ) -> std::result::Result<Self, Self::Rejection> {
+        Ok(Conf(app.config()))
     }
 }
 
@@ -176,13 +192,12 @@ impl Session {
         self.entries.read().await
     }
 
-    async fn open(mut data: Data) -> Session {
+    async fn open(mut data: Data, fresh: std::time::Duration) -> Session {
         let entries = std::mem::take(&mut data.entries);
         let manual = std::mem::take(&mut data.manual);
         let tables = match data.root.as_ref() {
             Some(r) => {
                 let uri = format!("{}/_graph", r.trim_end_matches('/'));
-                let fresh = crate::config::Config::load().fresh();
                 crate::index::Tables::connect(&uri, fresh).await.ok()
             }
             None => None,
@@ -202,6 +217,18 @@ impl Session {
 }
 
 impl AppState {
+    /// `config.toml`, read again only when the file changed.
+    fn config(&self) -> Arc<crate::config::Config> {
+        let modified = std::fs::metadata(crate::config::config_path())
+            .and_then(|m| m.modified())
+            .ok();
+        let mut c = self.config.lock().unwrap_or_else(|e| e.into_inner());
+        if c.1 != modified {
+            *c = (Arc::new(crate::config::Config::load()), modified);
+        }
+        c.0.clone()
+    }
+
     /// A server keeps `config.toml` with its accounts, so a new container starts with it.
     fn keep_config(&self) -> Result<()> {
         if let Some(s) = &self.server {
@@ -215,7 +242,8 @@ impl AppState {
     async fn reload(&self, root: &str) -> Result<()> {
         let owned = root.to_string();
         let data = tokio::task::spawn_blocking(move || Data::load_or_empty(&owned)).await?;
-        *self.current.write().await = Arc::new(Session::open(data).await);
+        let fresh = self.config().fresh();
+        *self.current.write().await = Arc::new(Session::open(data, fresh).await);
         self.reload_mcp(root);
         Ok(())
     }
@@ -231,9 +259,9 @@ impl AppState {
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
             + 1;
         let latest = self.mcp_generation.clone();
+        let cfg = self.config();
         tokio::spawn(async move {
-            let markdown = crate::config::Config::load().format() != "json";
-            match crate::mcp::load(&uri, markdown).await {
+            match crate::mcp::load(&uri, cfg.format() != "json", cfg.fresh()).await {
                 // A slower, older load never replaces a newer one.
                 Ok(server) if latest.load(std::sync::atomic::Ordering::SeqCst) == generation => {
                     if let Ok(mut m) = mcp.write() {
@@ -263,8 +291,13 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
         Access::Server(s) => Some(s.clone()),
         Access::Local(_) => None,
     };
+    let cfg = Arc::new(crate::config::Config::load());
+    let modified = std::fs::metadata(crate::config::config_path())
+        .and_then(|m| m.modified())
+        .ok();
     let state = Arc::new(AppState {
-        current: RwLock::new(Arc::new(rt.block_on(Session::open(data)))),
+        current: RwLock::new(Arc::new(rt.block_on(Session::open(data, cfg.fresh())))),
+        config: std::sync::Mutex::new((cfg, modified)),
         job: Default::default(),
         watch: Default::default(),
         mcp: server.as_ref().map(|_| Default::default()),
@@ -942,15 +975,13 @@ async fn packages(Cur(s): Cur) -> Json<Value> {
 }
 
 /// Setup status and how to connect agents: index location, checks, MCP tools.
-async fn setup(Srv(server): Srv, Cur(s): Cur) -> Json<Value> {
+async fn setup(Srv(server): Srv, Conf(cfg): Conf, Cur(s): Cur) -> Json<Value> {
     let root = s.data.root.clone().unwrap_or_default();
     let checks = {
         let root = root.clone();
-        tokio::task::spawn_blocking(move || {
-            crate::doctor::run(&crate::config::Config::load(), &root)
-        })
-        .await
-        .unwrap_or_default()
+        tokio::task::spawn_blocking(move || crate::doctor::run(&cfg, &root))
+            .await
+            .unwrap_or_default()
     };
     let tools: Vec<Value> = crate::mcp::tools()
         .into_iter()

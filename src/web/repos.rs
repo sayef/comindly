@@ -11,10 +11,10 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::{Cur, Shared, Srv};
+use super::{Conf, Cur, Shared, Srv};
 use std::sync::Arc;
 
-use crate::config::{Config, RepoEntry};
+use crate::config::RepoEntry;
 use crate::events::{Event, EventSink, Kind, Level};
 use crate::worktree;
 
@@ -75,7 +75,7 @@ fn absolute(p: &str) -> String {
         .unwrap_or(p)
 }
 
-pub(super) async fn list(Cur(s): Cur) -> Json<Value> {
+pub(super) async fn list(Conf(cfg): Conf, Cur(s): Cur) -> Json<Value> {
     let indexed: std::collections::HashMap<String, usize> =
         s.data.graph.repos().into_iter().collect();
     let meta = match super::graph_uri(&s) {
@@ -88,7 +88,7 @@ pub(super) async fn list(Cur(s): Cur) -> Json<Value> {
         .iter()
         .map(|r| (r.name.clone(), r.commit.clone()))
         .collect();
-    let repos = Config::load().repos;
+    let repos = cfg.repos.clone();
     let symbols = indexed.clone();
     let rows = tokio::task::spawn_blocking(move || {
         repos
@@ -117,7 +117,7 @@ pub(super) async fn list(Cur(s): Cur) -> Json<Value> {
         .iter()
         .filter_map(|r| r["name"].as_str().map(str::to_string))
         .collect();
-    let mine: Vec<String> = Config::load()
+    let mine: Vec<String> = cfg
         .repos
         .iter()
         .filter_map(|r| {
@@ -172,16 +172,12 @@ pub(super) struct ScanQ {
 }
 
 /// Git repositories under a folder, marked when already listed.
-pub(super) async fn scan(Json(q): Json<ScanQ>) -> impl IntoResponse {
+pub(super) async fn scan(Conf(cfg): Conf, Json(q): Json<ScanQ>) -> impl IntoResponse {
     let dir = absolute(&q.dir);
     if !Path::new(&dir).is_dir() {
         return fail(anyhow::anyhow!("{dir} is not a folder"));
     }
-    let listed: Vec<String> = Config::load()
-        .repos
-        .iter()
-        .map(|r| absolute(&r.path))
-        .collect();
+    let listed: Vec<String> = cfg.repos.iter().map(|r| absolute(&r.path)).collect();
     let found = tokio::task::spawn_blocking(move || {
         worktree::scan(Path::new(&dir), q.depth.unwrap_or(2).clamp(1, 4))
             .into_iter()
@@ -211,8 +207,8 @@ pub(super) struct Change {
 
 /// Add and remove repositories (folders); removed ones lose comindly's worktree, not your folder.
 pub(super) async fn change(State(app): State<Shared>, Json(c): Json<Change>) -> impl IntoResponse {
+    let mut list = app.config().repos.clone();
     let run = tokio::task::spawn_blocking(move || {
-        let mut list = Config::load().repos;
         for p in &c.add {
             let path = absolute(p);
             anyhow::ensure!(
@@ -311,7 +307,8 @@ pub(super) async fn begin(
     let root = session.data.root.clone().context("read-only UI")?;
     if !drop_unlisted {
         let indexed = session.data.graph.repos().into_iter().collect();
-        let listed: Vec<String> = Config::load()
+        let listed: Vec<String> = app
+            .config()
             .repos
             .iter()
             .map(|r| worktree::name(Path::new(&r.path)))
@@ -347,7 +344,7 @@ pub(super) async fn begin(
     if let Some(w) = why {
         log.emit(Event::new(Level::Info, Kind::Note, w));
     }
-    let cfg = Config::load();
+    let cfg = app.config();
     let team = crate::team::load(&root)
         .await
         .map(|t| t.settings)
@@ -414,9 +411,9 @@ pub(super) struct Watch {
 /// remote (`git ls-remote`, no download) and re-index when one did.
 pub(super) async fn watch(app: Shared) {
     loop {
-        let cfg = Config::load();
+        let cfg = app.config();
         tokio::time::sleep(cfg.fresh().max(std::time::Duration::from_secs(60))).await;
-        if Config::load().auto_index != Some(true) {
+        if cfg.auto_index != Some(true) {
             continue;
         }
         let result = match moved(&app).await {
@@ -443,7 +440,7 @@ async fn moved(app: &Shared) -> anyhow::Result<Vec<String>> {
     let indexed = crate::index::read_repo_commits(&uri)
         .await
         .unwrap_or_default();
-    let repos = Config::load().repos;
+    let repos = app.config().repos.clone();
     let creds = crate::config::git_credentials(app.server.clone());
     tokio::task::spawn_blocking(move || {
         let mut out = Vec::new();
@@ -469,7 +466,7 @@ async fn moved(app: &Shared) -> anyhow::Result<Vec<String>> {
 
 pub(super) async fn watch_state(State(app): State<Shared>) -> Json<Value> {
     Json(json!({
-        "enabled": Config::load().auto_index == Some(true),
+        "enabled": app.config().auto_index == Some(true),
         "last": *app.watch.lock().await,
     }))
 }
@@ -493,6 +490,7 @@ pub(super) struct RemoteListQ {
 /// The repositories of a GitHub organisation or GitLab group, with the ones already here marked.
 pub(super) async fn remote_list(
     Srv(server): Srv,
+    Conf(cfg): Conf,
     who: Option<axum::Extension<crate::server::Who>>,
     Json(q): Json<RemoteListQ>,
 ) -> impl IntoResponse {
@@ -545,7 +543,7 @@ pub(super) async fn remote_list(
                 _ => tokio::task::spawn_blocking(move || worktree::approve(&host, &a)).await?,
             }
         }
-        let here: Vec<String> = Config::load()
+        let here: Vec<String> = cfg
             .repos
             .iter()
             .filter_map(|r| {
@@ -600,7 +598,7 @@ pub(super) async fn remote_add(
     Json(q): Json<RemoteAddQ>,
 ) -> impl IntoResponse {
     let run = async {
-        let mut list = Config::load().repos;
+        let mut list = app.config().repos.clone();
         let mut added = 0;
         for url in &q.urls {
             let path = crate::hosting::managed_path(url)?

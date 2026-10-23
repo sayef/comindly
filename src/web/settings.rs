@@ -8,8 +8,8 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::{Cur, Shared, Srv};
-use crate::config::{Config, Setting};
+use super::{Conf, Cur, Shared, Srv};
+use crate::config::Setting;
 
 fn fail(e: anyhow::Error) -> (StatusCode, Json<Value>) {
     (
@@ -18,8 +18,7 @@ fn fail(e: anyhow::Error) -> (StatusCode, Json<Value>) {
     )
 }
 
-pub(super) async fn get(Srv(server): Srv, Cur(s): Cur) -> Json<Value> {
-    let cfg = Config::load();
+pub(super) async fn get(Srv(server): Srv, Conf(cfg): Conf, Cur(s): Cur) -> Json<Value> {
     let root = s.data.root.clone().unwrap_or_default();
     let key = tokio::task::spawn_blocking(move || {
         let team = crate::team::current().and_then(|t| t.name);

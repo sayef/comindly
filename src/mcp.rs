@@ -1435,7 +1435,7 @@ fn md_guide(d: &GuideDto) -> String {
 /// client disconnects. `markdown` controls whether tool results are handed back as markdown
 /// text (default) or raw JSON.
 pub async fn serve_stdio(uri: &str, markdown: bool) -> Result<()> {
-    let mut server = load(uri, markdown).await?;
+    let mut server = load(uri, markdown, crate::config::Config::load().fresh()).await?;
     server.signer = crate::config::local_signing_key();
     let service = server.serve(rmcp::transport::io::stdio()).await?;
     service.waiting().await?;
@@ -1443,7 +1443,7 @@ pub async fn serve_stdio(uri: &str, markdown: bool) -> Result<()> {
 }
 
 /// Load the graph, enrichment, conventions and search model for `uri` into a server.
-pub async fn load(uri: &str, markdown: bool) -> Result<ComindlyServer> {
+pub async fn load(uri: &str, markdown: bool, fresh: std::time::Duration) -> Result<ComindlyServer> {
     let (symbols, edges) = crate::index::read_graph(uri).await?;
     let mut conventions = match crate::index::read_facts(uri).await {
         Ok(Some(facts)) => crate::conventions::mine(&symbols, &edges, &facts),
@@ -1515,9 +1515,7 @@ pub async fn load(uri: &str, markdown: bool) -> Result<ComindlyServer> {
         symbols: Arc::new(by_id),
         embedder: Arc::new(embedder),
         uri: Arc::new(uri.to_string()),
-        tables: Arc::new(
-            crate::index::Tables::connect(uri, crate::config::Config::load().fresh()).await?,
-        ),
+        tables: Arc::new(crate::index::Tables::connect(uri, fresh).await?),
         records: Arc::new(tokio::sync::Mutex::new(None)),
         packages: Arc::new(crate::index::read_packages(uri).await.unwrap_or_default()),
         conventions: Arc::new(conventions),

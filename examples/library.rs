@@ -38,7 +38,8 @@ async fn main() -> anyhow::Result<()> {
         println!("{:?}: {}", record.kind, record.title);
     }
 
-    let server = comindly::mcp::load(&format!("{root}/_graph"), true).await?;
+    let fresh = std::time::Duration::from_secs(comindly::cache::DEFAULT_TTL);
+    let server = comindly::mcp::load(&format!("{root}/_graph"), true, fresh).await?;
     let current = Arc::new(RwLock::new(Some(server)));
     let _app: axum::Router = axum::Router::new().nest_service(
         "/mcp",

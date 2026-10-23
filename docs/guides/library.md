@@ -72,7 +72,8 @@ over any rmcp transport, or mount the HTTP one in an axum router next to your ow
 ```rust
 use std::sync::{Arc, RwLock};
 
-let server = comindly::mcp::load(&format!("{root}/_graph"), true).await?;
+let fresh = std::time::Duration::from_secs(comindly::cache::DEFAULT_TTL);
+let server = comindly::mcp::load(&format!("{root}/_graph"), true, fresh).await?;
 let current = Arc::new(RwLock::new(Some(server)));
 let app = axum::Router::new().nest_service(
     "/mcp",
