@@ -1853,7 +1853,7 @@ fn cmd_app(from: Option<&str>) -> ExitCode {
     #[cfg(target_os = "macos")]
     {
         let root = comindly::config::Config::load().index_dir(from);
-        match comindly::app::run(root) {
+        match comindly::app::run(comindly::app::Open::Local(root)) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 comindly::ui::err(&comindly::storage::explain(&format!("{e:#}")));

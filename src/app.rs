@@ -1,5 +1,5 @@
-//! `comindly app`: the web UI in a native WebKit window, like Ollama's desktop app. The UI server
-//! listens on a random local port with a token only this window knows.
+//! `comindly app`: the web UI in a native WebKit window, like Ollama's desktop app. Locally the UI
+//! server listens on a random port with a token only this window knows; a server's app opens as is.
 
 use std::net::TcpListener;
 
@@ -19,8 +19,14 @@ enum Msg {
     PickFolder,
 }
 
-/// Open the window and serve the index at `root` into it; returns when the window closes.
-pub fn run(root: String) -> anyhow::Result<()> {
+/// What the window shows: the index at a root, served privately, or a comindly server's app.
+pub enum Open {
+    Local(String),
+    Server(String),
+}
+
+/// Open the window; returns when it closes.
+pub fn run(open: Open) -> anyhow::Result<()> {
     let event_loop = EventLoopBuilder::<Msg>::with_user_event().build();
     dock_icon();
     let proxy = event_loop.create_proxy();
@@ -36,6 +42,12 @@ pub fn run(root: String) -> anyhow::Result<()> {
         ..Default::default()
     };
     let sep = PredefinedMenuItem::separator;
+    let view_menu =
+        Submenu::with_items("View", true, &[&reload, &sep(), &actual, &bigger, &smaller])?;
+    let paste_link = MenuItem::new("Open Link from Clipboard", true, key("CmdOrCtrl+L"));
+    if matches!(open, Open::Server(_)) {
+        view_menu.append_items(&[&sep(), &paste_link])?;
+    }
     let window_menu = Submenu::with_items(
         "Window",
         true,
@@ -74,7 +86,7 @@ pub fn run(root: String) -> anyhow::Result<()> {
                 &PredefinedMenuItem::select_all(None),
             ],
         )?,
-        &Submenu::with_items("View", true, &[&reload, &sep(), &actual, &bigger, &smaller])?,
+        &view_menu,
         &window_menu,
     ])?;
     menu.init_for_nsapp();
@@ -86,8 +98,19 @@ pub fn run(root: String) -> anyhow::Result<()> {
         }
     }));
 
+    let (title, home) = match &open {
+        Open::Local(_) => ("comindly".to_string(), None),
+        Open::Server(url) => (format!("comindly — {}", host(url)), Some(url.clone())),
+    };
+    let inside = {
+        let home = home.clone();
+        move |url: &str| match &home {
+            Some(h) => within(url, h),
+            None => url.starts_with("http://127.0.0.1:"),
+        }
+    };
     let window = WindowBuilder::new()
-        .with_title("comindly")
+        .with_title(&title)
         .with_inner_size(LogicalSize::new(1320.0, 860.0))
         .with_min_inner_size(LogicalSize::new(880.0, 560.0))
         .build(&event_loop)?;
@@ -101,10 +124,8 @@ pub fn run(root: String) -> anyhow::Result<()> {
                 }
             }
         })
-        .with_navigation_handler(|url| {
-            let local = ["http://127.0.0.1:", "about:", "data:"]
-                .iter()
-                .any(|p| url.starts_with(p));
+        .with_navigation_handler(move |url| {
+            let local = inside(&url) || url.starts_with("about:") || url.starts_with("data:");
             if !local {
                 open_external(&url);
             }
@@ -116,16 +137,29 @@ pub fn run(root: String) -> anyhow::Result<()> {
         })
         .build(&window)?;
 
+    let hint = match &open {
+        Open::Local(_) => local_hint(),
+        Open::Server(url) => server_hint(url),
+    };
     std::thread::spawn(move || {
-        let started = (|| {
-            let data = crate::view::Data::load_or_empty(&root, &crate::config::local_verifier());
-            let listener = TcpListener::bind("127.0.0.1:0")?;
-            let port = listener.local_addr()?.port();
-            let token = crate::web::new_token();
-            let url = format!("http://127.0.0.1:{port}/?token={token}");
-            let _ = proxy.send_event(Msg::Ready(url));
-            crate::web::serve(data, listener, crate::web::Access::Local(token))
-        })();
+        let started = match open {
+            Open::Local(root) => (|| {
+                let data =
+                    crate::view::Data::load_or_empty(&root, &crate::config::local_verifier());
+                let listener = TcpListener::bind("127.0.0.1:0")?;
+                let port = listener.local_addr()?.port();
+                let token = crate::web::new_token();
+                let url = format!("http://127.0.0.1:{port}/?token={token}");
+                let _ = proxy.send_event(Msg::Ready(url));
+                crate::web::serve(data, listener, crate::web::Access::Local(token))
+            })(),
+            Open::Server(url) => {
+                let c = crate::client::Client::new(&url, None);
+                crate::rt::block_on(c.get::<serde_json::Value>("/api/v1/auth/me", &[])).map(|_| {
+                    let _ = proxy.send_event(Msg::Ready(format!("{url}/")));
+                })
+            }
+        };
         if let Err(e) = started {
             let _ = proxy.send_event(Msg::Failed(format!("{e:#}")));
         }
@@ -134,7 +168,7 @@ pub fn run(root: String) -> anyhow::Result<()> {
     let mut zoom = 1.0_f64;
     event_loop.run(move |event, _, flow| {
         *flow = ControlFlow::Wait;
-        let _ = (&window, &menu);
+        let _ = (&window, &menu, &view_menu);
         match event {
             Event::UserEvent(Msg::Ready(url)) => {
                 let _ = webview.load_url(&url);
@@ -149,11 +183,17 @@ pub fn run(root: String) -> anyhow::Result<()> {
                 ));
             }
             Event::UserEvent(Msg::Failed(e)) => {
-                let _ = webview.load_html(&failed(&e, &root_hint()));
+                let _ = webview.load_html(&failed(&e, &hint));
             }
             Event::UserEvent(Msg::Menu(id)) => {
                 if id == *reload.id() {
                     let _ = webview.reload();
+                } else if id == *paste_link.id() {
+                    let link =
+                        clipboard().filter(|u| home.as_deref().is_some_and(|h| within(u, h)));
+                    if let Some(url) = link {
+                        let _ = webview.load_url(&url);
+                    }
                 } else {
                     zoom = if id == *bigger.id() {
                         (zoom + 0.1).min(2.0)
@@ -180,8 +220,40 @@ fn open_external(url: &str) {
     let _ = std::process::Command::new("open").arg(url).spawn();
 }
 
-fn root_hint() -> String {
-    crate::config::store_path().display().to_string()
+/// `url` is on the server at `home` (same scheme, host and port).
+fn within(url: &str, home: &str) -> bool {
+    url.strip_prefix(home)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with(['/', '?', '#']))
+}
+
+fn host(url: &str) -> &str {
+    let rest = url.split_once("://").map_or(url, |(_, r)| r);
+    rest.split('/').next().unwrap_or(rest)
+}
+
+/// The clipboard's text, e.g. a sign-in link from an email.
+fn clipboard() -> Option<String> {
+    let out = std::process::Command::new("pbpaste").output().ok()?;
+    Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+fn local_hint() -> String {
+    format!(
+        r#"<h1>comindly could not open the index</h1><pre>{{error}}</pre>
+<p>Set <code>index_dir</code> in <code>{}</code>, or start the app from a terminal with
+<code>comindly app --index-dir …</code>. An index in a bucket needs the platform's credentials in the
+environment the app starts from.</p>"#,
+        escape(&crate::config::store_path().display().to_string())
+    )
+}
+
+fn server_hint(url: &str) -> String {
+    format!(
+        r#"<h1>comindly could not reach {}</h1><pre>{{error}}</pre>
+<p>Check the address and your connection, then use View → Reload; <code>comindly app --local</code>
+opens this machine's index instead.</p>"#,
+        escape(url)
+    )
 }
 
 fn escape(s: &str) -> String {
@@ -190,15 +262,12 @@ fn escape(s: &str) -> String {
         .replace('>', "&gt;")
 }
 
-fn failed(error: &str, config: &str) -> String {
+/// The error page: `hint` is HTML with `{error}` where the escaped error goes.
+fn failed(error: &str, hint: &str) -> String {
     format!(
         r#"<!doctype html><html><head><meta charset="utf-8"><style>{STYLE}</style></head><body><main>
-<h1>comindly could not open the index</h1><pre>{}</pre>
-<p>Set <code>index_dir</code> in <code>{}</code>, or start the app from a terminal with
-<code>comindly app --index-dir …</code>. An index in a bucket needs the platform's credentials in the
-environment the app starts from.</p></main></body></html>"#,
-        escape(error),
-        escape(config)
+{}</main></body></html>"#,
+        hint.replace("{error}", &escape(error))
     )
 }
 
