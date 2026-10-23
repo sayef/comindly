@@ -327,12 +327,23 @@ export interface IndexEvent {
 }
 
 export interface IndexJob {
+  id?: string;
   running: boolean;
   cancelled: boolean;
   ok: boolean | null;
   events: IndexEvent[];
   started: string | null;
   finished: string | null;
+  /** Jobs waiting their turn, the next to run first. */
+  queued?: QueuedJob[];
+}
+
+export interface QueuedJob {
+  id: string;
+  kind: string;
+  position: number;
+  started_by: string | null;
+  created: string;
 }
 
 declare global {
@@ -464,6 +475,7 @@ export const api = {
   indexJob: () => get<IndexJob>("/api/v1/index"),
   startIndex: (llm: boolean, drop_unlisted = false) => post("/api/v1/index", { llm, drop_unlisted }),
   cancelIndex: () => post("/api/v1/index/cancel", {}),
+  cancelJob: (id: string) => post(`/api/v1/jobs/${id}/cancel`, {}),
   indexWatch: () => get<{ enabled: boolean; last: { checked: string | null; result: string } }>("/api/v1/index/watch"),
   team: () => get<Team>("/api/v1/team"),
   saveTeam: (settings: TeamSettings, version: number | null) => post("/api/v1/team", { settings, version }),

@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   Building2,
   CheckCircle2,
+  Clock,
   FolderOpen,
   FolderSearch,
   GitBranch,
@@ -200,7 +201,11 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
   const qc = useQueryClient();
   const [llm, setLlm] = useState(false);
   const [drop, setDrop] = useState(false);
-  const job = useQuery({ queryKey: ["index-job"], queryFn: api.indexJob, refetchInterval: (q) => (q.state.data?.running ? 1000 : false) });
+  const job = useQuery({
+    queryKey: ["index-job"],
+    queryFn: api.indexJob,
+    refetchInterval: (q) => (q.state.data?.running || q.state.data?.queued?.length ? 1000 : false),
+  });
   const start = useMutation({
     mutationFn: () => api.startIndex(llm, drop),
     meta: { inline: true },
@@ -211,7 +216,13 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
     meta: { quiet: true },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["index-job"] }),
   });
+  const dequeue = useMutation({
+    mutationFn: api.cancelJob,
+    meta: { quiet: true },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["index-job"] }),
+  });
   const j = job.data;
+  const queued = j?.queued ?? [];
   const [seen, setSeen] = useState<string | null>(null);
   useEffect(() => {
     if (j && !j.running && j.ok && j.finished && j.finished !== seen) {
@@ -246,11 +257,12 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
             )}
             <Button
               variant="brand"
-              disabled={(unlisted.length > 0 && !drop) || j?.running}
-              loading={start.isPending || j?.running}
+              disabled={(unlisted.length > 0 && !drop) || queued.length > 0}
+              loading={start.isPending}
               onClick={() => start.mutate()}
+              title={j?.running ? "Index again once the running job ends" : undefined}
             >
-              {!(start.isPending || j?.running) && <Play />} {j?.running ? "Indexing…" : "Index now"}
+              {!start.isPending && <Play />} {j?.running ? "Queue next" : "Index now"}
             </Button>
           </div>
           <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -288,6 +300,15 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
             {j.finished && <span className="text-xs text-muted-foreground">{new Date(j.finished).toLocaleString()}</span>}
           </p>
         )}
+        {queued.map((q) => (
+          <p key={q.id} className="flex items-center gap-1.5 text-sm">
+            <Clock className="size-4 text-muted-foreground" />
+            Queued{queued.length > 1 ? ` (position ${q.position})` : ""}: indexing starts when the running job ends.
+            <Button variant="outline" size="sm" loading={dequeue.isPending} onClick={() => dequeue.mutate(q.id)}>
+              Cancel
+            </Button>
+          </p>
+        ))}
         <IndexLog events={j?.events ?? []} running={!!j?.running} />
       </CardContent>
     </Card>
