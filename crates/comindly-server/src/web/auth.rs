@@ -796,3 +796,15 @@ pub(super) async fn device_approve(
         message,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn viewers_read_the_terminal_view_and_members_review() {
+        assert_eq!(needs(&Method::GET, "/api/v1/view"), Role::Viewer);
+        assert_eq!(needs(&Method::POST, "/api/v1/review"), Role::Member);
+        assert!(!Role::Viewer.at_least(needs(&Method::POST, "/api/v1/review")));
+    }
+}

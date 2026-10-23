@@ -25,7 +25,7 @@ pub struct PackageRow {
 }
 
 /// An internal dependency: `consumer` uses `name`, which `publisher` publishes.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InternalDep {
     pub ecosystem: String,
     pub name: String,

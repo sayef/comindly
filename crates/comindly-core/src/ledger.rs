@@ -719,7 +719,7 @@ pub enum Trust {
 }
 
 /// A record with its derived state against the current index.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Entry {
     pub record: Record,
     pub status: Status,
@@ -739,7 +739,7 @@ pub struct Entry {
 }
 
 /// One review of a record.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
     pub id: String,
     /// `confirm`, `supersede`, `dispute`, `retract`, `archive` or `invalidate`.

@@ -349,6 +349,10 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
         .route("/api/v1/contracts", get(contracts))
         .route("/api/v1/ledger", get(ledger))
         .route(
+            "/api/v1/view",
+            get(view).layer(tower_http::compression::CompressionLayer::new()),
+        )
+        .route(
             "/api/v1/conventions",
             get(conventions).post(change_convention),
         )
@@ -834,6 +838,28 @@ async fn ledger(Cur(s): Cur) -> Json<Value> {
     let mut v: Vec<&Entry> = entries.iter().collect();
     v.sort_by(|a, b| b.record.created.cmp(&a.record.created));
     Json(named(&s, &v))
+}
+
+/// What the terminal UI shows, for `comindly ui` against this server.
+async fn view(Cur(s): Cur) -> impl IntoResponse {
+    let packages = match graph_uri(&s) {
+        Some(u) => crate::index::read_packages(&u).await.unwrap_or_default(),
+        None => Vec::new(),
+    };
+    let mut entries = s.entries().await.clone();
+    let findings = crate::checks::run(&entries, &s.data.symbols, &s.data.edges, &packages);
+    crate::checks::promote(&mut entries, &findings);
+    let manual = s.manual.read().await.clone();
+    Json(crate::view::View {
+        symbols: (&s.data.symbols[..]).into(),
+        edges: (&s.data.edges[..]).into(),
+        entries: entries.into(),
+        conventions: (&s.data.conventions[..]).into(),
+        manual: manual.into(),
+        deps: (&s.data.deps[..]).into(),
+        problem: s.data.problem.clone(),
+    })
+    .into_response()
 }
 
 /// Entries as JSON with each anchor named as the graph shows it (`Class.method`).

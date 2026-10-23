@@ -1,5 +1,9 @@
 //! What the apps show of an index — graph, contracts, ledger, conventions, dependencies — read once.
 
+use std::borrow::Cow;
+
+use serde::{Deserialize, Serialize};
+
 use crate::conventions::Convention;
 use crate::graph::{CodeGraph, ContractView};
 use crate::ledger::Entry;
@@ -41,19 +45,35 @@ impl Data {
         let findings = crate::checks::run(&entries, &symbols, &edges, &packages);
         crate::checks::promote(&mut entries, &findings);
         let deps = crate::manifests::internal(&packages);
+        let mut data = Data::from_view(View {
+            symbols: symbols.into(),
+            edges: edges.into(),
+            entries: entries.into(),
+            conventions: conventions.into(),
+            manual: manual.into(),
+            deps: deps.into(),
+            problem: None,
+        });
+        data.root = Some(root.to_string());
+        Ok(data)
+    }
+
+    /// The UI's data from a transferred view; the graph and contracts are rebuilt. Read-only.
+    pub fn from_view(v: View<'_>) -> Data {
+        let (symbols, edges) = (v.symbols.into_owned(), v.edges.into_owned());
         let graph = CodeGraph::build(&symbols, &edges);
-        Ok(Data {
+        Data {
             contracts: graph.contracts(None, false),
             graph,
             symbols,
             edges,
-            entries,
-            conventions,
-            manual,
-            deps,
-            root: Some(root.to_string()),
-            problem: None,
-        })
+            entries: v.entries.into_owned(),
+            conventions: v.conventions.into_owned(),
+            manual: v.manual.into_owned(),
+            deps: v.deps.into_owned(),
+            root: None,
+            problem: v.problem,
+        }
     }
 
     /// No index yet: an empty view of `root` that says why.
@@ -76,4 +96,17 @@ impl Data {
     pub fn load_or_empty(root: &str, verifier: &crate::signing::Verifier) -> Data {
         Data::load(root, verifier).unwrap_or_else(|e| Data::empty(root, format!("{e:#}")))
     }
+}
+
+/// The parts of [`Data`] a server sends a client; the client rebuilds the rest.
+#[derive(Serialize, Deserialize)]
+pub struct View<'a> {
+    pub symbols: Cow<'a, [Symbol]>,
+    pub edges: Cow<'a, [Edge]>,
+    /// Ledger entries with the status and trust the server derived.
+    pub entries: Cow<'a, [Entry]>,
+    pub conventions: Cow<'a, [Convention]>,
+    pub manual: Cow<'a, [crate::conventions::Manual]>,
+    pub deps: Cow<'a, [InternalDep]>,
+    pub problem: Option<String>,
 }
