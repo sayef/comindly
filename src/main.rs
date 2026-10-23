@@ -2455,11 +2455,16 @@ fn cmd_login(url: &str) -> ExitCode {
             token: a.token,
             email: a.email.clone(),
         }))?;
-        Ok(a.email)
+        Ok((a.email, a.expires))
     });
     match saved {
-        Ok(email) => {
+        Ok((email, expires)) => {
             comindly::ui::ok(&format!("signed in to {url} as {email}"));
+            if let Some(day) = expires.as_deref().and_then(|e| e.get(..10)) {
+                comindly::ui::note(&format!(
+                    "this sign-in lasts until {day}; then run `comindly login {url}` again"
+                ));
+            }
             comindly::ui::note("find, search, why, ledger, flow, contracts, conventions, remember, review and link now ask the server; --local uses the index here");
             ExitCode::SUCCESS
         }

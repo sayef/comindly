@@ -13,7 +13,7 @@ use lancedb::arrow::arrow_schema::{DataType, Field, Schema};
 use serde::{Deserialize, Serialize};
 
 use crate::backends::{
-    AccountStore, Authenticator, DeviceSignIn, Mailer, SecretStore, SettingsStore,
+    AccountStore, AuditLog, Authenticator, DeviceSignIn, Mailer, SecretStore, SettingsStore,
 };
 
 /// `NAME` from the environment, or the contents of the file `NAME_FILE` names.
@@ -113,6 +113,7 @@ impl ServerConfig {
 pub struct Server {
     pub config: ServerConfig,
     pub accounts: Arc<dyn AccountStore>,
+    pub audit: Arc<dyn AuditLog>,
     pub auth: Arc<dyn Authenticator>,
     pub devices: Arc<dyn DeviceSignIn>,
     pub secrets: Arc<dyn SecretStore>,
@@ -132,6 +133,7 @@ impl Server {
         Ok(Server {
             config,
             accounts: store.clone(),
+            audit: store.clone(),
             auth: store.clone(),
             devices: store.clone(),
             secrets: store.clone(),
@@ -234,6 +236,34 @@ pub struct AccessToken {
     pub name: String,
     pub created: String,
     pub last_used: Option<String>,
+    /// `None` for a token that never expires.
+    pub expires: Option<String>,
+    pub expired: bool,
+}
+
+/// One row of the audit log; details never hold token values or codes.
+#[derive(Debug, Clone, Serialize)]
+pub struct AuditEntry {
+    pub at: String,
+    pub actor: String,
+    pub action: String,
+    pub detail: String,
+}
+
+/// Which audit entries to list: `before` is the `next` cursor of the previous page.
+#[derive(Debug, Default, Deserialize)]
+pub struct AuditQuery {
+    pub limit: Option<usize>,
+    pub before: Option<String>,
+    pub actor: Option<String>,
+    pub action: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AuditPage {
+    pub entries: Vec<AuditEntry>,
+    /// The cursor for the next (older) page, when there is one.
+    pub next: Option<String>,
 }
 
 /// A secret's state for the UI; its value never leaves the server.
@@ -256,6 +286,12 @@ const MAX_LINKS_PER_HOUR: i64 = 5;
 const DEVICE_MINUTES: i64 = 10;
 /// Command-line sign-ins one address may start in `LOCK_MINUTES`.
 const MAX_DEVICE_STARTS: i64 = 10;
+/// How long a token lasts unless chosen otherwise, and a command-line sign-in's always.
+pub const TOKEN_DAYS: u32 = 90;
+/// Expired tokens stay listed (as expired) this long before they are removed.
+const EXPIRED_TOKEN_DAYS: i64 = 30;
+const AUDIT_PAGE: usize = 50;
+const AUDIT_PAGE_MAX: usize = 500;
 const CODE_ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 fn now() -> String {
@@ -389,7 +425,11 @@ pub struct DeviceRequest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DevicePoll {
     Pending,
-    Approved { token: String, email: String },
+    Approved {
+        token: String,
+        email: String,
+        expires: Option<String>,
+    },
     Denied,
     Expired,
 }
@@ -408,6 +448,14 @@ struct Token {
     name: String,
     created: String,
     last_used: Option<String>,
+    #[serde(default)]
+    expires: Option<String>,
+}
+
+impl Token {
+    fn expired(&self, now: &str) -> bool {
+        self.expires.as_deref().is_some_and(|e| e <= now)
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -572,11 +620,16 @@ async fn table(uri: &str) -> Result<lancedb::Table> {
 
 /// Every row except the audit log, and the table version they came from.
 async fn read_all(uri: String) -> Result<(u64, Vec<[String; 4]>)> {
+    read_rows(uri, "kind != 'audit'").await
+}
+
+/// Rows matching `filter` as `[kind, key, json, mac]`, and the table version they came from.
+async fn read_rows(uri: String, filter: &str) -> Result<(u64, Vec<[String; 4]>)> {
     use futures::TryStreamExt;
     use lancedb::query::{ExecutableQuery, QueryBase};
     let tbl = table(&uri).await?;
     let version = tbl.version().await?;
-    let mut st = tbl.query().only_if("kind != 'audit'").execute().await?;
+    let mut st = tbl.query().only_if(filter).execute().await?;
     let mut rows = Vec::new();
     while let Some(b) = st.try_next().await? {
         let col = |n: &str| {
@@ -797,7 +850,7 @@ impl Store {
         Ok(())
     }
 
-    /// Drop expired links, invitations and sessions and old failed attempts, and tidy the table.
+    /// Drop expired links, invitations, sessions and tokens and old failed attempts; tidy the table.
     fn prune(&self) {
         let t = now();
         let day = (Utc::now() - Duration::days(1)).to_rfc3339();
@@ -828,6 +881,7 @@ impl Store {
                     .filter(|(_, d)| d.expires < t)
                     .map(|(k, _)| del("device", k)),
             );
+            changes.extend(long_expired(&st.tokens, |_| true));
             st.failures.retain(|(_, at)| *at >= day);
         }
         if let Err(e) = self.commit(changes) {
@@ -879,6 +933,29 @@ impl Store {
         }
     }
 
+    /// Audit rows this server signed, with the index of the key that signed each.
+    fn audit_rows(&self) -> Result<Vec<(String, AuditEntry, String, usize)>> {
+        let (_, rows) = run(read_rows(self.uri.clone(), "kind = 'audit'"))?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|[kind, key, json, m]| {
+                let i = self
+                    .keys
+                    .iter()
+                    .position(|k| constant_eq(&mac(k, &kind, &key, &json), &m))?;
+                let v: serde_json::Value = serde_json::from_str(&json).ok()?;
+                let s = |n: &str| v[n].as_str().unwrap_or_default().to_string();
+                let entry = AuditEntry {
+                    at: s("at"),
+                    actor: s("actor"),
+                    action: s("action"),
+                    detail: s("detail"),
+                };
+                Some((key, entry, json, i))
+            })
+            .collect())
+    }
+
     fn session_for(&self, email: &str) -> Result<(String, Who)> {
         let who = self.member(email)?.context("not a member")?;
         let token = new_token("ses_");
@@ -914,7 +991,17 @@ impl Store {
             again.updated = row.updated;
             changes.push(put("secret", &name, &again));
         }
-        self.commit(changes)
+        self.commit(changes)?;
+        let audit: Vec<Change> = self
+            .audit_rows()?
+            .into_iter()
+            .filter(|(.., i)| *i > 0)
+            .map(|(key, _, json, _)| ("audit", key, Some(json)))
+            .collect();
+        if !audit.is_empty() {
+            run(write(self.uri.clone(), self.keys[0], audit))?;
+        }
+        Ok(())
     }
 
     /// Only admins invite, change or remove people.
@@ -930,6 +1017,16 @@ impl Store {
     fn write_lock(&self) -> std::sync::MutexGuard<'_, ()> {
         self.writing.lock().unwrap_or_else(|e| e.into_inner())
     }
+}
+
+/// Tokens of whoever `whose` accepts that expired more than `EXPIRED_TOKEN_DAYS` ago.
+fn long_expired(tokens: &HashMap<String, Token>, whose: impl Fn(&str) -> bool) -> Vec<Change> {
+    let gone = (Utc::now() - Duration::days(EXPIRED_TOKEN_DAYS)).to_rfc3339();
+    tokens
+        .iter()
+        .filter(|(_, t)| whose(&t.email) && t.expired(&gone))
+        .map(|(k, _)| del("token", k))
+        .collect()
 }
 
 fn sealed(key: &str, name: &str, value: &str, by: &str) -> Result<Secret> {
@@ -1372,9 +1469,10 @@ impl crate::backends::AccountStore for Store {
 
     fn sign_out(&self, session: &str, everywhere: bool) -> Result<()> {
         let h = hash(session);
-        let changes = {
+        let (changes, email) = {
             let st = self.state();
-            match (everywhere, st.sessions.get(&h)) {
+            let email = st.sessions.get(&h).map(|s| s.email.clone());
+            let changes = match (everywhere, st.sessions.get(&h)) {
                 (true, Some(s)) => st
                     .sessions
                     .iter()
@@ -1382,15 +1480,27 @@ impl crate::backends::AccountStore for Store {
                     .map(|(k, _)| del("session", k))
                     .collect(),
                 _ => vec![del("session", &h)],
-            }
+            };
+            (changes, email)
         };
-        self.commit(changes)
+        self.commit(changes)?;
+        if let Some(email) = email {
+            self.audit(
+                &email,
+                "sign-out",
+                if everywhere { "everywhere" } else { "" },
+            );
+        }
+        Ok(())
     }
 
     /// A personal access token for agents; its value is returned once.
-    fn create_token(&self, who: &Who, name: &str) -> Result<String> {
+    fn create_token(&self, who: &Who, name: &str, expires_in_days: Option<u32>) -> Result<String> {
         let name = name.trim();
         anyhow::ensure!(!name.is_empty(), "give the token a name");
+        if let Some(d) = expires_in_days {
+            anyhow::ensure!((1..=3650).contains(&d), "a token lasts 1 to 3650 days");
+        }
         let token = new_token("cly_");
         let id = uuid::Uuid::new_v4().simple().to_string();
         let row = Token {
@@ -1399,23 +1509,33 @@ impl crate::backends::AccountStore for Store {
             name: name.to_string(),
             created: now(),
             last_used: None,
+            expires: expires_in_days.map(|d| (Utc::now() + Duration::days(d.into())).to_rfc3339()),
         };
-        self.commit(vec![put("token", &id, &row)])?;
-        self.audit(&who.email, "token", name);
+        let mut changes = long_expired(&self.state().tokens, |e| e == who.email);
+        changes.push(put("token", &id, &row));
+        self.commit(changes)?;
+        let lasts = match expires_in_days {
+            Some(d) => format!("{name} ({d} days)"),
+            None => format!("{name} (no expiry)"),
+        };
+        self.audit(&who.email, "token", &lasts);
         Ok(token)
     }
 
     fn tokens(&self, who: &Who) -> Result<Vec<AccessToken>> {
+        let t = now();
         let mut out: Vec<AccessToken> = self
             .state()
             .tokens
             .iter()
-            .filter(|(_, t)| t.email == who.email)
-            .map(|(id, t)| AccessToken {
+            .filter(|(_, tok)| tok.email == who.email)
+            .map(|(id, tok)| AccessToken {
                 id: id.clone(),
-                name: t.name.clone(),
-                created: t.created.clone(),
-                last_used: t.last_used.clone(),
+                name: tok.name.clone(),
+                created: tok.created.clone(),
+                last_used: tok.last_used.clone(),
+                expires: tok.expires.clone(),
+                expired: tok.expired(&t),
             })
             .collect();
         out.sort_by(|a, b| b.created.cmp(&a.created));
@@ -1427,12 +1547,50 @@ impl crate::backends::AccountStore for Store {
             .state()
             .tokens
             .get(id)
-            .is_some_and(|t| t.email == who.email);
-        if mine {
+            .filter(|t| t.email == who.email)
+            .map(|t| t.name.clone());
+        if let Some(name) = mine {
             self.commit(vec![del("token", id)])?;
+            self.audit(&who.email, "revoke-token", &name);
         }
-        self.audit(&who.email, "revoke-token", id);
         Ok(())
+    }
+}
+
+impl crate::backends::AuditLog for Store {
+    fn audit_entries(&self, query: &AuditQuery) -> Result<AuditPage> {
+        let limit = query.limit.unwrap_or(AUDIT_PAGE).clamp(1, AUDIT_PAGE_MAX);
+        let before = query.before.as_deref().and_then(|b| b.split_once('|'));
+        let actor = query
+            .actor
+            .as_deref()
+            .map(normalize)
+            .filter(|a| !a.is_empty());
+        let action = query
+            .action
+            .as_deref()
+            .map(str::trim)
+            .filter(|a| !a.is_empty());
+        let mut rows: Vec<(String, AuditEntry)> = self
+            .audit_rows()?
+            .into_iter()
+            .map(|(key, e, ..)| (key, e))
+            .filter(|(key, e)| {
+                before.is_none_or(|(at, k)| (e.at.as_str(), key.as_str()) < (at, k))
+                    && actor.as_ref().is_none_or(|a| normalize(&e.actor) == *a)
+                    && action.is_none_or(|a| e.action == a)
+            })
+            .collect();
+        rows.sort_unstable_by(|a, b| (&b.1.at, &b.0).cmp(&(&a.1.at, &a.0)));
+        let next = (rows.len() > limit).then(|| {
+            let (key, e) = &rows[limit - 1];
+            format!("{}|{key}", e.at)
+        });
+        rows.truncate(limit);
+        Ok(AuditPage {
+            entries: rows.into_iter().map(|(_, e)| e).collect(),
+            next,
+        })
     }
 }
 
@@ -1494,7 +1652,7 @@ impl crate::backends::DeviceSignIn for Store {
             bail!("That code is not waiting for approval; start the sign-in again");
         };
         if approve {
-            let token = self.create_token(who, &row.client)?;
+            let token = self.create_token(who, &row.client, Some(TOKEN_DAYS))?;
             let (sealed, nonce) = seal(&self.key, &format!("device:{id}"), &token)?;
             row.token = Some((hex(&sealed), hex(&nonce)));
             row.approved_by = Some(who.email.clone());
@@ -1530,9 +1688,17 @@ impl crate::backends::DeviceSignIn for Store {
                 .and_then(|(s, n)| open(&self.key, &format!("device:{id}"), &s, &n))
                 .context("the issued token cannot be read; start the sign-in again")?;
             self.commit(vec![del("device", &id)])?;
+            let h = hash(&token);
+            let expires = self
+                .state()
+                .tokens
+                .values()
+                .find(|t| t.hash == h)
+                .and_then(|t| t.expires.clone());
             return Ok(DevicePoll::Approved {
                 token,
                 email: email.clone(),
+                expires,
             });
         }
         Ok(if row.expires < now() {
@@ -1572,7 +1738,11 @@ impl crate::backends::Authenticator for Store {
                 } else {
                     let h = hash(b);
                     let st = self.state();
-                    if let Some((id, tok)) = st.tokens.iter().find(|(_, t)| t.hash == h) {
+                    let live = st
+                        .tokens
+                        .iter()
+                        .find(|(_, k)| k.hash == h && !k.expired(&t));
+                    if let Some((id, tok)) = live {
                         found = Some((tok.email.clone(), Via::Token));
                         used = Some((id.clone(), tok.clone()));
                     }
@@ -1754,7 +1924,7 @@ mod tests {
         assert!(s.device_approve(&who, "AAAA-AAAA", true).is_err());
         s.device_approve(&who, &user, true).unwrap();
         assert!(s.device_info(&user).is_none(), "approved once");
-        let DevicePoll::Approved { token, email } = s.device_poll(&device).unwrap() else {
+        let DevicePoll::Approved { token, email, .. } = s.device_poll(&device).unwrap() else {
             panic!("not approved");
         };
         assert_eq!(email, "m@x.org");
@@ -1812,7 +1982,7 @@ mod tests {
         let (_d, s) = temp_store();
         let inv = s.invite("a", "m@x.org", Role::Member, false).unwrap();
         let (_, who) = s.redeem(&inv, "10.0.0.1").unwrap();
-        let token = s.create_token(&who, "laptop").unwrap();
+        let token = s.create_token(&who, "laptop", None).unwrap();
         assert!(s.authenticate(None, Some(&token)).unwrap().is_some());
         s.remove("a", "m@x.org").unwrap();
         assert!(s.authenticate(None, Some(&token)).unwrap().is_none());
@@ -1875,7 +2045,7 @@ mod tests {
             .unwrap();
         let (_, _, personal) = s.sign_in_code("dev@x.org", &code, "1.2.3.4").unwrap();
         let token = s
-            .create_token(&s.member("dev@x.org").unwrap().unwrap(), "agent")
+            .create_token(&s.member("dev@x.org").unwrap().unwrap(), "agent", None)
             .unwrap();
         drop(s);
 
@@ -1907,6 +2077,165 @@ mod tests {
         assert!(rotated.authenticate(None, Some(&token)).unwrap().is_some());
         let only_new = Store::open_keyed(root, "key two", None).unwrap();
         assert!(only_new.authenticate(None, Some(&token)).unwrap().is_some());
+    }
+
+    /// Move token `id`'s expiry to `days` from now.
+    fn expire(s: &Store, id: &str, days: i64) {
+        let mut tok = s.state().tokens.get(id).cloned().unwrap();
+        tok.expires = Some((Utc::now() + Duration::days(days)).to_rfc3339());
+        s.commit(vec![put("token", id, &tok)]).unwrap();
+    }
+
+    #[test]
+    fn expired_tokens_stop_working_stay_listed_then_go() {
+        let (_d, s) = temp_store();
+        let who = s.member("a@x.org").unwrap().unwrap();
+        let token = s.create_token(&who, "agent", Some(30)).unwrap();
+        let forever = s.create_token(&who, "forever", None).unwrap();
+        assert!(s.create_token(&who, "zero", Some(0)).is_err());
+        let list = s.tokens(&who).unwrap();
+        let agent = list.iter().find(|t| t.name == "agent").unwrap();
+        assert!(agent.expires.is_some() && !agent.expired);
+        assert!(list
+            .iter()
+            .find(|t| t.name == "forever")
+            .unwrap()
+            .expires
+            .is_none());
+        let id = agent.id.clone();
+
+        expire(&s, &id, -1);
+        assert!(s.authenticate(None, Some(&token)).unwrap().is_none());
+        assert!(s.authenticate(None, Some(&forever)).unwrap().is_some());
+        assert!(s
+            .tokens(&who)
+            .unwrap()
+            .iter()
+            .any(|t| t.id == id && t.expired));
+        s.prune();
+        assert!(
+            s.tokens(&who).unwrap().iter().any(|t| t.id == id),
+            "kept a while"
+        );
+
+        expire(&s, &id, -(EXPIRED_TOKEN_DAYS + 1));
+        s.prune();
+        let left = s.tokens(&who).unwrap();
+        assert!(!left.iter().any(|t| t.id == id), "pruned later");
+        assert_eq!(left.len(), 1);
+    }
+
+    #[test]
+    fn tokens_stored_without_an_expiry_never_expire() {
+        let (_d, s) = temp_store();
+        let row = r#"{"hash":"h","email":"a@x.org","name":"old","created":"2025-01-01T00:00:00+00:00","last_used":null}"#;
+        let tok: Token = serde_json::from_str(row).unwrap();
+        assert!(tok.expires.is_none() && !tok.expired(&now()));
+        let who = s.member("a@x.org").unwrap().unwrap();
+        s.commit(vec![put("token", "old", &tok)]).unwrap();
+        let t = s.tokens(&who).unwrap();
+        assert!(t[0].expires.is_none() && !t[0].expired);
+    }
+
+    #[test]
+    fn a_command_line_token_expires_by_default() {
+        use crate::backends::DeviceSignIn;
+        let (_d, s) = temp_store();
+        let who = s.member("a@x.org").unwrap().unwrap();
+        let (device, user) = s.device_start("comindly CLI on laptop", "1.2.3.4").unwrap();
+        s.device_approve(&who, &user, true).unwrap();
+        let DevicePoll::Approved { expires, .. } = s.device_poll(&device).unwrap() else {
+            panic!("not approved");
+        };
+        let expires = expires.expect("an expiry");
+        let in_days = chrono::DateTime::parse_from_rfc3339(&expires)
+            .unwrap()
+            .to_utc()
+            - Utc::now();
+        assert_eq!(in_days.num_days(), i64::from(TOKEN_DAYS) - 1);
+    }
+
+    #[test]
+    fn the_audit_log_lists_newest_first_in_pages_and_filters() {
+        use crate::backends::AuditLog;
+        let (_d, s) = temp_store();
+        for i in 0..5 {
+            s.audit("a@x.org", "secret-set", &format!("n{i}"));
+        }
+        s.audit("b@x.org", "repos", "2");
+        let token = s
+            .create_token(&s.member("a@x.org").unwrap().unwrap(), "agent", Some(30))
+            .unwrap();
+        let all = s.audit_entries(&AuditQuery::default()).unwrap();
+        assert_eq!(all.entries.len(), 7);
+        assert!(all.next.is_none());
+        assert!(all.entries.windows(2).all(|w| w[0].at >= w[1].at));
+        assert_eq!(all.entries[0].action, "token");
+        assert!(all.entries.iter().all(|e| !e.detail.contains(&token)));
+
+        let first = s
+            .audit_entries(&AuditQuery {
+                limit: Some(3),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(first.entries.len(), 3);
+        let second = s
+            .audit_entries(&AuditQuery {
+                limit: Some(3),
+                before: first.next.clone(),
+                ..Default::default()
+            })
+            .unwrap();
+        let third = s
+            .audit_entries(&AuditQuery {
+                limit: Some(3),
+                before: second.next.clone(),
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(third.next.is_none());
+        let paged: Vec<_> = [first, second, third]
+            .into_iter()
+            .flat_map(|p| p.entries)
+            .map(|e| (e.at, e.detail))
+            .collect();
+        let whole: Vec<_> = all.entries.into_iter().map(|e| (e.at, e.detail)).collect();
+        assert_eq!(paged, whole);
+
+        let by = |actor: Option<&str>, action: Option<&str>| {
+            s.audit_entries(&AuditQuery {
+                actor: actor.map(str::to_string),
+                action: action.map(str::to_string),
+                ..Default::default()
+            })
+            .unwrap()
+            .entries
+            .len()
+        };
+        assert_eq!(by(Some("B@x.org"), None), 1);
+        assert_eq!(by(None, Some("secret-set")), 5);
+        assert_eq!(by(Some("a@x.org"), Some("repos")), 0);
+    }
+
+    #[test]
+    fn audit_rows_survive_a_key_rotation() {
+        use crate::backends::AuditLog;
+        let dir = std::env::temp_dir().join(format!("comindly-server-{}", uuid::Uuid::new_v4()));
+        let root = dir.to_str().unwrap();
+        Store::open_keyed(root, "key one", None)
+            .unwrap()
+            .audit("a@x.org", "repos", "1");
+        drop(Store::open_keyed(root, "key two", Some("key one")).unwrap());
+        let only_new = Store::open_keyed(root, "key two", None).unwrap();
+        assert_eq!(
+            only_new
+                .audit_entries(&AuditQuery::default())
+                .unwrap()
+                .entries
+                .len(),
+            1
+        );
     }
 
     #[test]

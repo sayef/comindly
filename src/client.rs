@@ -71,7 +71,7 @@ impl Client {
         }
         if status == reqwest::StatusCode::UNAUTHORIZED {
             bail!(
-                "{message}: your sign-in has ended; run `comindly login {}`",
+                "{message}: your sign-in has ended; run `comindly login {}` to sign in again",
                 self.base
             );
         }
@@ -117,6 +117,8 @@ impl Client {
 pub struct Approved {
     pub token: String,
     pub email: String,
+    /// When the token stops working; `None` when it does not expire.
+    pub expires: Option<String>,
 }
 
 /// Sign in to `base` as `client`: `show` gets the address and code to approve in the browser, then
@@ -134,6 +136,7 @@ pub async fn login(base: &str, client: &str, show: impl FnOnce(&str, &str)) -> R
         status: String,
         token: Option<String>,
         email: Option<String>,
+        expires: Option<String>,
     }
     let c = Client::new(base, None);
     let start: Start = c
@@ -155,6 +158,7 @@ pub async fn login(base: &str, client: &str, show: impl FnOnce(&str, &str)) -> R
             return Ok(Approved {
                 token: p.token.context("no token in the answer")?,
                 email: p.email.unwrap_or_default(),
+                expires: p.expires,
             });
         }
     }

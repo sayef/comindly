@@ -5,7 +5,8 @@ use anyhow::{Context, Result};
 use futures::future::BoxFuture;
 
 use crate::server::{
-    AccessToken, DevicePoll, DeviceRequest, Invite, Member, Role, SecretInfo, Via, Who,
+    AccessToken, AuditPage, AuditQuery, DevicePoll, DeviceRequest, Invite, Member, Role,
+    SecretInfo, Via, Who,
 };
 
 /// Members, invitations, sign-in links and codes, sessions and personal access tokens.
@@ -34,9 +35,16 @@ pub trait AccountStore: Send + Sync {
     /// A new sign-in code for `email`; their sessions end, except `keep`.
     fn reset_code(&self, by: &str, email: &str, keep: Option<&str>) -> Result<String>;
     fn sign_out(&self, session: &str, everywhere: bool) -> Result<()>;
-    fn create_token(&self, who: &Who, name: &str) -> Result<String>;
+    /// A token that stops working after `expires_in_days`, or never with `None`.
+    fn create_token(&self, who: &Who, name: &str, expires_in_days: Option<u32>) -> Result<String>;
     fn tokens(&self, who: &Who) -> Result<Vec<AccessToken>>;
     fn revoke_token(&self, who: &Who, id: &str) -> Result<()>;
+}
+
+/// Who changed what in accounts, secrets and settings, for admins to read.
+pub trait AuditLog: Send + Sync {
+    /// Entries newest first, from before `query.before` and matching its filters.
+    fn audit_entries(&self, query: &AuditQuery) -> Result<AuditPage>;
 }
 
 /// Command-line sign-in approved in the browser: the command starts it and polls, a signed-in

@@ -415,6 +415,7 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
             .route("/api/v1/tokens", get(auth::tokens).post(auth::create_token))
             .route("/api/v1/tokens/revoke", post(auth::revoke_token))
             .route("/api/v1/secrets", get(auth::secrets).post(auth::set_secret))
+            .route("/api/v1/audit", get(auth::audit))
             .merge({
                 let shared = state.mcp.clone().unwrap_or_default();
                 Router::new()

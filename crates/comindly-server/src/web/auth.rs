@@ -114,6 +114,7 @@ fn account_only(path: &str) -> bool {
         "/api/v1/tokens",
         "/api/v1/members",
         "/api/v1/secrets",
+        "/api/v1/audit",
     ]
     .iter()
     .any(|p| path.starts_with(p))
@@ -122,7 +123,10 @@ fn account_only(path: &str) -> bool {
 /// The least role a request needs: viewers read, members also write to the ledger and
 /// conventions, admins manage people, secrets, repositories, settings and indexing.
 fn needs(method: &Method, path: &str) -> Role {
-    if path.starts_with("/api/v1/members") || path.starts_with("/api/v1/secrets") {
+    if ["/api/v1/members", "/api/v1/secrets", "/api/v1/audit"]
+        .iter()
+        .any(|p| path.starts_with(p))
+    {
         return Role::Admin;
     }
     if method == Method::GET
@@ -174,6 +178,12 @@ pub(super) async fn guard(
         return next.run(req).await;
     }
     let Some((who, via)) = found else {
+        if token.is_some() && session.is_none() {
+            return fail(
+                StatusCode::UNAUTHORIZED,
+                "This access token has expired or was revoked",
+            );
+        }
         return fail(StatusCode::UNAUTHORIZED, "Sign in to continue");
     };
     if via == Via::Token && account_only(&path) {
@@ -527,18 +537,28 @@ pub(super) async fn tokens(On(server): On, Extension(who): Extension<Who>) -> Re
     }
 }
 
+fn default_token_days() -> Option<u32> {
+    Some(server::TOKEN_DAYS)
+}
+
 #[derive(Deserialize)]
-pub(super) struct NameQ {
+pub(super) struct NewTokenQ {
     name: String,
+    /// Absent means 90 days, `null` never.
+    #[serde(default = "default_token_days")]
+    expires_in_days: Option<u32>,
 }
 
 /// A personal access token for an agent; shown once.
 pub(super) async fn create_token(
     On(server): On,
     Extension(who): Extension<Who>,
-    Json(q): Json<NameQ>,
+    Json(q): Json<NewTokenQ>,
 ) -> Response {
-    match server.accounts.create_token(&who, &q.name) {
+    match server
+        .accounts
+        .create_token(&who, &q.name, q.expires_in_days)
+    {
         Ok(t) => Json(json!({"ok": true, "message": "Token created; copy it now, it is shown once", "token": t}))
             .into_response(),
         Err(e) => bad(e),
@@ -556,6 +576,17 @@ pub(super) async fn revoke_token(
     Json(q): Json<IdQ>,
 ) -> Response {
     done(server.accounts.revoke_token(&who, &q.id), "Token revoked")
+}
+
+/// The audit log, newest first; `before` takes the previous page's `next`.
+pub(super) async fn audit(
+    On(server): On,
+    axum::extract::Query(q): axum::extract::Query<server::AuditQuery>,
+) -> Response {
+    match tokio::task::block_in_place(|| server.audit.audit_entries(&q)) {
+        Ok(page) => Json(json!(page)).into_response(),
+        Err(e) => bad(e),
+    }
 }
 
 /// The deployment's value for a secret, which always wins over one stored here.
@@ -687,8 +718,13 @@ pub(super) struct DeviceTokenQ {
 pub(super) async fn device_token(On(server): On, Json(q): Json<DeviceTokenQ>) -> Response {
     match server.devices.device_poll(&q.device_code) {
         Ok(server::DevicePoll::Pending) => Json(json!({"status": "pending"})).into_response(),
-        Ok(server::DevicePoll::Approved { token, email }) => {
-            Json(json!({"status": "approved", "token": token, "email": email})).into_response()
+        Ok(server::DevicePoll::Approved {
+            token,
+            email,
+            expires,
+        }) => {
+            Json(json!({"status": "approved", "token": token, "email": email, "expires": expires}))
+                .into_response()
         }
         Ok(server::DevicePoll::Denied) => fail(StatusCode::FORBIDDEN, "The sign-in was denied"),
         Ok(server::DevicePoll::Expired) => fail(
