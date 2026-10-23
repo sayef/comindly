@@ -6,6 +6,10 @@ structured JSON attached (`--format json` for JSON only). How to register the se
 [Getting started](../getting-started.md#4-connect-your-agent); what to ask:
 [Using comindly with agents](../guides/agents.md).
 
+Over HTTP, an agent works with the role of the person whose token it uses. A viewer's agent can call
+every reading tool, but `remember` and `review` are refused; a member's or an admin's agent can also
+record and review.
+
 Wherever a tool takes `focus`, it accepts a symbol name (`place_order`), a qualified method
 (`OrderService.place_order`), a file path, or an id returned by `find` or `search`.
 Optional parameters are marked with `?`.

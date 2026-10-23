@@ -12,8 +12,8 @@ and Windows: use the web UI.
 
 ## Web UI
 
-`comindly ui --web [--port 7878] [--open]` serves the same UI on 127.0.0.1 only. With `--host 0.0.0.0`
-and `COMINDLY_PUBLIC_URL` it runs as a team server instead ([Self-hosting](self-hosting.md)). It prints a link
+`comindly ui --web [--port 7878] [--open]` serves the same UI on 127.0.0.1 only. A team server runs
+with `comindly server` instead ([Self-hosting](self-hosting.md)). It prints a link
 with an access token; open it once (or pass `--open`) and the browser keeps the token in a cookie,
 so the plain address works as a bookmark afterwards. Other programs and web pages cannot call the
 UI's API without it. The token is kept in `~/.config/comindly/ui-token`; delete the file to issue a

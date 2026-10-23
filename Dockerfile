@@ -28,7 +28,7 @@ ENV COMINDLY_LOG_FORMAT=json
 VOLUME /data
 EXPOSE 7878
 ENTRYPOINT ["comindly"]
-CMD ["ui", "--web", "--host", "0.0.0.0"]
+CMD ["server"]
 
 # A binary built outside Docker for each platform: scripts/docker-local.sh, or the release workflow.
 FROM runtime AS local

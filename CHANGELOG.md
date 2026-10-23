@@ -12,9 +12,10 @@ All notable changes to this project are documented here. The format follows
   ledger and conventions; admins also manage people, repositories, settings, secrets and indexing. An
   agent works with the role of the person whose token it uses.
 - `comindly login <url>`: sign the command line in to a server by approving it in the browser (a
-  `/device` page shows the machine and a code to compare); `comindly logout` forgets it. `find`,
-  `search`, `why`, `ledger`, `flow`, `contracts`, `conventions`, `remember`, `review` and `link` then ask
-  the server and print what a local run prints; `link` starts indexing there and follows it, and Ctrl-C
+  `/device` page shows the machine and a code to compare); `comindly logout` revokes its token on the
+  server and forgets it. `find`, `search`, `explore`, `why`, `ledger`, `flow`, `stats`, `contracts`,
+  `packages`, `conventions`, `preflight`, `remember`, `review` and `link` then ask the server and print
+  what a local run prints (`preflight` reads the changes from git here); `link` starts indexing there and follows it, and Ctrl-C
   cancels it there. `--server <url>`, `COMINDLY_SERVER` and `COMINDLY_TOKEN` (for CI) pick a server for
   one command; `--local` uses the index on this machine.
 - Indexing jobs on a server keep a record: who started them, their status and their events, also after a
@@ -24,6 +25,10 @@ All notable changes to this project are documented here. The format follows
   re-index) waits its turn instead of being refused. Up to 5 wait; asking again for the same indexing
   returns the waiting job. The app and `comindly link` show "Queued" with the position and can cancel
   it; queued jobs left by a restart are marked interrupted.
+- `comindly server` runs a team server (the app, `/api/v1` and `/mcp`, listening on `0.0.0.0:7878`);
+  it refuses to start without `COMINDLY_PUBLIC_URL`. The container image runs it.
+- `comindly doctor` shows which server the command line is signed in to, as whom, and whether its
+  token still works.
 - `GET /ready` for orchestrators: `200` once an index is loaded and the accounts can be read.
 - `comindly config` shows your preferences; `set`, `import <file> [--override]`, `export [file]` and
   `history` change them, read and write them as TOML, and list earlier versions.
@@ -38,6 +43,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- `comindly ui --web` is the web UI on this machine; a team server runs with `comindly server`.
+- `preflight` treats a constraint whose check passes as verified, as `ledger` does.
 - The HTTP API moved to `/api/v1`, and every error has one shape, `{"error": {"code", "message"}}`, with
   a matching status.
 - Your preferences are kept in a versioned table instead of `config.toml`. An existing

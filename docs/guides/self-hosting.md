@@ -85,7 +85,8 @@ claude mcp add --transport http --scope user comindly https://comindly.example.c
 Until the first index exists, agents get `503` with the reason; they connect once an admin has
 indexed. Nothing is installed on the developer's machine, and no storage credentials leave the server. A
 personal access token is for agents and scripts: it reads and writes the index and the ledger, but
-cannot manage the account, its tokens, members or the server's secrets; that needs signing in.
+cannot manage the account, its tokens, members or the server's secrets; that needs signing in. It can
+revoke itself (`POST /api/v1/auth/token/revoke`), as `comindly logout` does.
 A token lasts 30 days, 90 days (the default), a year or without expiry, chosen when it is created.
 An expired token stops working and shows as expired under Settings → Your access; it is removed 30
 days later. Through the API, `POST /api/v1/tokens` takes `{"name": "…", "expires_in_days": 90}`
@@ -102,11 +103,14 @@ comindly login https://comindly.example.com
 
 It prints an address and a short code and opens the browser; once signed in there, the member checks
 the code and approves. The command line then has its own personal access token, named after the
-machine, and `find`, `search`, `why`, `ledger`, `flow`, `contracts`, `conventions`, `remember`,
-`review` and `link` ask the server ([Command line](../reference/cli.md#against-a-server)). Admins can
-start indexing with `comindly link` and follow it in the terminal. `comindly logout` forgets the
-sign-in on that machine; the token can be revoked under Settings → Your access. It expires after 90
-days; the command line then says so and asks to run `comindly login` again.
+machine, and `find`, `search`, `explore`, `why`, `ledger`, `flow`, `stats`, `contracts`,
+`packages`, `conventions`, `preflight`, `remember`, `review` and `link` ask the server
+([Command line](../reference/cli.md#against-a-server)). Admins can start indexing with `comindly link`
+and follow it in the terminal. `comindly doctor` shows who the command line is signed in as and
+whether its token still works. `comindly logout` revokes that token on the server and forgets the
+sign-in on that machine; when the server cannot be reached, it says so, and the token can be revoked
+under Settings → Your access. The command line's token expires after 90 days; the command line then
+says so and asks to run `comindly login` again.
 
 ![Approving a command line's sign-in](../assets/screenshots/device.webp#only-light)
 ![Approving a command line's sign-in](../assets/screenshots/device-dark.webp#only-dark)
@@ -129,8 +133,9 @@ filters. Its rows are signed like the rest of the accounts.
 
 ## Deploying
 
-The image listens on port 7878. Give it its settings and secrets, access to the index location,
-and HTTPS in front. Without signing in, `GET /health` answers `200` while the process serves requests,
+The image runs `comindly server`, which listens on port 7878 on all interfaces
+(`--port` and `--host` change that) and refuses to start without `COMINDLY_PUBLIC_URL`. Give it its
+settings and secrets, access to the index location, and HTTPS in front. Without signing in, `GET /health` answers `200` while the process serves requests,
 and `GET /ready` answers `200` once an index is loaded and the accounts can be read (`503` with the
 reason until then).
 
