@@ -1555,6 +1555,22 @@ impl crate::backends::AccountStore for Store {
         }
         Ok(())
     }
+
+    fn revoke_own_token(&self, token: &str) -> Result<bool> {
+        let h = hash(token);
+        let found = self
+            .state()
+            .tokens
+            .iter()
+            .find(|(_, t)| t.hash == h)
+            .map(|(id, t)| (id.clone(), t.email.clone()));
+        let Some((id, email)) = found else {
+            return Ok(false);
+        };
+        self.commit(vec![del("token", &id)])?;
+        self.audit(&email, "revoke-token", &id);
+        Ok(true)
+    }
 }
 
 impl crate::backends::AuditLog for Store {
@@ -1986,6 +2002,20 @@ mod tests {
         assert!(s.authenticate(None, Some(&token)).unwrap().is_some());
         s.remove("a", "m@x.org").unwrap();
         assert!(s.authenticate(None, Some(&token)).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_token_revokes_itself_and_no_other() {
+        let (_d, s) = temp_store();
+        let inv = s.invite("a", "m@x.org", Role::Member, false).unwrap();
+        let (_, who) = s.redeem(&inv, "10.0.0.1").unwrap();
+        let laptop = s.create_token(&who, "laptop").unwrap();
+        let ci = s.create_token(&who, "ci").unwrap();
+        assert!(s.revoke_own_token(&laptop).unwrap());
+        assert!(s.authenticate(None, Some(&laptop)).unwrap().is_none());
+        assert!(s.authenticate(None, Some(&ci)).unwrap().is_some());
+        assert!(!s.revoke_own_token(&laptop).unwrap(), "already gone");
+        assert!(!s.revoke_own_token("cly_unknown").unwrap());
     }
 
     #[test]

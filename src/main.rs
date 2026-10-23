@@ -2483,8 +2483,20 @@ fn cmd_logout() -> ExitCode {
         }
         Some(l) => match comindly::credentials::set_login(None) {
             Ok(()) => {
+                let c = comindly::client::Client::new(&l.url, Some(l.token.clone()));
                 comindly::ui::ok(&format!("signed out of {} on this machine", l.url));
-                comindly::ui::note("the access token stays valid until you revoke it in the app (Settings → Your access)");
+                match comindly::rt::block_on(c.revoke_own_token()) {
+                    Ok(true) => comindly::ui::ok("revoked its access token on the server"),
+                    Ok(false) => {
+                        comindly::ui::note("the server no longer accepted its access token")
+                    }
+                    Err(e) => {
+                        comindly::ui::warn(&format!(
+                            "could not revoke the access token on the server: {e:#}"
+                        ));
+                        comindly::ui::note("it stays valid until you revoke it in the app (Settings → Your access)");
+                    }
+                }
                 ExitCode::SUCCESS
             }
             Err(e) => {

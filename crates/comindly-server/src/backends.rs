@@ -39,6 +39,8 @@ pub trait AccountStore: Send + Sync {
     fn create_token(&self, who: &Who, name: &str, expires_in_days: Option<u32>) -> Result<String>;
     fn tokens(&self, who: &Who) -> Result<Vec<AccessToken>>;
     fn revoke_token(&self, who: &Who, id: &str) -> Result<()>;
+    /// Revoke the personal access token whose value is `token`; `false` when none matched.
+    fn revoke_own_token(&self, token: &str) -> Result<bool>;
 }
 
 /// Who changed what in accounts, secrets and settings, for admins to read.

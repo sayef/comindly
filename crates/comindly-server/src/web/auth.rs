@@ -107,6 +107,9 @@ fn same_site(req: &Request, cfg: &ServerConfig) -> bool {
     }
 }
 
+/// Where a personal access token revokes itself, the one account path a token may call.
+pub(super) const SELF_REVOKE: &str = "/api/v1/auth/token/revoke";
+
 /// What a personal access token may not do: manage the account, its tokens, members or secrets.
 fn account_only(path: &str) -> bool {
     [
@@ -186,7 +189,7 @@ pub(super) async fn guard(
         }
         return fail(StatusCode::UNAUTHORIZED, "Sign in to continue");
     };
-    if via == Via::Token && account_only(&path) {
+    if via == Via::Token && account_only(&path) && path != SELF_REVOKE {
         return fail(
             StatusCode::FORBIDDEN,
             "Personal access tokens are for agents; sign in to manage your account",
@@ -585,6 +588,24 @@ pub(super) async fn audit(
 ) -> Response {
     match tokio::task::block_in_place(|| server.audit.audit_entries(&q)) {
         Ok(page) => Json(json!(page)).into_response(),
+        Err(e) => bad(e),
+    }
+}
+
+/// Revoke the personal access token this request was made with, as `comindly logout` does.
+pub(super) async fn revoke_self(On(server): On, req: Request) -> Response {
+    let Some(token) = bearer(&req) else {
+        return fail(
+            StatusCode::BAD_REQUEST,
+            "Only a personal access token can revoke itself",
+        );
+    };
+    match server.accounts.revoke_own_token(&token) {
+        Ok(true) => Json(json!({"ok": true, "message": "Token revoked"})).into_response(),
+        Ok(false) => fail(
+            StatusCode::BAD_REQUEST,
+            "Only a personal access token can revoke itself",
+        ),
         Err(e) => bad(e),
     }
 }

@@ -402,6 +402,7 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
             .route("/api/v1/auth/code", post(auth::sign_in_code))
             .route("/api/v1/auth/reset-code", post(auth::reset_own_code))
             .route("/api/v1/auth/signout", post(auth::sign_out))
+            .route(auth::SELF_REVOKE, post(auth::revoke_self))
             .route("/api/v1/auth/device/start", post(auth::device_start))
             .route("/api/v1/auth/device/token", post(auth::device_token))
             .route("/api/v1/auth/device", get(auth::device_info))

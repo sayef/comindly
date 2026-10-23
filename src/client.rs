@@ -55,6 +55,21 @@ impl Client {
         self.read(r).await
     }
 
+    /// Revoke the token this client signs in with; `false` when the server no longer accepts it.
+    pub async fn revoke_own_token(&self) -> Result<bool> {
+        let r = self
+            .request(reqwest::Method::POST, "/api/v1/auth/token/revoke")
+            .json(&serde_json::json!({}))
+            .send()
+            .await;
+        if r.as_ref()
+            .is_ok_and(|r| r.status() == reqwest::StatusCode::UNAUTHORIZED)
+        {
+            return Ok(false);
+        }
+        self.read::<serde_json::Value>(r).await.map(|_| true)
+    }
+
     async fn read<T: DeserializeOwned>(&self, r: reqwest::Result<reqwest::Response>) -> Result<T> {
         let r = r.with_context(|| format!("cannot reach {}", self.base))?;
         let status = r.status();
