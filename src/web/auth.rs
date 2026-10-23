@@ -129,6 +129,7 @@ fn admin_only(method: &Method, path: &str) -> bool {
             "/api/settings",
             "/api/repos",
             "/api/index",
+            "/api/v1/jobs",
             "/api/team",
             "/api/join",
             "/api/erase",

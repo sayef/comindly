@@ -20,6 +20,7 @@ use crate::tui::Data;
 
 mod auth;
 mod flows;
+mod jobs;
 mod repos;
 mod settings;
 mod team;
@@ -109,7 +110,7 @@ impl Session {
 
 struct AppState {
     current: RwLock<Arc<Session>>,
-    job: tokio::sync::Mutex<repos::Job>,
+    jobs: crate::jobs::Jobs,
     watch: tokio::sync::Mutex<repos::Watch>,
     /// Members, sign-in and stored secrets, in server mode.
     server: Option<Arc<crate::server::Server>>,
@@ -326,7 +327,13 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
         team: std::sync::RwLock::new(team),
         current: RwLock::new(Arc::new(rt.block_on(Session::open(data, cfg.fresh())))),
         config: std::sync::Mutex::new((cfg, modified)),
-        job: Default::default(),
+        jobs: crate::jobs::Jobs::new(
+            match &server {
+                Some(s) => s.jobs.clone(),
+                None => Arc::new(crate::jobs::MemoryJobs::default()),
+            },
+            Arc::new(crate::ui::Terminal::new()),
+        ),
         watch: Default::default(),
         mcp: server.as_ref().map(|_| Default::default()),
         server,
@@ -365,6 +372,10 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
         .route("/api/index", get(repos::job).post(repos::start))
         .route("/api/index/cancel", post(repos::cancel))
         .route("/api/index/watch", get(repos::watch_state))
+        .route("/api/v1/jobs", get(jobs::list))
+        .route("/api/v1/jobs/{id}", get(jobs::one))
+        .route("/api/v1/jobs/{id}/events", get(jobs::events))
+        .route("/api/v1/jobs/{id}/cancel", post(jobs::cancel))
         .route("/api/team", get(team::get).post(team::save))
         .route("/api/team/key", post(team::key))
         .route("/api/join", post(team::join))

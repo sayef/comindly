@@ -12,54 +12,11 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::{Conf, Cur, Shared, Srv};
-use std::sync::Arc;
 
 use crate::config::RepoEntry;
 use crate::events::{Event, EventSink, Kind, Level};
+use crate::jobs::Status;
 use crate::worktree;
-
-/// The current or last indexing run.
-#[derive(Default)]
-pub(super) struct Job {
-    id: Option<String>,
-    running: bool,
-    cancel: Option<tokio_util::sync::CancellationToken>,
-    cancelled: bool,
-    ok: Option<bool>,
-    log: Arc<JobLog>,
-    started: Option<String>,
-    finished: Option<String>,
-}
-
-/// A job's events, kept for the app and passed on to the server's log.
-#[derive(Default)]
-pub(super) struct JobLog {
-    id: String,
-    events: std::sync::Mutex<Vec<Event>>,
-    out: crate::ui::Terminal,
-}
-
-impl EventSink for JobLog {
-    fn emit(&self, mut e: Event) {
-        e.job_id = Some(self.id.clone());
-        let mut events = self.events.lock().unwrap_or_else(|p| p.into_inner());
-        // Progress replaces the previous progress of the same step, so the log stays short.
-        if e.kind == Kind::Progress {
-            if let Some(last) = events
-                .last_mut()
-                .filter(|l| l.kind == Kind::Progress && l.message == e.message)
-            {
-                *last = e.clone();
-                drop(events);
-                self.out.emit(e);
-                return;
-            }
-        }
-        events.push(e.clone());
-        drop(events);
-        self.out.emit(e);
-    }
-}
 
 fn fail(e: anyhow::Error) -> (StatusCode, Json<Value>) {
     (
@@ -246,10 +203,9 @@ pub(super) async fn change(State(app): State<Shared>, Json(c): Json<Change>) -> 
 
 /// Stop the running indexer and everything it started.
 pub(super) async fn cancel(State(app): State<Shared>) -> impl IntoResponse {
-    let j = app.job.lock().await;
-    match j.cancel.as_ref().filter(|_| j.running) {
-        Some(token) => {
-            token.cancel();
+    match app.jobs.running() {
+        Some(job) => {
+            job.cancel.cancel();
             (
                 StatusCode::OK,
                 Json(json!({"ok": true, "message": "cancelling; work already saved stays"})),
@@ -263,16 +219,17 @@ pub(super) async fn cancel(State(app): State<Shared>) -> impl IntoResponse {
 }
 
 pub(super) async fn job(State(app): State<Shared>) -> Json<Value> {
-    let j = app.job.lock().await;
-    let events = j.log.events.lock().map(|e| e.clone()).unwrap_or_default();
-    let from = events.len().saturating_sub(400);
+    let Some((j, events)) = app.jobs.latest() else {
+        return Json(json!({"running": false, "events": []}));
+    };
     Json(json!({
         "id": j.id,
-        "running": j.running,
-        "cancelled": j.cancelled,
-        "ok": j.ok,
-        "events": &events[from..],
-        "started": j.started,
+        "running": !j.status.finished(),
+        "cancelled": j.status == Status::Cancelled,
+        "ok": j.status.finished().then_some(j.status == Status::Succeeded),
+        "status": j.status,
+        "events": events,
+        "started": j.created,
         "finished": j.finished,
     }))
 }
@@ -286,8 +243,13 @@ pub(super) struct IndexQ {
     drop_unlisted: bool,
 }
 
-pub(super) async fn start(State(app): State<Shared>, Json(q): Json<IndexQ>) -> impl IntoResponse {
-    match begin(&app, q.llm, q.drop_unlisted, None).await {
+pub(super) async fn start(
+    who: super::Member,
+    State(app): State<Shared>,
+    Json(q): Json<IndexQ>,
+) -> impl IntoResponse {
+    let by = who.map(|w| w.email.clone());
+    match begin(&app, q.llm, q.drop_unlisted, None, by).await {
         Ok(()) => (
             StatusCode::OK,
             Json(json!({"ok": true, "message": "indexing started"})),
@@ -303,6 +265,7 @@ pub(super) async fn begin(
     llm: bool,
     drop_unlisted: bool,
     why: Option<String>,
+    by: Option<String>,
 ) -> anyhow::Result<()> {
     let session = app.current.read().await.clone();
     let root = session.data.root.clone().context("read-only UI")?;
@@ -324,27 +287,7 @@ pub(super) async fn begin(
             missing.join(", ")
         );
     }
-    let id = uuid::Uuid::new_v4().simple().to_string();
-    let log = Arc::new(JobLog {
-        id: id.clone(),
-        ..Default::default()
-    });
-    let cancel = tokio_util::sync::CancellationToken::new();
-    {
-        let mut j = app.job.lock().await;
-        anyhow::ensure!(!j.running, "indexing is already running");
-        *j = Job {
-            id: Some(id),
-            running: true,
-            cancel: Some(cancel.clone()),
-            log: log.clone(),
-            started: Some(chrono::Utc::now().to_rfc3339()),
-            ..Default::default()
-        };
-    }
-    if let Some(w) = why {
-        log.emit(Event::new(Level::Info, Kind::Note, w));
-    }
+    anyhow::ensure!(app.jobs.running().is_none(), "indexing is already running");
     let cfg = app.config();
     let team = crate::team::load(&root)
         .await
@@ -368,41 +311,44 @@ pub(super) async fn begin(
         None
     };
     let scip = cfg.scip();
-    let mut ctx = crate::context::IndexContext::new(
-        root.clone(),
-        settings,
-        log.clone(),
-        crate::config::cache_dir(),
-    )
-    .with_llm(client)
-    .with_git(crate::config::git_credentials(app.server.clone()));
-    ctx.cancel = cancel;
+    let git = crate::config::git_credentials(app.server.clone());
     let app2 = app.clone();
-    tokio::spawn(async move {
-        let run = async {
-            let sources = crate::pipeline::checkout(&ctx, &cfg.repos).await?;
-            crate::pipeline::link(&ctx, sources, true, scip).await
-        };
-        let result = run.await;
-        let cancelled = matches!(&result, Err(e) if e.is::<crate::context::Cancelled>());
-        let ok = result.is_ok();
-        match &result {
-            Ok(_) => {}
-            Err(_) if cancelled => ctx.report.warn("Cancelled; what was already saved stays."),
-            Err(e) => ctx.report.error(crate::storage::explain(&format!("{e:#}"))),
+    app.jobs.start("index", by, move |job| {
+        if let Some(w) = why {
+            job.emit(Event::new(Level::Info, Kind::Note, w));
         }
-        if ok {
-            if let Err(e) = app2.reload(&root).await {
-                ctx.report.error(format!("reload failed: {e:#}"));
+        let mut ctx = crate::context::IndexContext::new(
+            root.clone(),
+            settings,
+            job.clone(),
+            crate::config::cache_dir(),
+        )
+        .with_llm(client)
+        .with_git(git);
+        ctx.cancel = job.cancel.clone();
+        Box::pin(async move {
+            let run = async {
+                let sources = crate::pipeline::checkout(&ctx, &cfg.repos).await?;
+                crate::pipeline::link(&ctx, sources, true, scip).await
+            };
+            match run.await {
+                Ok(_) => {
+                    if let Err(e) = app2.reload(&root).await {
+                        ctx.report.error(format!("reload failed: {e:#}"));
+                    }
+                    Ok(())
+                }
+                Err(e) if e.is::<crate::context::Cancelled>() => {
+                    ctx.report.warn("Cancelled; what was already saved stays.");
+                    Err(e)
+                }
+                Err(e) => {
+                    ctx.report.error(crate::storage::explain(&format!("{e:#}")));
+                    Err(e)
+                }
             }
-        }
-        let mut j = app2.job.lock().await;
-        j.running = false;
-        j.cancel = None;
-        j.cancelled = cancelled;
-        j.ok = Some(ok);
-        j.finished = Some(chrono::Utc::now().to_rfc3339());
-    });
+        })
+    })?;
     Ok(())
 }
 
@@ -426,7 +372,7 @@ pub(super) async fn watch(app: Shared) {
             Ok(m) if m.is_empty() => "every default branch is indexed".to_string(),
             Ok(m) => {
                 let why = format!("Automatic re-index: {} moved", m.join(", "));
-                match begin(&app, false, false, Some(why.clone())).await {
+                match begin(&app, false, false, Some(why.clone()), None).await {
                     Ok(()) => why,
                     Err(e) => format!("{why}, not started: {e:#}"),
                 }

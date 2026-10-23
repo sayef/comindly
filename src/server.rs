@@ -115,6 +115,7 @@ pub struct Server {
     pub secrets: Arc<dyn SecretStore>,
     pub settings: Arc<dyn SettingsStore>,
     pub mailer: Arc<dyn Mailer>,
+    pub jobs: Arc<dyn crate::jobs::JobStore>,
 }
 
 impl Server {
@@ -130,7 +131,8 @@ impl Server {
             accounts: store.clone(),
             auth: store.clone(),
             secrets: store.clone(),
-            settings: store,
+            settings: store.clone(),
+            jobs: store,
             mailer,
         })
     }
@@ -381,6 +383,8 @@ struct State {
     seen: HashMap<String, String>,
     /// The server's `config.toml`, for containers that start without it.
     config: HashMap<String, String>,
+    jobs: HashMap<String, crate::jobs::JobRecord>,
+    job_events: HashMap<String, Vec<crate::events::Event>>,
     failures: Vec<(String, String)>,
 }
 
@@ -416,6 +420,8 @@ impl State {
             "code" => add(&mut self.codes, key, json),
             "seen" => add(&mut self.seen, key, json),
             "config" => add(&mut self.config, key, json),
+            "job" => add(&mut self.jobs, key, json),
+            "job-events" => add(&mut self.job_events, key, json),
             _ => {}
         }
     }
@@ -435,6 +441,8 @@ impl State {
                     "code" => drop(self.codes.remove(key)),
                     "seen" => drop(self.seen.remove(key)),
                     "config" => drop(self.config.remove(key)),
+                    "job" => drop(self.jobs.remove(key)),
+                    "job-events" => drop(self.job_events.remove(key)),
                     _ => {}
                 },
             }
@@ -444,8 +452,18 @@ impl State {
 
 const TABLE: &str = "server";
 const CONFIG: &str = "config.toml";
-const KINDS: [&str; 9] = [
-    "user", "invite", "link", "session", "token", "secret", "code", "seen", "config",
+const KINDS: [&str; 11] = [
+    "user",
+    "invite",
+    "link",
+    "session",
+    "token",
+    "secret",
+    "code",
+    "seen",
+    "config",
+    "job",
+    "job-events",
 ];
 
 /// LanceDB work from the store's synchronous methods.
@@ -1452,6 +1470,43 @@ impl crate::backends::SettingsStore for Store {
     /// The kept `config.toml`, if any.
     fn kept_config(&self) -> Option<String> {
         self.state().config.get(CONFIG).cloned()
+    }
+}
+
+impl crate::jobs::JobStore for Store {
+    fn save(&self, job: &crate::jobs::JobRecord, events: &[crate::events::Event]) -> Result<()> {
+        let mut changes = vec![
+            put("job", &job.id, job),
+            put("job-events", &job.id, &events),
+        ];
+        {
+            let st = self.state();
+            let mut ids: Vec<(&String, &String)> = st
+                .jobs
+                .iter()
+                .filter(|(id, _)| **id != job.id)
+                .map(|(id, j)| (&j.created, id))
+                .collect();
+            ids.sort_unstable_by(|a, b| b.cmp(a));
+            for (_, id) in ids.into_iter().skip(crate::jobs::MAX_JOBS - 1) {
+                changes.extend([del("job", id), del("job-events", id)]);
+            }
+        }
+        let _w = self.write_lock();
+        self.commit(changes)
+    }
+
+    fn get(&self, id: &str) -> Option<(crate::jobs::JobRecord, Vec<crate::events::Event>)> {
+        let st = self.state();
+        let job = st.jobs.get(id)?.clone();
+        Some((job, st.job_events.get(id).cloned().unwrap_or_default()))
+    }
+
+    fn list(&self, limit: usize) -> Vec<crate::jobs::JobRecord> {
+        let mut jobs: Vec<_> = self.state().jobs.values().cloned().collect();
+        jobs.sort_unstable_by(|a, b| b.created.cmp(&a.created));
+        jobs.truncate(limit);
+        jobs
     }
 }
 

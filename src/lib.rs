@@ -41,6 +41,7 @@ pub mod eval;
 
 pub mod index;
 pub mod infra;
+pub mod jobs;
 pub mod search;
 pub mod signing;
 
