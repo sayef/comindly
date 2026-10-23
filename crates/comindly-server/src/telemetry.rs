@@ -155,14 +155,14 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for Lines {
 /// One log line: a JSON object (`timestamp`, `level`, `kind`, `message`, then the other fields),
 /// or the readable `line` when given, else one styled by `kind`.
 pub(crate) fn render(level: Level, mut f: Map<String, Value>, json: bool) -> String {
-    let readable = f.remove("line");
+    let readable = f.shift_remove("line");
     let text = |v: Option<Value>| match v {
         Some(Value::String(s)) => s,
         Some(v) => v.to_string(),
         None => String::new(),
     };
-    let message = text(f.remove("message"));
-    let kind = match f.remove("kind") {
+    let message = text(f.shift_remove("message"));
+    let kind = match f.shift_remove("kind") {
         Some(k) => text(Some(k)),
         None if level == Level::ERROR => "error".into(),
         None if level == Level::WARN => "warning".into(),
@@ -179,6 +179,11 @@ pub(crate) fn render(level: Level, mut f: Map<String, Value>, json: bool) -> Str
         out.insert("level".into(), level_name(level).into());
         out.insert("kind".into(), kind.into());
         out.insert("message".into(), message.into());
+        for k in ["step", "job_id", "request_id"] {
+            if let Some(v) = f.shift_remove(k) {
+                out.insert(k.into(), v);
+            }
+        }
         out.extend(f);
         return Value::Object(out).to_string();
     }
