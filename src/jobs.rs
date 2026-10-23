@@ -85,6 +85,8 @@ pub struct Running {
     events: Mutex<Vec<Event>>,
     live: broadcast::Sender<Event>,
     pub cancel: CancellationToken,
+    /// Set once the job has ended and its record is saved.
+    done: CancellationToken,
     /// Where events also go: the terminal or the server's log.
     out: Arc<dyn EventSink>,
 }
@@ -102,6 +104,11 @@ impl Running {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
+    }
+
+    /// Wait until the job has ended and its record is saved.
+    pub async fn wait(&self) {
+        self.done.cancelled().await
     }
 
     /// The events so far and the ones to come.
@@ -233,6 +240,7 @@ impl Jobs {
                 events: Default::default(),
                 live: broadcast::channel(256).0,
                 cancel: CancellationToken::new(),
+                done: CancellationToken::new(),
                 out: self.out.clone(),
             });
             *current = Some(job.clone());
@@ -267,7 +275,9 @@ impl Jobs {
                     }
                 };
             }
-            let _ = tokio::task::spawn_blocking(move || save(&s, &j)).await;
+            let saved = j.clone();
+            let _ = tokio::task::spawn_blocking(move || save(&s, &saved)).await;
+            j.done.cancel();
         });
         Ok(job)
     }

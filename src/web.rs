@@ -382,6 +382,7 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
         .route("/api/team/create", post(team::create))
         .route("/api/auth/me", get(auth::me))
         .route("/health", get(health))
+        .route("/ready", get(ready))
         .fallback(get(asset));
     let app = match access {
         Access::Local(token) => app
@@ -413,7 +414,8 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
             })
             .layer(axum::middleware::from_fn_with_state(server, auth::guard)),
     }
-    .with_state(state);
+    .with_state(state.clone());
+    let stopping = state;
     listener.set_nonblocking(true)?;
     rt.block_on(async move {
         let listener = tokio::net::TcpListener::from_std(listener)?;
@@ -421,14 +423,63 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
             listener,
             app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
         )
+        .with_graceful_shutdown(shutdown(stopping))
         .await
         .context("serve")
     })
 }
 
+/// On Ctrl-C or SIGTERM: stop taking requests and let a running job stop at its next checkpoint.
+async fn shutdown(app: Shared) {
+    let term = async {
+        #[cfg(unix)]
+        if let Ok(mut s) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        {
+            s.recv().await;
+            return;
+        }
+        std::future::pending::<()>().await
+    };
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        _ = term => {}
+    }
+    crate::ui::note("stopping");
+    if let Some(job) = app.jobs.running() {
+        job.cancel.cancel();
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(20), job.wait()).await;
+    }
+    // Open event streams and agent sessions do not hold the process.
+    tokio::spawn(async {
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        std::process::exit(0);
+    });
+}
+
 /// For load balancers and orchestrators: answers while the process serves requests.
 async fn health() -> Json<Value> {
     Json(json!({"status": "ok", "version": env!("CARGO_PKG_VERSION")}))
+}
+
+/// For orchestrators: ready once an index is loaded and, on a server, the stores answer.
+async fn ready(State(app): State<Shared>) -> axum::response::Response {
+    let loaded = app.current.read().await.data.root.is_some();
+    let stores = match app.server.clone() {
+        Some(s) => tokio::task::spawn_blocking(move || s.accounts.members().is_ok())
+            .await
+            .unwrap_or(false),
+        None => true,
+    };
+    let status = if loaded && stores {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+    (
+        status,
+        Json(json!({"ready": status == StatusCode::OK, "index": loaded, "stores": stores})),
+    )
+        .into_response()
 }
 
 /// Agents get 503 with a reason until there is an index to answer from.
