@@ -17,7 +17,7 @@ pub struct Source {
     pub repo: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Provider {
     GitHub,
@@ -25,7 +25,7 @@ pub enum Provider {
 }
 
 /// A repository on the host.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RemoteRepo {
     pub name: String,
     /// `owner/name` or `group/sub/name`.

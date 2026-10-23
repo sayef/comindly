@@ -6,21 +6,15 @@ use std::path::Path;
 use anyhow::Context as _;
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::response::IntoResponse;
 use axum::Json;
-use serde::Deserialize;
-use serde_json::{json, Value};
 
-use super::{Cur, Shared};
+use super::{bad as fail, Cur, Reply, Shared};
 
+use crate::api;
 use crate::config::RepoEntry;
 use crate::events::{Event, EventSink, Kind, Level};
 use crate::jobs::Status;
 use crate::worktree;
-
-fn fail(e: anyhow::Error) -> (StatusCode, Json<Value>) {
-    super::error_body(StatusCode::BAD_REQUEST, super::error_text(&e))
-}
 
 fn absolute(p: &str) -> String {
     let p = crate::config::expand_tilde(p.trim());
@@ -29,7 +23,7 @@ fn absolute(p: &str) -> String {
         .unwrap_or(p)
 }
 
-pub(super) async fn list(State(app): State<Shared>, Cur(s): Cur) -> Json<Value> {
+pub(super) async fn list(State(app): State<Shared>, Cur(s): Cur) -> Json<api::Repos> {
     let repos = app.repos();
     let indexed: std::collections::HashMap<String, usize> =
         s.data.graph.repos().into_iter().collect();
@@ -51,27 +45,28 @@ pub(super) async fn list(State(app): State<Shared>, Cur(s): Cur) -> Json<Value> 
             .map(|r| {
                 let p = Path::new(&r.path);
                 let name = worktree::name(p);
-                json!({
-                    "path": r.path,
-                    "name": name,
-                    "exists": p.join(".git").exists(),
-                    "branch": worktree::default_branch(p).ok(),
-                    "managed": r.remote.is_some(),
-                    "cloned": p.exists(),
-                    "your_branch": worktree::current_branch(p),
-                    "remote": r.remote.clone().or_else(|| worktree::remote_url(p)).map(|u| crate::storage::without_userinfo(&u)),
-                    "symbols": symbols.get(&name),
-                    "indexed_commit": commits.get(&name),
-                })
+                api::RepoRow {
+                    path: r.path.clone(),
+                    exists: p.join(".git").exists(),
+                    branch: worktree::default_branch(p).ok(),
+                    managed: r.remote.is_some(),
+                    cloned: p.exists(),
+                    your_branch: worktree::current_branch(p),
+                    remote: r
+                        .remote
+                        .clone()
+                        .or_else(|| worktree::remote_url(p))
+                        .map(|u| crate::storage::without_userinfo(&u)),
+                    symbols: symbols.get(&name).copied(),
+                    indexed_commit: commits.get(&name).cloned(),
+                    name,
+                }
             })
             .collect::<Vec<_>>()
     })
     .await
     .unwrap_or_default();
-    let listed: Vec<String> = rows
-        .iter()
-        .filter_map(|r| r["name"].as_str().map(str::to_string))
-        .collect();
+    let listed: Vec<String> = rows.iter().map(|r| r.name.clone()).collect();
     let mine: Vec<String> = repos
         .iter()
         .filter_map(|r| {
@@ -87,12 +82,12 @@ pub(super) async fn list(State(app): State<Shared>, Cur(s): Cur) -> Json<Value> 
         .into_iter()
         .filter(|u| !mine.contains(&same_repo(u)))
         .collect();
-    Json(json!({
-        "repos": rows,
-        "unlisted": unlisted(&indexed, &meta, &listed),
-        "team_missing": team_missing,
-        "root": s.data.root,
-    }))
+    Json(api::Repos {
+        repos: rows,
+        unlisted: unlisted(&indexed, &meta, &listed),
+        team_missing,
+        root: s.data.root.clone(),
+    })
 }
 
 /// Repositories in the index with no folder in your list: name, symbols, commit and remote URL.
@@ -100,7 +95,7 @@ fn unlisted(
     indexed: &std::collections::HashMap<String, usize>,
     meta: &[crate::index::IndexedRepo],
     listed: &[String],
-) -> Vec<Value> {
+) -> Vec<api::UnlistedRepo> {
     let mut names: Vec<&String> = indexed.keys().collect();
     names.sort();
     names
@@ -108,28 +103,26 @@ fn unlisted(
         .filter(|n| !listed.contains(n))
         .map(|n| {
             let m = meta.iter().find(|r| &r.name == n);
-            json!({
-                "name": n,
-                "symbols": indexed.get(n),
-                "commit": m.map(|r| &r.commit),
-                "remote": m.and_then(|r| r.remote.as_deref()).map(crate::storage::without_userinfo),
-            })
+            api::UnlistedRepo {
+                name: n.clone(),
+                symbols: indexed.get(n).copied(),
+                commit: m.map(|r| r.commit.clone()),
+                remote: m
+                    .and_then(|r| r.remote.as_deref())
+                    .map(crate::storage::without_userinfo),
+            }
         })
         .collect()
 }
 
-#[derive(Deserialize)]
-pub(super) struct ScanQ {
-    dir: String,
-    #[serde(default)]
-    depth: Option<usize>,
-}
-
 /// Git repositories under a folder, marked when already listed.
-pub(super) async fn scan(State(app): State<Shared>, Json(q): Json<ScanQ>) -> impl IntoResponse {
+pub(super) async fn scan(
+    State(app): State<Shared>,
+    Json(q): Json<api::ScanRequest>,
+) -> Reply<api::Scan> {
     let dir = absolute(&q.dir);
     if !Path::new(&dir).is_dir() {
-        return fail(anyhow::anyhow!("{dir} is not a folder"));
+        return Err(fail(anyhow::anyhow!("{dir} is not a folder")));
     }
     let listed: Vec<String> = app.repos().iter().map(|r| absolute(&r.path)).collect();
     let found = tokio::task::spawn_blocking(move || {
@@ -137,34 +130,26 @@ pub(super) async fn scan(State(app): State<Shared>, Json(q): Json<ScanQ>) -> imp
             .into_iter()
             .map(|p| {
                 let path = p.to_string_lossy().into_owned();
-                json!({
-                    "name": worktree::name(&p),
-                    "listed": listed.contains(&path),
-                    "remote": worktree::remote_url(&p).map(|u| crate::storage::without_userinfo(&u)),
-                    "path": path,
-                })
+                api::ScanHit {
+                    name: worktree::name(&p),
+                    listed: listed.contains(&path),
+                    remote: worktree::remote_url(&p).map(|u| crate::storage::without_userinfo(&u)),
+                    path,
+                }
             })
             .collect::<Vec<_>>()
     })
     .await
     .unwrap_or_default();
-    (StatusCode::OK, Json(json!({"ok": true, "found": found})))
-}
-
-#[derive(Deserialize)]
-pub(super) struct Change {
-    #[serde(default)]
-    add: Vec<String>,
-    #[serde(default)]
-    remove: Vec<String>,
+    Ok(Json(api::Scan { ok: true, found }))
 }
 
 /// Add and remove repositories (folders); removed ones lose comindly's worktree, not your folder.
 pub(super) async fn change(
     who: super::Member,
     State(app): State<Shared>,
-    Json(c): Json<Change>,
-) -> impl IntoResponse {
+    Json(c): Json<api::RepoChange>,
+) -> Reply<api::Done> {
     let mut list = app.repos();
     let by = who.map(|w| w.email.clone());
     let run = tokio::task::spawn_blocking(move || {
@@ -191,72 +176,67 @@ pub(super) async fn change(
     })
     .await;
     match run.map_err(anyhow::Error::from).and_then(|r| r) {
-        Ok(n) => (
-            StatusCode::OK,
-            Json(
-                json!({"ok": true, "message": format!("saved; {n} {} in the list", if n == 1 { "repository" } else { "repositories" })}),
-            ),
-        ),
-        Err(e) => fail(e),
+        Ok(n) => {
+            let what = if n == 1 { "repository" } else { "repositories" };
+            Ok(Json(api::Done::new(format!(
+                "saved; {n} {what} in the list"
+            ))))
+        }
+        Err(e) => Err(fail(e)),
     }
 }
 
 /// Stop the running indexer and everything it started.
-pub(super) async fn cancel(State(app): State<Shared>) -> impl IntoResponse {
-    match app.jobs.running() {
+pub(super) async fn cancel(State(app): State<Shared>) -> Json<api::Done> {
+    Json(api::Done::new(match app.jobs.running() {
         Some(job) => {
             job.cancel.cancel();
-            (
-                StatusCode::OK,
-                Json(json!({"ok": true, "message": "cancelling; work already saved stays"})),
-            )
+            "cancelling; work already saved stays"
         }
-        None => (
-            StatusCode::OK,
-            Json(json!({"ok": true, "message": "nothing is indexing"})),
-        ),
-    }
+        None => "nothing is indexing",
+    }))
 }
 
-pub(super) async fn job(State(app): State<Shared>) -> Json<Value> {
-    let queued: Vec<Value> = app
+pub(super) async fn job(State(app): State<Shared>) -> Json<api::IndexState> {
+    let queued: Vec<api::QueuedJob> = app
         .jobs
         .queued()
         .iter()
         .enumerate()
-        .map(|(i, q)| json!({"id": q.id, "kind": q.kind, "position": i + 1, "started_by": q.started_by, "created": q.created}))
+        .map(|(i, q)| api::QueuedJob {
+            id: q.id.clone(),
+            kind: q.kind.clone(),
+            position: i + 1,
+            started_by: q.started_by.clone(),
+            created: q.created.clone(),
+        })
         .collect();
     let Some((j, events)) = app.jobs.latest() else {
-        return Json(json!({"running": false, "events": [], "queued": queued}));
+        return Json(api::IndexState::Idle {
+            running: false,
+            events: Vec::new(),
+            queued,
+        });
     };
-    Json(json!({
-        "id": j.id,
-        "running": !j.status.finished(),
-        "cancelled": j.status == Status::Cancelled,
-        "ok": j.status.finished().then_some(j.status == Status::Succeeded),
-        "status": j.status,
-        "events": events,
-        "started": j.started.unwrap_or(j.created),
-        "finished": j.finished,
-        "queued": queued,
+    Json(api::IndexState::Latest(api::LatestJob {
+        id: j.id,
+        running: !j.status.finished(),
+        cancelled: j.status == Status::Cancelled,
+        ok: j.status.finished().then_some(j.status == Status::Succeeded),
+        status: j.status,
+        events,
+        started: j.started.unwrap_or(j.created),
+        finished: j.finished,
+        queued,
     }))
-}
-
-#[derive(Deserialize)]
-pub(super) struct IndexQ {
-    #[serde(default)]
-    llm: bool,
-    /// Index without the repositories that have no folder here, dropping them from the index.
-    #[serde(default)]
-    drop_unlisted: bool,
 }
 
 pub(super) async fn start(
     who: super::Member,
     rid: Option<axum::Extension<super::RequestId>>,
     State(app): State<Shared>,
-    Json(q): Json<IndexQ>,
-) -> impl IntoResponse {
+    Json(q): Json<api::IndexRequest>,
+) -> Reply<api::IndexStarted> {
     let by = who.map(|w| w.email.clone());
     let rid = rid.map(|r| r.0 .0);
     match begin(&app, q.llm, q.drop_unlisted, None, by, rid).await {
@@ -267,14 +247,15 @@ pub(super) async fn start(
                 (Some(n), true) => format!("the same indexing is already queued (position {n})"),
             };
             let r = s.job.record();
-            (
-                StatusCode::OK,
-                Json(
-                    json!({"ok": true, "message": message, "id": r.id, "status": r.status, "position": s.position}),
-                ),
-            )
+            Ok(Json(api::IndexStarted {
+                ok: true,
+                message,
+                id: r.id,
+                status: r.status,
+                position: s.position,
+            }))
         }
-        Err(e) => fail(e),
+        Err(e) => Err(fail(e)),
     }
 }
 
@@ -298,8 +279,8 @@ pub(super) async fn begin(
             .map(|r| worktree::name(Path::new(&r.path)))
             .collect();
         let missing: Vec<String> = unlisted(&indexed, &[], &listed)
-            .iter()
-            .filter_map(|r| r["name"].as_str().map(str::to_string))
+            .into_iter()
+            .map(|r| r.name)
             .collect();
         anyhow::ensure!(
             missing.is_empty(),
@@ -383,13 +364,6 @@ pub(super) async fn begin(
         })
 }
 
-/// What the automatic re-index last found.
-#[derive(Default, Clone, serde::Serialize)]
-pub(super) struct Watch {
-    checked: Option<String>,
-    result: String,
-}
-
 /// With `auto_index` on, check every freshness interval whether a default branch moved on the
 /// remote (`git ls-remote`, no download) and queue a re-index when one did.
 pub(super) async fn watch(app: Shared) {
@@ -412,7 +386,7 @@ pub(super) async fn watch(app: Shared) {
             }
             Err(e) => format!("check failed: {e:#}"),
         };
-        *app.watch.lock().await = Watch {
+        *app.watch.lock().await = api::WatchResult {
             checked: Some(chrono::Utc::now().to_rfc3339()),
             result,
         };
@@ -449,11 +423,11 @@ async fn moved(app: &Shared) -> anyhow::Result<Vec<String>> {
     .await?
 }
 
-pub(super) async fn watch_state(State(app): State<Shared>) -> Json<Value> {
-    Json(json!({
-        "enabled": app.settings().auto_index,
-        "last": *app.watch.lock().await,
-    }))
+pub(super) async fn watch_state(State(app): State<Shared>) -> Json<api::IndexWatch> {
+    Json(api::IndexWatch {
+        enabled: app.settings().auto_index,
+        last: app.watch.lock().await.clone(),
+    })
 }
 
 /// A clone URL reduced to host and path, so HTTPS and SSH forms of one repository compare equal.
@@ -463,21 +437,12 @@ fn same_repo(url: &str) -> String {
         .unwrap_or_else(|_| url.to_string())
 }
 
-#[derive(Deserialize)]
-pub(super) struct RemoteListQ {
-    url: String,
-    #[serde(default)]
-    username: Option<String>,
-    #[serde(default)]
-    token: Option<String>,
-}
-
 /// The repositories of a GitHub organisation or GitLab group, with the ones already here marked.
 pub(super) async fn remote_list(
     State(app): State<Shared>,
     who: Option<axum::Extension<crate::server::Who>>,
-    Json(q): Json<RemoteListQ>,
-) -> impl IntoResponse {
+    Json(q): Json<api::RemoteListRequest>,
+) -> Reply<api::RemoteList> {
     let server = app.server.clone();
     let run = async {
         let source = crate::hosting::parse(&q.url)?;
@@ -538,45 +503,36 @@ pub(super) async fn remote_list(
             })
             .map(|u| same_repo(&u))
             .collect();
-        let rows: Vec<Value> = repos
-            .iter()
-            .map(|r| {
-                let mut v = json!(r);
-                v["listed"] = json!(here.contains(&same_repo(&r.clone_url)));
-                v
+        let rows = repos
+            .into_iter()
+            .map(|repo| api::RemoteRow {
+                listed: here.contains(&same_repo(&repo.clone_url)),
+                repo,
             })
             .collect();
-        anyhow::Ok(json!({
-            "ok": true,
-            "provider": source.provider,
-            "host": source.host,
-            "owner": source.owner,
-            "repos": rows,
-            "warning": warning,
-        }))
+        anyhow::Ok(api::RemoteList {
+            ok: true,
+            provider: source.provider,
+            host: source.host,
+            owner: source.owner,
+            repos: rows,
+            warning,
+        })
     };
-    match run.await {
-        Ok(v) => (StatusCode::OK, Json(v)),
-        Err(e) => match e.downcast_ref::<worktree::NeedsToken>() {
-            Some(n) => (
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": {
-                    "code": "needs_token",
-                    "message": e.to_string(),
-                    "host": n.host,
-                    "username": n.username,
-                }})),
-            ),
+    run.await
+        .map(Json)
+        .map_err(|e| match e.downcast_ref::<worktree::NeedsToken>() {
+            Some(n) => {
+                let error = api::ErrorDetail {
+                    code: "needs_token".into(),
+                    message: e.to_string(),
+                    host: Some(n.host.clone()),
+                    username: Some(n.username.clone()),
+                };
+                super::Failure(StatusCode::UNAUTHORIZED, error)
+            }
             None => fail(e),
-        },
-    }
-}
-
-#[derive(Deserialize)]
-pub(super) struct RemoteAddQ {
-    urls: Vec<String>,
-    #[serde(default)]
-    share: bool,
+        })
 }
 
 /// Add repositories by clone URL; comindly clones them into its own folder when indexing.
@@ -584,8 +540,8 @@ pub(super) async fn remote_add(
     who: super::Member,
     State(app): State<Shared>,
     Cur(s): Cur,
-    Json(q): Json<RemoteAddQ>,
-) -> impl IntoResponse {
+    Json(q): Json<api::RemoteAddRequest>,
+) -> Reply<api::Done> {
     let run = async {
         let mut list = app.repos();
         let mut added = 0;
@@ -629,8 +585,5 @@ pub(super) async fn remote_add(
             _ => format!("added {added}; press Index now to clone and index them"),
         })
     };
-    match run.await {
-        Ok(m) => (StatusCode::OK, Json(json!({"ok": true, "message": m}))),
-        Err(e) => fail(e),
-    }
+    run.await.map(|m| Json(api::Done::new(m))).map_err(fail)
 }

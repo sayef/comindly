@@ -2,20 +2,13 @@
 //! loaded index without a restart.
 
 use axum::extract::State;
-use axum::http::StatusCode;
-use axum::response::IntoResponse;
 use axum::Json;
-use serde::Deserialize;
-use serde_json::{json, Value};
 
-use super::{Cur, Shared};
+use super::{bad as fail, Cur, Reply, Shared};
+use crate::api;
 use crate::config::Setting;
 
-fn fail(e: anyhow::Error) -> (StatusCode, Json<Value>) {
-    super::error_body(StatusCode::BAD_REQUEST, super::error_text(&e))
-}
-
-pub(super) async fn get(State(app): State<Shared>, Cur(s): Cur) -> Json<Value> {
+pub(super) async fn get(State(app): State<Shared>, Cur(s): Cur) -> Json<api::Settings> {
     let (server, cfg, settings) = (app.server.clone(), app.config(), app.settings());
     let root = s.data.root.clone().unwrap_or_default();
     let team = app.team().name;
@@ -24,30 +17,25 @@ pub(super) async fn get(State(app): State<Shared>, Cur(s): Cur) -> Json<Value> {
     })
     .await
     .unwrap_or(crate::credentials::Source::None);
-    Json(json!({
-        "config_path": crate::config::store_path(),
-        "index_dir": cfg.index_dir,
-        "index_effective": root,
-        "author_name": cfg.author_name,
-        "author_effective": crate::config::local_identity().name,
-        "record_names": cfg.record_names.unwrap_or(true),
-        "llm_model": settings.llm_model,
-        "defaults": super::team::defaults(),
-        "llm_key": key,
-        "cache_ttl_secs": cfg.cache_ttl_secs.unwrap_or(crate::cache::DEFAULT_TTL),
-    }))
-}
-
-#[derive(Deserialize)]
-pub(super) struct Changes {
-    index_dir: Option<String>,
-    author_name: Option<String>,
-    record_names: Option<bool>,
-    cache_ttl_secs: Option<u64>,
+    Json(api::Settings {
+        config_path: crate::config::store_path().to_string_lossy().into_owned(),
+        index_dir: cfg.index_dir.clone(),
+        index_effective: root,
+        author_name: cfg.author_name.clone(),
+        author_effective: crate::config::local_identity().name,
+        record_names: cfg.record_names.unwrap_or(true),
+        llm_model: settings.llm_model,
+        defaults: super::team::defaults(),
+        llm_key: key,
+        cache_ttl_secs: cfg.cache_ttl_secs.unwrap_or(crate::cache::DEFAULT_TTL),
+    })
 }
 
 /// Save the given settings; a new index location is loaded before it is saved.
-pub(super) async fn save(State(app): State<Shared>, Json(c): Json<Changes>) -> impl IntoResponse {
+pub(super) async fn save(
+    State(app): State<Shared>,
+    Json(c): Json<api::SettingsChange>,
+) -> Reply<api::Done> {
     let run = async {
         let text = |v: &Option<String>| match v.as_deref().map(str::trim) {
             Some("") => Setting::Remove,
@@ -86,36 +74,20 @@ pub(super) async fn save(State(app): State<Shared>, Json(c): Json<Changes>) -> i
         app.config_changed();
         anyhow::Ok(message)
     };
-    match run.await {
-        Ok(m) => (StatusCode::OK, Json(json!({"ok": true, "message": m}))),
-        Err(e) => fail(e),
-    }
-}
-
-#[derive(Deserialize)]
-pub(super) struct Probe {
-    index_dir: String,
+    run.await.map(|m| Json(api::Done::new(m))).map_err(fail)
 }
 
 /// Whether an index location can be read, without switching to it.
-pub(super) async fn test(Json(p): Json<Probe>) -> impl IntoResponse {
+pub(super) async fn test(Json(p): Json<api::IndexDirRequest>) -> Reply<api::Done> {
     let root = crate::config::expand_tilde(p.index_dir.trim());
     let graph = format!("{}/_graph", root.trim_end_matches('/'));
-    match crate::index::graph_versions(&graph).await {
-        Ok(v) if !v.is_empty() => (
-            StatusCode::OK,
-            Json(json!({"ok": true, "message": format!("index found: {} version(s)", v.len())})),
-        ),
-        Ok(_) | Err(_) if !root.contains("://") && !std::path::Path::new(&root).exists() => (
-            StatusCode::OK,
-            Json(
-                json!({"ok": true, "message": "empty location: an index will be created here when you index repositories"}),
-            ),
-        ),
-        Ok(_) => (
-            StatusCode::OK,
-            Json(json!({"ok": true, "message": "reachable, no index yet"})),
-        ),
-        Err(e) => fail(e),
-    }
+    let message = match crate::index::graph_versions(&graph).await {
+        Ok(v) if !v.is_empty() => format!("index found: {} version(s)", v.len()),
+        Ok(_) | Err(_) if !root.contains("://") && !std::path::Path::new(&root).exists() => {
+            "empty location: an index will be created here when you index repositories".into()
+        }
+        Ok(_) => "reachable, no index yet".into(),
+        Err(e) => return Err(fail(e)),
+    };
+    Ok(Json(api::Done::new(message)))
 }

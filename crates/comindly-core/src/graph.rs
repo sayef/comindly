@@ -55,11 +55,11 @@ pub struct Node {
 }
 
 /// A step of a flow: the node, how it was reached and from which node.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FlowStep {
     pub node: Node,
     pub depth: usize,
-    pub via: &'static str,
+    pub via: String,
     pub from: String,
 }
 
@@ -72,7 +72,7 @@ pub struct Hop {
 }
 
 /// The 360° view of one symbol.
-#[derive(Debug, Clone, Default, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Zoom {
     pub focus: Option<Node>,
     pub container: Option<Node>,
@@ -88,7 +88,7 @@ pub struct Zoom {
 }
 
 /// A symbol's role in a contract (`serves http:GET /x`) and the participants on the other side.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ContractRole {
     pub role: EdgeKind,
     pub contract: Node,
@@ -351,7 +351,7 @@ impl CodeGraph {
                     out.push(FlowStep {
                         node: self.node_of(m),
                         depth: depth + 1,
-                        via: via.as_str(),
+                        via: via.as_str().to_string(),
                         from: self.g[n].sym.id.render(),
                     });
                     q.push_back((m, depth + 1));

@@ -151,7 +151,7 @@ impl Server {
 
 /// How members sign in: everything by email, or everything by codes admins hand out. Email when
 /// the server can send it, else codes; `COMINDLY_SIGN_IN=email|code` decides when set.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SignIn {
     Email,
@@ -213,7 +213,7 @@ pub struct Who {
     pub role: Role,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Member {
     pub email: String,
     pub role: Role,
@@ -222,7 +222,7 @@ pub struct Member {
     pub last_seen: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Invite {
     pub email: String,
     pub role: Role,
@@ -230,7 +230,7 @@ pub struct Invite {
     pub expires: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AccessToken {
     pub id: String,
     pub name: String,
@@ -242,7 +242,7 @@ pub struct AccessToken {
 }
 
 /// One row of the audit log; details never hold token values or codes.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditEntry {
     pub at: String,
     pub actor: String,
@@ -251,7 +251,7 @@ pub struct AuditEntry {
 }
 
 /// Which audit entries to list: `before` is the `next` cursor of the previous page.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct AuditQuery {
     pub limit: Option<usize>,
     pub before: Option<String>,
@@ -259,7 +259,7 @@ pub struct AuditQuery {
     pub action: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AuditPage {
     pub entries: Vec<AuditEntry>,
     /// The cursor for the next (older) page, when there is one.
@@ -267,10 +267,10 @@ pub struct AuditPage {
 }
 
 /// A secret's state for the UI; its value never leaves the server.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SecretInfo {
     pub name: String,
-    pub source: &'static str,
+    pub source: String,
     pub hint: Option<String>,
     pub updated: Option<String>,
     pub updated_by: Option<String>,
@@ -415,7 +415,7 @@ struct Device {
 }
 
 /// What a member sees before approving a command-line sign-in.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceRequest {
     pub client: String,
     pub expires: String,
@@ -1826,7 +1826,7 @@ impl crate::backends::SecretStore for Store {
     fn secret_info(&self, name: &str) -> Option<SecretInfo> {
         self.state().secrets.get(name).map(|s| SecretInfo {
             name: name.to_string(),
-            source: "stored",
+            source: "stored".into(),
             hint: Some(s.hint.clone()),
             updated: Some(s.updated.clone()),
             updated_by: Some(s.updated_by.clone()),

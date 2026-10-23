@@ -2,9 +2,9 @@
 
 use std::path::Path;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Check {
     pub ok: bool,
     /// Optional extras (signing, SCIP) do not count as problems.

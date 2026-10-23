@@ -8,42 +8,44 @@ use axum::response::sse::{Event as Sse, KeepAlive};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use futures::stream::{self, BoxStream, StreamExt};
-use serde_json::json;
 use tokio::sync::broadcast::error::RecvError;
 
-use super::Shared;
+use super::{Reply, Shared};
+use crate::api;
 use crate::events::{Event, Kind, Level};
 use crate::jobs::Status;
 
 /// Most recent first; waiting jobs carry their `position`, 1 for the next to run.
-pub(super) async fn list(State(app): State<Shared>) -> Response {
-    let jobs: Vec<_> = app
+pub(super) async fn list(State(app): State<Shared>) -> Json<api::Jobs> {
+    let jobs = app
         .jobs
         .list(crate::jobs::MAX_JOBS)
         .into_iter()
-        .map(|j| {
-            let mut v = json!(j);
-            if j.status == Status::Queued {
-                v["position"] = json!(app.jobs.position(&j.id));
-            }
-            v
+        .map(|job| api::JobRow {
+            position: (job.status == Status::Queued)
+                .then(|| app.jobs.position(&job.id))
+                .flatten(),
+            job,
         })
         .collect();
-    Json(json!({"jobs": jobs})).into_response()
+    Json(api::Jobs { jobs })
 }
 
-pub(super) async fn one(State(app): State<Shared>, Path(id): Path<String>) -> Response {
-    match app.jobs.get(&id) {
-        Some((job, events)) => {
-            let position = app.jobs.position(&id);
-            Json(json!({"job": job, "events": events, "position": position})).into_response()
-        }
-        None => missing(),
-    }
+pub(super) async fn one(
+    State(app): State<Shared>,
+    Path(id): Path<String>,
+) -> Reply<api::JobDetail> {
+    let (job, events) = app.jobs.get(&id).ok_or_else(missing)?;
+    let position = app.jobs.position(&id);
+    Ok(Json(api::JobDetail {
+        job,
+        events,
+        position,
+    }))
 }
 
 /// The job's events so far, then new ones as they happen; ends when the job does. While it waits
-/// in the queue, a note says its position each time that changes.
+/// in the queue, a note says its position each time that changes. Each `event` is an [`api::Event`].
 pub(super) async fn events(State(app): State<Shared>, Path(id): Path<String>) -> Response {
     let events: BoxStream<'static, Result<Sse, Infallible>> = match app.jobs.live(&id) {
         Some(job) => {
@@ -85,7 +87,7 @@ pub(super) async fn events(State(app): State<Shared>, Path(id): Path<String>) ->
         }
         None => match app.jobs.get(&id) {
             Some((_, past)) => stream::iter(past.into_iter().map(event)).boxed(),
-            None => return missing(),
+            None => return missing().into_response(),
         },
     };
     let all = events.chain(stream::once(async {
@@ -96,13 +98,13 @@ pub(super) async fn events(State(app): State<Shared>, Path(id): Path<String>) ->
         .into_response()
 }
 
-pub(super) async fn cancel(State(app): State<Shared>, Path(id): Path<String>) -> Response {
+pub(super) async fn cancel(State(app): State<Shared>, Path(id): Path<String>) -> Json<api::Done> {
     let message = match app.jobs.cancel(&id) {
         Some(Status::Queued) => "removed from the queue",
         Some(_) => "cancelling; work already saved stays",
         None => "that job is not running or queued",
     };
-    Json(json!({"ok": true, "message": message})).into_response()
+    Json(api::Done::new(message))
 }
 
 fn event(e: Event) -> Result<Sse, Infallible> {
@@ -112,6 +114,6 @@ fn event(e: Event) -> Result<Sse, Infallible> {
         .unwrap_or_default())
 }
 
-fn missing() -> Response {
-    super::error_body(StatusCode::NOT_FOUND, "no such job").into_response()
+fn missing() -> super::Failure {
+    super::failure(StatusCode::NOT_FOUND, "no such job")
 }

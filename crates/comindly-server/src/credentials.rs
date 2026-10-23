@@ -55,7 +55,7 @@ fn read() -> File {
 }
 
 /// Where an API key comes from, for display.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Source {
     Team,

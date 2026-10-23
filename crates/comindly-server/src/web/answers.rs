@@ -6,9 +6,9 @@ use axum::extract::Query;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use serde::Deserialize;
 
 use super::Cur;
+use crate::api;
 
 fn answer<T: serde::Serialize>(
     r: anyhow::Result<Option<T>>,
@@ -16,8 +16,8 @@ fn answer<T: serde::Serialize>(
 ) -> Response {
     match r {
         Ok(Some(v)) => Json(v).into_response(),
-        Ok(None) => super::error_body(StatusCode::NOT_FOUND, missing).into_response(),
-        Err(e) => super::error_body(StatusCode::BAD_REQUEST, super::error_text(&e)).into_response(),
+        Ok(None) => super::error_body(StatusCode::NOT_FOUND, missing),
+        Err(e) => super::bad(e).into_response(),
     }
 }
 
@@ -31,17 +31,11 @@ fn repos(r: &Option<String>) -> Vec<String> {
         .collect()
 }
 
-#[derive(Deserialize)]
-pub(super) struct QueryQ {
-    q: String,
-    repos: Option<String>,
+pub(super) async fn find(Cur(s): Cur, Query(q): Query<api::AnswerQuery>) -> Json<Vec<api::Node>> {
+    Json(crate::answers::find(&s.data.graph, &q.q, &repos(&q.repos)))
 }
 
-pub(super) async fn find(Cur(s): Cur, Query(q): Query<QueryQ>) -> Response {
-    Json(crate::answers::find(&s.data.graph, &q.q, &repos(&q.repos))).into_response()
-}
-
-pub(super) async fn search(Cur(s): Cur, Query(q): Query<QueryQ>) -> Response {
+pub(super) async fn search(Cur(s): Cur, Query(q): Query<api::AnswerQuery>) -> Response {
     let run = async {
         let tables = s.tables.as_ref().context("no index")?;
         let engine = s
@@ -66,26 +60,16 @@ pub(super) async fn search(Cur(s): Cur, Query(q): Query<QueryQ>) -> Response {
     answer(run.await, "")
 }
 
-#[derive(Deserialize)]
-pub(super) struct FocusQ {
-    focus: String,
-}
-
-pub(super) async fn why(Cur(s): Cur, Query(q): Query<FocusQ>) -> Response {
+pub(super) async fn why(Cur(s): Cur, Query(q): Query<api::AnswerFocus>) -> Response {
     let entries = s.entries().await;
     let w = crate::answers::why(&s.data.graph, &entries, &q.focus);
     answer(Ok(w), format!("no symbol matches `{}`", q.focus))
 }
 
-#[derive(Deserialize)]
-pub(super) struct LedgerQ {
-    #[serde(default)]
-    inbox: bool,
-    #[serde(default)]
-    check: bool,
-}
-
-pub(super) async fn ledger(Cur(s): Cur, Query(q): Query<LedgerQ>) -> Response {
+pub(super) async fn ledger(
+    Cur(s): Cur,
+    Query(q): Query<api::LedgerQuery>,
+) -> Json<api::answers::Ledger> {
     let packages = match super::graph_uri(&s) {
         Some(u) => crate::index::read_packages(&u).await.unwrap_or_default(),
         None => Vec::new(),
@@ -99,57 +83,45 @@ pub(super) async fn ledger(Cur(s): Cur, Query(q): Query<LedgerQ>) -> Response {
         q.inbox,
         q.check,
     ))
-    .into_response()
 }
 
-pub(super) async fn flow(Cur(s): Cur, Query(q): Query<FocusQ>) -> Response {
+pub(super) async fn flow(Cur(s): Cur, Query(q): Query<api::AnswerFocus>) -> Response {
     let extras = s.extras().await;
     let f = crate::answers::flow(&s.data.graph, &q.focus, |id| extras.flows.get(id).cloned());
     answer(Ok(f), format!("no symbol matching `{}`", q.focus))
 }
 
-#[derive(Deserialize)]
-pub(super) struct ContractsQ {
-    kind: Option<String>,
-    #[serde(default)]
-    dangling: bool,
-}
-
-pub(super) async fn contracts(Cur(s): Cur, Query(q): Query<ContractsQ>) -> Response {
+pub(super) async fn contracts(
+    Cur(s): Cur,
+    Query(q): Query<api::ContractsQuery>,
+) -> Json<api::answers::Contracts> {
     Json(crate::answers::contracts(
         &s.data.graph,
         q.kind.as_deref(),
         q.dangling,
     ))
-    .into_response()
 }
 
-#[derive(Deserialize)]
-pub(super) struct RepoQ {
-    repo: Option<String>,
-}
-
-pub(super) async fn conventions(Cur(s): Cur, Query(q): Query<RepoQ>) -> Response {
+pub(super) async fn conventions(
+    Cur(s): Cur,
+    Query(q): Query<api::RepoQuery>,
+) -> Json<api::answers::Conventions> {
     let manual = s.manual.read().await.clone();
     let all = crate::conventions::apply(s.data.conventions.clone(), &manual);
-    Json(crate::answers::conventions(all, &manual, q.repo.as_deref())).into_response()
+    Json(crate::answers::conventions(all, &manual, q.repo.as_deref()))
 }
 
-#[derive(Deserialize)]
-pub(super) struct ExploreQ {
-    focus: String,
+pub(super) async fn explore(
+    Cur(s): Cur,
+    Query(q): Query<api::AnswerFocus>,
+) -> Json<api::answers::Explore> {
+    Json(crate::answers::explore(&s.data.graph, &q.focus))
 }
 
-pub(super) async fn explore(Cur(s): Cur, Query(q): Query<ExploreQ>) -> Response {
-    Json(crate::answers::explore(&s.data.graph, &q.focus)).into_response()
-}
-
-#[derive(Deserialize)]
-pub(super) struct StatsQ {
-    repos: Option<String>,
-}
-
-pub(super) async fn stats(Cur(s): Cur, Query(q): Query<StatsQ>) -> Response {
+pub(super) async fn stats(
+    Cur(s): Cur,
+    Query(q): Query<api::StatsQuery>,
+) -> Json<api::answers::Stats> {
     let enriched = s.extras().await.enrichment.keys().cloned().collect();
     Json(crate::answers::stats(
         &s.data.symbols,
@@ -157,26 +129,20 @@ pub(super) async fn stats(Cur(s): Cur, Query(q): Query<StatsQ>) -> Response {
         &enriched,
         &repos(&q.repos),
     ))
-    .into_response()
 }
 
-#[derive(Deserialize)]
-pub(super) struct PackagesQ {
-    #[serde(default)]
-    skew: bool,
-}
-
-pub(super) async fn packages(Cur(s): Cur, Query(q): Query<PackagesQ>) -> Response {
-    Json(crate::answers::packages(s.data.deps.clone(), q.skew)).into_response()
-}
-
-#[derive(Deserialize)]
-pub(super) struct PreflightQ {
-    changes: Vec<crate::preflight::Change>,
+pub(super) async fn packages(
+    Cur(s): Cur,
+    Query(q): Query<api::PackagesQuery>,
+) -> Json<Vec<crate::manifests::InternalDep>> {
+    Json(crate::answers::packages(s.data.deps.clone(), q.skew))
 }
 
 /// `preflight`: the caller reads its changes from git; the index answers what they touch.
-pub(super) async fn preflight(Cur(s): Cur, Json(q): Json<PreflightQ>) -> Response {
+pub(super) async fn preflight(
+    Cur(s): Cur,
+    Json(q): Json<api::PreflightRequest>,
+) -> Json<api::answers::Preflight> {
     let graph = super::graph_uri(&s);
     let (recipes, packages) = match &graph {
         Some(u) => (
@@ -195,5 +161,4 @@ pub(super) async fn preflight(Cur(s): Cur, Json(q): Json<PreflightQ>) -> Respons
         &packages,
         &q.changes,
     ))
-    .into_response()
 }

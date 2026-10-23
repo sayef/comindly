@@ -4,6 +4,7 @@
 
 pub use comindly_core::*;
 
+pub mod api;
 pub mod backends;
 pub mod cache;
 pub mod config;

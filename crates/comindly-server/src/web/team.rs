@@ -1,17 +1,14 @@
 //! Team settings from the UI, plus your own API key in your credentials file (never in the index).
 
 use axum::extract::State;
-use axum::http::StatusCode;
-use axum::response::IntoResponse;
 use axum::Json;
-use serde::Deserialize;
-use serde_json::{json, Value};
 
-use super::Shared;
+use super::{bad as fail, Reply, Shared};
+use crate::api;
 use crate::team::{self, TeamSettings};
 
-fn fail(e: anyhow::Error) -> (StatusCode, Json<Value>) {
-    super::error_body(StatusCode::BAD_REQUEST, super::error_text(&e))
+fn done(r: anyhow::Result<impl Into<String>>) -> Reply<api::Done> {
+    r.map(|m| Json(api::Done::new(m))).map_err(fail)
 }
 
 async fn root(app: &Shared) -> anyhow::Result<String> {
@@ -26,49 +23,40 @@ async fn root(app: &Shared) -> anyhow::Result<String> {
 }
 
 /// comindly's built-in values, shown where a setting is left empty.
-pub(super) fn defaults() -> Value {
-    json!({
-        "llm_model": crate::llm::DEFAULT_MODEL,
-        "llm_base_url": crate::llm::DEFAULT_BASE_URL,
-        "embed_model": crate::embed::DEFAULT_MODEL,
-        "llm_concurrency": 8,
-        "format": "md",
-    })
+pub(super) fn defaults() -> api::Defaults {
+    api::Defaults {
+        llm_model: crate::llm::DEFAULT_MODEL.into(),
+        llm_base_url: crate::llm::DEFAULT_BASE_URL.into(),
+        embed_model: crate::embed::DEFAULT_MODEL.into(),
+        llm_concurrency: 8,
+        format: "md".into(),
+    }
 }
 
-pub(super) async fn get(State(app): State<Shared>) -> impl IntoResponse {
+pub(super) async fn get(State(app): State<Shared>) -> Reply<api::Team> {
     let run = async {
         let root = root(&app).await?;
         let stored = team::load(&root).await?;
         let key =
             crate::credentials::llm_key(stored.settings.name.as_deref(), app.server.as_deref()).1;
-        anyhow::Ok(json!({
-            "settings": stored.settings,
-            "key_source": key,
-            "version": stored.version,
-            "changed_by": stored.changed_by,
-            "changed_at": stored.changed_at,
-            "defaults": defaults(),
-        }))
+        anyhow::Ok(api::Team {
+            settings: stored.settings,
+            key_source: key,
+            version: stored.version,
+            changed_by: stored.changed_by,
+            changed_at: stored.changed_at,
+            defaults: defaults(),
+        })
     };
-    match run.await {
-        Ok(v) => (StatusCode::OK, Json(v)),
-        Err(e) => fail(e),
-    }
-}
-
-#[derive(Deserialize)]
-pub(super) struct Save {
-    settings: TeamSettings,
-    version: Option<u64>,
+    run.await.map(Json).map_err(fail)
 }
 
 /// Save the shared settings for everyone using this index.
 pub(super) async fn save(
     who: super::Member,
     State(app): State<Shared>,
-    Json(b): Json<Save>,
-) -> impl IntoResponse {
+    Json(b): Json<api::TeamSave>,
+) -> Reply<api::Done> {
     let run = async {
         let root = root(&app).await?;
         let current = team::load(&root).await?;
@@ -106,19 +94,14 @@ pub(super) async fn save(
             "saved for everyone using this index"
         })
     };
-    match run.await {
-        Ok(m) => (StatusCode::OK, Json(json!({"ok": true, "message": m}))),
-        Err(e) => fail(e),
-    }
-}
-
-#[derive(Deserialize)]
-pub(super) struct Key {
-    key: String,
+    done(run.await)
 }
 
 /// Store your API key for this team (or as your default) in your credentials file.
-pub(super) async fn key(State(app): State<Shared>, Json(b): Json<Key>) -> impl IntoResponse {
+pub(super) async fn key(
+    State(app): State<Shared>,
+    Json(b): Json<api::KeyRequest>,
+) -> Reply<api::Done> {
     let run = async {
         anyhow::ensure!(
             app.server.is_none(),
@@ -135,19 +118,14 @@ pub(super) async fn key(State(app): State<Shared>, Json(b): Json<Key>) -> impl I
             _ => "removed your key".to_string(),
         })
     };
-    match run.await {
-        Ok(m) => (StatusCode::OK, Json(json!({"ok": true, "message": m}))),
-        Err(e) => fail(e),
-    }
-}
-
-#[derive(Deserialize)]
-pub(super) struct Join {
-    index: String,
+    done(run.await)
 }
 
 /// Use a team's index: check it, remember it and load it.
-pub(super) async fn join(State(app): State<Shared>, Json(b): Json<Join>) -> impl IntoResponse {
+pub(super) async fn join(
+    State(app): State<Shared>,
+    Json(b): Json<api::JoinRequest>,
+) -> Reply<api::Done> {
     let run = async {
         let root = crate::config::expand_tilde(b.index.trim());
         let indexed = has_index(&root).await?;
@@ -157,25 +135,16 @@ pub(super) async fn join(State(app): State<Shared>, Json(b): Json<Join>) -> impl
             "no team or index at {root}"
         );
         use_location(&app, &root, stored.settings.clone()).await?;
-        anyhow::Ok(stored.settings.name.unwrap_or(root))
+        anyhow::Ok(format!("joined {}", stored.settings.name.unwrap_or(root)))
     };
-    match run.await {
-        Ok(name) => (
-            StatusCode::OK,
-            Json(json!({"ok": true, "message": format!("joined {name}")})),
-        ),
-        Err(e) => fail(e),
-    }
-}
-
-#[derive(Deserialize)]
-pub(super) struct Create {
-    name: String,
-    index: String,
+    done(run.await)
 }
 
 /// Start a team at an empty location: write its settings there and switch to it.
-pub(super) async fn create(State(app): State<Shared>, Json(b): Json<Create>) -> impl IntoResponse {
+pub(super) async fn create(
+    State(app): State<Shared>,
+    Json(b): Json<api::CreateTeam>,
+) -> Reply<api::Done> {
     let run = async {
         let name = b.name.trim().to_string();
         anyhow::ensure!(!name.is_empty(), "give the team a name");
@@ -198,15 +167,9 @@ pub(super) async fn create(State(app): State<Shared>, Json(b): Json<Create>) -> 
         };
         crate::config::save_team(&root, &settings, None).await?;
         use_location(&app, &root, settings).await?;
-        anyhow::Ok(name)
+        anyhow::Ok(format!("created {name}"))
     };
-    match run.await {
-        Ok(name) => (
-            StatusCode::OK,
-            Json(json!({"ok": true, "message": format!("created {name}")})),
-        ),
-        Err(e) => fail(e),
-    }
+    done(run.await)
 }
 
 async fn has_index(root: &str) -> anyhow::Result<bool> {

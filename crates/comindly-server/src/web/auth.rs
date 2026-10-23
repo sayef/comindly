@@ -6,12 +6,11 @@ use axum::http::{header, Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
-use serde::Deserialize;
-use serde_json::{json, Value};
 
 use std::sync::Arc;
 
-use super::Shared;
+use super::{bad, failure as fail, Reply, Shared};
+use crate::api::{self, Done};
 use crate::server::{self, Role, Server, ServerConfig, SignIn, Via, Who};
 
 /// The server, for routes that exist only in server mode.
@@ -37,16 +36,8 @@ fn cookie_name(cfg: &ServerConfig) -> &'static str {
     }
 }
 
-fn fail(status: StatusCode, message: impl Into<String>) -> Response {
-    super::error_body(status, message).into_response()
-}
-
-fn bad(e: anyhow::Error) -> Response {
-    fail(StatusCode::BAD_REQUEST, super::error_text(&e))
-}
-
 fn unavailable() -> Response {
-    fail(
+    super::error_body(
         StatusCode::SERVICE_UNAVAILABLE,
         "the server's database could not be opened; see its log",
     )
@@ -187,21 +178,24 @@ pub(super) async fn guard(
             return fail(
                 StatusCode::UNAUTHORIZED,
                 "This access token has expired or was revoked",
-            );
+            )
+            .into_response();
         }
-        return fail(StatusCode::UNAUTHORIZED, "Sign in to continue");
+        return fail(StatusCode::UNAUTHORIZED, "Sign in to continue").into_response();
     };
     if via == Via::Token && account_only(&path) && path != SELF_REVOKE {
         return fail(
             StatusCode::FORBIDDEN,
             "Personal access tokens are for agents; sign in to manage your account",
-        );
+        )
+        .into_response();
     }
     if via == Via::Session && req.method() != Method::GET && !same_site(&req, &server.config) {
         return fail(
             StatusCode::FORBIDDEN,
             "This request did not come from comindly's own pages",
-        );
+        )
+        .into_response();
     }
     // Agents write over `/mcp`; its tools check the role themselves.
     let need = if path.starts_with("/mcp") {
@@ -214,7 +208,7 @@ pub(super) async fn guard(
             Role::Admin => "Only admins can do this",
             _ => "Viewers can read, not change anything",
         };
-        return fail(StatusCode::FORBIDDEN, msg);
+        return fail(StatusCode::FORBIDDEN, msg).into_response();
     }
     by(next.run(req).await, signed)
 }
@@ -238,33 +232,33 @@ pub(super) fn hosts(cfg: &ServerConfig) -> Vec<String> {
     out
 }
 
-pub(super) async fn me(super::Srv(server): super::Srv, who: Option<Extension<Who>>) -> Json<Value> {
+pub(super) async fn me(
+    super::Srv(server): super::Srv,
+    who: Option<Extension<Who>>,
+) -> Json<api::Me> {
     let Some(server) = server else {
-        return Json(json!({"mode": "local"}));
+        return Json(api::Me::Local);
     };
-    Json(json!({
-        "mode": "server",
-        "signed_in": who.is_some(),
-        "email": who.as_ref().map(|w| w.email.clone()),
-        "role": who.as_ref().map(|w| w.role),
-        "sign_in": server.config.sign_in,
-        "public_url": server.config.public_url,
-    }))
+    Json(api::Me::Server {
+        signed_in: who.is_some(),
+        email: who.as_ref().map(|w| w.email.clone()),
+        role: who.as_ref().map(|w| w.role),
+        sign_in: server.config.sign_in,
+        public_url: server.config.public_url.clone(),
+    })
 }
 
 fn link(cfg: &ServerConfig, path: &str, token: &str) -> String {
     format!("{}/{path}?t={token}", cfg.public_url)
 }
 
-#[derive(Deserialize)]
-pub(super) struct EmailQ {
-    email: String,
-}
-
 /// Email a sign-in link; the answer is the same whether or not the address is a member.
-pub(super) async fn request_link(On(server): On, Json(q): Json<EmailQ>) -> Response {
+pub(super) async fn request_link(On(server): On, Json(q): Json<api::EmailRequest>) -> Reply<Done> {
     if server.config.sign_in != SignIn::Email {
-        return fail(StatusCode::BAD_REQUEST, "This server signs in with codes");
+        return Err(fail(
+            StatusCode::BAD_REQUEST,
+            "This server signs in with codes",
+        ));
     }
     let email = server::normalize(&q.email);
     // Sent in the background, so the answer neither waits on the mail server nor reveals a member.
@@ -288,13 +282,9 @@ pub(super) async fn request_link(On(server): On, Json(q): Json<EmailQ>) -> Respo
         Ok(None) => {}
         Err(e) => crate::ui::warn(&format!("sign-in link: {}", super::error_text(&e))),
     }
-    Json(json!({"ok": true, "message": "If that address belongs to a member, a sign-in link is on its way"}))
-        .into_response()
-}
-
-#[derive(Deserialize)]
-pub(super) struct TokenQ {
-    token: String,
+    Ok(Json(Done::new(
+        "If that address belongs to a member, a sign-in link is on its way",
+    )))
 }
 
 fn session_cookie(cfg: &ServerConfig, token: &str, max_age: i64) -> String {
@@ -310,7 +300,7 @@ pub(super) async fn redeem(
     On(server): On,
     axum::extract::ConnectInfo(peer): axum::extract::ConnectInfo<std::net::SocketAddr>,
     headers: axum::http::HeaderMap,
-    Json(q): Json<TokenQ>,
+    Json(q): Json<api::RedeemRequest>,
 ) -> Response {
     let cfg = &server.config;
     match server
@@ -323,17 +313,11 @@ pub(super) async fn redeem(
                 header::SET_COOKIE,
                 session_cookie(cfg, &session, 30 * 86400),
             )],
-            Json(json!({"ok": true, "message": format!("Signed in as {}", who.email)})),
+            Json(Done::new(format!("Signed in as {}", who.email))),
         )
             .into_response(),
-        Err(e) => bad(e),
+        Err(e) => bad(e).into_response(),
     }
-}
-
-#[derive(Deserialize)]
-pub(super) struct CodeQ {
-    email: String,
-    code: String,
 }
 
 /// Where a request comes from: the connecting address, or behind a proxy you run
@@ -365,11 +349,11 @@ pub(super) async fn sign_in_code(
     On(server): On,
     axum::extract::ConnectInfo(peer): axum::extract::ConnectInfo<std::net::SocketAddr>,
     headers: axum::http::HeaderMap,
-    Json(q): Json<CodeQ>,
+    Json(q): Json<api::CodeRequest>,
 ) -> Response {
     let cfg = &server.config;
     if cfg.sign_in != SignIn::Code {
-        return fail(StatusCode::BAD_REQUEST, "This server signs in by email");
+        return fail(StatusCode::BAD_REQUEST, "This server signs in by email").into_response();
     }
     match server
         .accounts
@@ -381,12 +365,14 @@ pub(super) async fn sign_in_code(
                 header::SET_COOKIE,
                 session_cookie(cfg, &session, 30 * 86400),
             )],
-            Json(
-                json!({"ok": true, "message": format!("Signed in as {}", who.email), "code": code}),
-            ),
+            Json(api::WithCode {
+                ok: true,
+                message: format!("Signed in as {}", who.email),
+                code,
+            }),
         )
             .into_response(),
-        Err(e) => bad(e),
+        Err(e) => bad(e).into_response(),
     }
 }
 
@@ -395,16 +381,23 @@ pub(super) async fn reset_own_code(
     On(server): On,
     Extension(who): Extension<Who>,
     req: Request,
-) -> Response {
+) -> Reply<api::WithCode> {
     if server.config.sign_in != SignIn::Code {
-        return fail(StatusCode::BAD_REQUEST, "This server signs in by email");
+        return Err(fail(
+            StatusCode::BAD_REQUEST,
+            "This server signs in by email",
+        ));
     }
     let mine = cookie(&req, cookie_name(&server.config));
-    match server.accounts.reset_code(&who.email, &who.email, mine.as_deref()) {
-        Ok(code) => Json(json!({"ok": true, "message": "New sign-in code; the old one no longer works", "code": code}))
-            .into_response(),
-        Err(e) => bad(e),
-    }
+    let code = server
+        .accounts
+        .reset_code(&who.email, &who.email, mine.as_deref())
+        .map_err(bad)?;
+    Ok(Json(api::WithCode {
+        ok: true,
+        message: "New sign-in code; the old one no longer works".into(),
+        code: Some(code),
+    }))
 }
 
 pub(super) async fn sign_out(On(server): On, req: Request) -> Response {
@@ -418,44 +411,41 @@ pub(super) async fn sign_out(On(server): On, req: Request) -> Response {
     (
         StatusCode::OK,
         [(header::SET_COOKIE, session_cookie(&server.config, "", 0))],
-        Json(json!({"ok": true, "message": "Signed out"})),
+        Json(Done::new("Signed out")),
     )
         .into_response()
 }
 
-pub(super) async fn members(On(server): On) -> Response {
+pub(super) async fn members(On(server): On) -> Reply<api::Members> {
     let store = &server.accounts;
     match (store.members(), store.invites()) {
-        (Ok(m), Ok(i)) => {
-            Json(json!({"members": m, "invites": i, "sign_in": server.config.sign_in}))
-                .into_response()
-        }
-        (Err(e), _) | (_, Err(e)) => bad(e),
+        (Ok(members), Ok(invites)) => Ok(Json(api::Members {
+            members,
+            invites,
+            sign_in: server.config.sign_in,
+        })),
+        (Err(e), _) | (_, Err(e)) => Err(bad(e)),
     }
-}
-
-#[derive(Deserialize)]
-pub(super) struct InviteQ {
-    email: String,
-    role: Role,
 }
 
 /// Invite `email`: by email, or with a code the admin hands over (returned once).
 pub(super) async fn invite(
     On(server): On,
     Extension(who): Extension<Who>,
-    Json(q): Json<InviteQ>,
-) -> Response {
+    Json(q): Json<api::MemberRole>,
+) -> Reply<api::Invited> {
     let store = &server.accounts;
     let email = server::normalize(&q.email);
     let code = server.config.sign_in == SignIn::Code;
-    let token = match store.invite(&who.email, &email, q.role, code) {
-        Ok(t) => t,
-        Err(e) => return bad(e),
-    };
+    let token = store
+        .invite(&who.email, &email, q.role, code)
+        .map_err(bad)?;
     if code {
-        return Json(json!({"ok": true, "message": format!("Invited {email}; give them this code"), "code": token}))
-            .into_response();
+        return Ok(Json(api::Invited {
+            ok: true,
+            message: format!("Invited {email}; give them this code"),
+            code: Some(token),
+        }));
     }
     let body = format!(
         "{} invited you to comindly. Join with this link (valid for 7 days, once, for {email} only):\n\n{}",
@@ -467,11 +457,14 @@ pub(super) async fn invite(
         .send(&email, "You're invited to comindly", &body)
         .await
     {
-        Ok(()) => Json(json!({"ok": true, "message": format!("Invitation emailed to {email}")}))
-            .into_response(),
+        Ok(()) => Ok(Json(api::Invited {
+            ok: true,
+            message: format!("Invitation emailed to {email}"),
+            code: None,
+        })),
         Err(e) => {
             let _ = store.revoke_invite(&who.email, &email);
-            bad(e)
+            Err(bad(e))
         }
     }
 }
@@ -480,31 +473,30 @@ pub(super) async fn invite(
 pub(super) async fn reset_code(
     On(server): On,
     Extension(who): Extension<Who>,
-    Json(q): Json<EmailQ>,
-) -> Response {
+    Json(q): Json<api::EmailRequest>,
+) -> Reply<api::WithCode> {
     if server.config.sign_in != SignIn::Code {
-        return fail(StatusCode::BAD_REQUEST, "This server signs in by email");
+        return Err(fail(
+            StatusCode::BAD_REQUEST,
+            "This server signs in by email",
+        ));
     }
-    match server.accounts.reset_code(&who.email, &q.email, None) {
-        Ok(code) => {
-            Json(json!({"ok": true, "message": "New sign-in code; give it to them", "code": code}))
-                .into_response()
-        }
-        Err(e) => bad(e),
-    }
-}
-
-#[derive(Deserialize)]
-pub(super) struct RoleQ {
-    email: String,
-    role: Role,
+    let code = server
+        .accounts
+        .reset_code(&who.email, &q.email, None)
+        .map_err(bad)?;
+    Ok(Json(api::WithCode {
+        ok: true,
+        message: "New sign-in code; give it to them".into(),
+        code: Some(code),
+    }))
 }
 
 pub(super) async fn set_role(
     On(server): On,
     Extension(who): Extension<Who>,
-    Json(q): Json<RoleQ>,
-) -> Response {
+    Json(q): Json<api::MemberRole>,
+) -> Reply<Done> {
     done(
         server.accounts.set_role(&who.email, &q.email, q.role),
         "Role changed",
@@ -514,10 +506,10 @@ pub(super) async fn set_role(
 pub(super) async fn remove(
     On(server): On,
     Extension(who): Extension<Who>,
-    Json(q): Json<EmailQ>,
-) -> Response {
+    Json(q): Json<api::EmailRequest>,
+) -> Reply<Done> {
     if server::normalize(&q.email) == who.email {
-        return fail(StatusCode::BAD_REQUEST, "You cannot remove yourself");
+        return Err(fail(StatusCode::BAD_REQUEST, "You cannot remove yourself"));
     }
     done(
         server.accounts.remove(&who.email, &q.email),
@@ -528,95 +520,71 @@ pub(super) async fn remove(
 pub(super) async fn revoke_invite(
     On(server): On,
     Extension(who): Extension<Who>,
-    Json(q): Json<EmailQ>,
-) -> Response {
+    Json(q): Json<api::EmailRequest>,
+) -> Reply<Done> {
     done(
         server.accounts.revoke_invite(&who.email, &q.email),
         "Invitation withdrawn",
     )
 }
 
-fn done(r: anyhow::Result<()>, message: &str) -> Response {
-    match r {
-        Ok(()) => Json(json!({"ok": true, "message": message})).into_response(),
-        Err(e) => bad(e),
-    }
+fn done(r: anyhow::Result<()>, message: &str) -> Reply<Done> {
+    r.map(|()| Json(Done::new(message))).map_err(bad)
 }
 
-pub(super) async fn tokens(On(server): On, Extension(who): Extension<Who>) -> Response {
-    match server.accounts.tokens(&who) {
-        Ok(t) => Json(json!({"tokens": t})).into_response(),
-        Err(e) => bad(e),
-    }
-}
-
-fn default_token_days() -> Option<u32> {
-    Some(server::TOKEN_DAYS)
-}
-
-#[derive(Deserialize)]
-pub(super) struct NewTokenQ {
-    name: String,
-    /// Absent means 90 days, `null` never.
-    #[serde(default = "default_token_days")]
-    expires_in_days: Option<u32>,
+pub(super) async fn tokens(On(server): On, Extension(who): Extension<Who>) -> Reply<api::Tokens> {
+    let tokens = server.accounts.tokens(&who).map_err(bad)?;
+    Ok(Json(api::Tokens { tokens }))
 }
 
 /// A personal access token for an agent; shown once.
 pub(super) async fn create_token(
     On(server): On,
     Extension(who): Extension<Who>,
-    Json(q): Json<NewTokenQ>,
-) -> Response {
-    match server
+    Json(q): Json<api::NewToken>,
+) -> Reply<api::TokenCreated> {
+    let token = server
         .accounts
         .create_token(&who, &q.name, q.expires_in_days)
-    {
-        Ok(t) => Json(json!({"ok": true, "message": "Token created; copy it now, it is shown once", "token": t}))
-            .into_response(),
-        Err(e) => bad(e),
-    }
-}
-
-#[derive(Deserialize)]
-pub(super) struct IdQ {
-    id: String,
+        .map_err(bad)?;
+    Ok(Json(api::TokenCreated {
+        ok: true,
+        message: "Token created; copy it now, it is shown once".into(),
+        token,
+    }))
 }
 
 pub(super) async fn revoke_token(
     On(server): On,
     Extension(who): Extension<Who>,
-    Json(q): Json<IdQ>,
-) -> Response {
+    Json(q): Json<api::IdRequest>,
+) -> Reply<Done> {
     done(server.accounts.revoke_token(&who, &q.id), "Token revoked")
 }
 
 /// The audit log, newest first; `before` takes the previous page's `next`.
 pub(super) async fn audit(
     On(server): On,
-    axum::extract::Query(q): axum::extract::Query<server::AuditQuery>,
-) -> Response {
-    match tokio::task::block_in_place(|| server.audit.audit_entries(&q)) {
-        Ok(page) => Json(json!(page)).into_response(),
-        Err(e) => bad(e),
-    }
+    axum::extract::Query(q): axum::extract::Query<api::AuditQuery>,
+) -> Reply<api::AuditPage> {
+    tokio::task::block_in_place(|| server.audit.audit_entries(&q))
+        .map(Json)
+        .map_err(bad)
 }
 
 /// Revoke the personal access token this request was made with, as `comindly logout` does.
-pub(super) async fn revoke_self(On(server): On, req: Request) -> Response {
-    let Some(token) = bearer(&req) else {
-        return fail(
+pub(super) async fn revoke_self(On(server): On, req: Request) -> Reply<Done> {
+    let only = || {
+        fail(
             StatusCode::BAD_REQUEST,
             "Only a personal access token can revoke itself",
-        );
+        )
     };
+    let token = bearer(&req).ok_or_else(only)?;
     match server.accounts.revoke_own_token(&token) {
-        Ok(true) => Json(json!({"ok": true, "message": "Token revoked"})).into_response(),
-        Ok(false) => fail(
-            StatusCode::BAD_REQUEST,
-            "Only a personal access token can revoke itself",
-        ),
-        Err(e) => bad(e),
+        Ok(true) => Ok(Json(Done::new("Token revoked"))),
+        Ok(false) => Err(only()),
+        Err(e) => Err(bad(e)),
     }
 }
 
@@ -639,7 +607,7 @@ fn label(name: &str) -> String {
 }
 
 /// The server's tokens and keys: where each comes from, never their values.
-pub(super) async fn secrets(On(server): On) -> Response {
+pub(super) async fn secrets(On(server): On) -> Json<api::Secrets> {
     let store = &server.secrets;
     let mut names = vec![
         server::LLM_SECRET.to_string(),
@@ -651,42 +619,39 @@ pub(super) async fn secrets(On(server): On) -> Response {
             names.push(n);
         }
     }
-    let list: Vec<Value> = names
+    let secrets = names
         .iter()
         .map(|n| {
-            let info = if deployment(&server.config, n).is_some() {
-                json!({"source": "deployment"})
-            } else if let Some(i) = store.secret_info(n) {
-                json!(i)
-            } else {
-                json!({"source": "none"})
+            let elsewhere = |source: &str| api::SecretState::Elsewhere {
+                source: source.into(),
+                name: n.clone(),
+                label: label(n),
             };
-            let mut v = info;
-            v["name"] = json!(n);
-            v["label"] = json!(label(n));
-            v
+            if deployment(&server.config, n).is_some() {
+                elsewhere("deployment")
+            } else if let Some(mut info) = store.secret_info(n) {
+                info.name = n.clone();
+                api::SecretState::Stored {
+                    info,
+                    label: label(n),
+                }
+            } else {
+                elsewhere("none")
+            }
         })
         .collect();
-    Json(json!({
-        "secrets": list,
-        "can_store": true,
-    }))
-    .into_response()
-}
-
-#[derive(Deserialize)]
-pub(super) struct SecretQ {
-    name: String,
-    #[serde(default)]
-    value: String,
+    Json(api::Secrets {
+        secrets,
+        can_store: true,
+    })
 }
 
 /// Store or remove a token or key; one the deployment provides cannot be changed here.
 pub(super) async fn set_secret(
     On(server): On,
     Extension(who): Extension<Who>,
-    Json(q): Json<SecretQ>,
-) -> Response {
+    Json(q): Json<api::SecretRequest>,
+) -> Reply<Done> {
     let name = q.name.trim().to_lowercase();
     let valid = name == server::LLM_SECRET
         || name.strip_prefix("git:").is_some_and(|h| {
@@ -695,13 +660,13 @@ pub(super) async fn set_secret(
                     .all(|c| c.is_ascii_alphanumeric() || ".-:".contains(c))
         });
     if !valid {
-        return fail(StatusCode::BAD_REQUEST, "Unknown secret");
+        return Err(fail(StatusCode::BAD_REQUEST, "Unknown secret"));
     }
     if deployment(&server.config, &name).is_some() {
-        return fail(
+        return Err(fail(
             StatusCode::BAD_REQUEST,
             "The deployment provides this one; change it where the deployment keeps its secrets",
-        );
+        ));
     }
     let message = if q.value.trim().is_empty() {
         "Removed"
@@ -714,87 +679,72 @@ pub(super) async fn set_secret(
     )
 }
 
-#[derive(Deserialize)]
-pub(super) struct DeviceStartQ {
-    client: String,
-}
-
 /// A command line asks to sign in; a member approves it at the returned address.
 pub(super) async fn device_start(
     On(server): On,
     axum::extract::ConnectInfo(peer): axum::extract::ConnectInfo<std::net::SocketAddr>,
     headers: axum::http::HeaderMap,
-    Json(q): Json<DeviceStartQ>,
-) -> Response {
+    Json(q): Json<api::DeviceStartRequest>,
+) -> Reply<api::DeviceStart> {
     let from = client(&server.config, peer, &headers);
-    match server.devices.device_start(&q.client, &from) {
-        Ok((device_code, user_code)) => Json(json!({
-            "device_code": device_code,
-            "user_code": user_code,
-            "verify_url": format!("{}/device?code={user_code}", server.config.public_url),
-            "interval": 2,
-            "expires_in": 600,
-        }))
-        .into_response(),
-        Err(e) => bad(e),
-    }
-}
-
-#[derive(Deserialize)]
-pub(super) struct DeviceTokenQ {
-    device_code: String,
+    let (device_code, user_code) = server.devices.device_start(&q.client, &from).map_err(bad)?;
+    Ok(Json(api::DeviceStart {
+        device_code,
+        verify_url: format!("{}/device?code={user_code}", server.config.public_url),
+        user_code,
+        interval: 2,
+        expires_in: 600,
+    }))
 }
 
 /// What the command line polls: pending, or the token once a member approved.
-pub(super) async fn device_token(On(server): On, Json(q): Json<DeviceTokenQ>) -> Response {
+pub(super) async fn device_token(
+    On(server): On,
+    Json(q): Json<api::DeviceTokenRequest>,
+) -> Reply<api::DeviceToken> {
     match server.devices.device_poll(&q.device_code) {
-        Ok(server::DevicePoll::Pending) => Json(json!({"status": "pending"})).into_response(),
+        Ok(server::DevicePoll::Pending) => Ok(Json(api::DeviceToken::Pending)),
         Ok(server::DevicePoll::Approved {
             token,
             email,
             expires,
-        }) => {
-            Json(json!({"status": "approved", "token": token, "email": email, "expires": expires}))
-                .into_response()
+        }) => Ok(Json(api::DeviceToken::Approved {
+            token,
+            email,
+            expires,
+        })),
+        Ok(server::DevicePoll::Denied) => {
+            Err(fail(StatusCode::FORBIDDEN, "The sign-in was denied"))
         }
-        Ok(server::DevicePoll::Denied) => fail(StatusCode::FORBIDDEN, "The sign-in was denied"),
-        Ok(server::DevicePoll::Expired) => fail(
+        Ok(server::DevicePoll::Expired) => Err(fail(
             StatusCode::GONE,
             "The sign-in expired or was already used; start it again",
-        ),
-        Err(e) => bad(e),
+        )),
+        Err(e) => Err(bad(e)),
     }
-}
-
-#[derive(Deserialize)]
-pub(super) struct DeviceCodeQ {
-    code: String,
 }
 
 pub(super) async fn device_info(
     On(server): On,
-    axum::extract::Query(q): axum::extract::Query<DeviceCodeQ>,
-) -> Response {
-    match server.devices.device_info(&q.code) {
-        Some(r) => Json(json!(r)).into_response(),
-        None => fail(
-            StatusCode::NOT_FOUND,
-            "That code is not waiting for approval; start the sign-in again",
-        ),
-    }
-}
-
-#[derive(Deserialize)]
-pub(super) struct DeviceApproveQ {
-    code: String,
-    approve: bool,
+    axum::extract::Query(q): axum::extract::Query<api::DeviceCodeQuery>,
+) -> Reply<api::DeviceRequest> {
+    server
+        .devices
+        .device_info(&q.code)
+        .map(Json)
+        .ok_or_else(|| {
+            fail(
+                StatusCode::NOT_FOUND,
+                "That code is not waiting for approval; start the sign-in again",
+            )
+        })
 }
 
 pub(super) async fn device_approve(
     On(server): On,
     Extension(who): Extension<Who>,
-    Json(q): Json<DeviceApproveQ>,
-) -> Response {
+    Json(q): Json<api::DeviceApprove>,
+) -> Reply<Done> {
     let message = if q.approve {
         "Approved; the command line is signed in"
     } else {

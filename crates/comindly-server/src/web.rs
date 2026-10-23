@@ -7,13 +7,13 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use axum::extract::{Query, State};
 use axum::http::{header, StatusCode};
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::Value;
 use tokio::sync::{OnceCell, RwLock};
 
+use crate::api;
 use crate::graph::{Node, Zoom};
 use crate::ledger::{Entry, Provenance, Record, RelationKind, Status};
 use crate::view::Data;
@@ -39,9 +39,9 @@ struct Session {
     /// The index's tables, held open so LanceDB caches their metadata and indexes.
     tables: Option<crate::index::Tables>,
     /// Org maps of earlier index versions, by position in `/api/versions`.
-    past: tokio::sync::Mutex<HashMap<usize, Value>>,
+    past: tokio::sync::Mutex<HashMap<usize, api::OrgMap>>,
     /// Where flows start, ranked once per loaded index.
-    flow_list: OnceCell<Value>,
+    flow_list: OnceCell<Vec<api::FlowRow>>,
 }
 
 #[derive(Default)]
@@ -108,7 +108,7 @@ impl Session {
 struct AppState {
     current: RwLock<Arc<Session>>,
     jobs: crate::jobs::Jobs,
-    watch: tokio::sync::Mutex<repos::Watch>,
+    watch: tokio::sync::Mutex<api::WatchResult>,
     /// Members, sign-in and stored secrets, in server mode.
     server: Option<Arc<crate::server::Server>>,
     /// The loaded index's shared settings.
@@ -577,10 +577,20 @@ async fn traced(
 }
 
 /// The one error shape, `{"error": {"code", "message"}}`, with a status that means what it says.
-pub(crate) fn error_body(
-    status: StatusCode,
-    message: impl Into<String>,
-) -> (StatusCode, Json<Value>) {
+pub(crate) fn error_body(status: StatusCode, message: impl Into<String>) -> Response {
+    failure(status, message).into_response()
+}
+
+/// A failed request, answered as [`api::ErrorBody`].
+pub(crate) struct Failure(StatusCode, api::ErrorDetail);
+
+impl IntoResponse for Failure {
+    fn into_response(self) -> Response {
+        (self.0, Json(api::ErrorBody { error: self.1 })).into_response()
+    }
+}
+
+pub(crate) fn failure(status: StatusCode, message: impl Into<String>) -> Failure {
     let code = match status {
         StatusCode::BAD_REQUEST => "bad_request",
         StatusCode::UNAUTHORIZED => "unauthorized",
@@ -591,19 +601,33 @@ pub(crate) fn error_body(
         StatusCode::SERVICE_UNAVAILABLE => "unavailable",
         _ => "error",
     };
-    (
-        status,
-        Json(json!({"error": {"code": code, "message": message.into()}})),
-    )
+    let error = api::ErrorDetail {
+        code: code.into(),
+        message: message.into(),
+        host: None,
+        username: None,
+    };
+    Failure(status, error)
+}
+
+/// A handler's answer: the typed body, or the error shape.
+pub(crate) type Reply<T> = std::result::Result<Json<T>, Failure>;
+
+/// A failed request's 400 with the error explained.
+pub(crate) fn bad(e: anyhow::Error) -> Failure {
+    failure(StatusCode::BAD_REQUEST, error_text(&e))
 }
 
 /// For load balancers and orchestrators: answers while the process serves requests.
-async fn health() -> Json<Value> {
-    Json(json!({"status": "ok", "version": env!("CARGO_PKG_VERSION")}))
+async fn health() -> Json<api::Health> {
+    Json(api::Health {
+        status: "ok".into(),
+        version: env!("CARGO_PKG_VERSION").into(),
+    })
 }
 
 /// For orchestrators: ready once an index is loaded and, on a server, the stores answer.
-async fn ready(State(app): State<Shared>) -> axum::response::Response {
+async fn ready(State(app): State<Shared>) -> Response {
     let loaded = app.current.read().await.data.root.is_some();
     let stores = match app.server.clone() {
         Some(s) => tokio::task::spawn_blocking(move || s.accounts.members().is_ok())
@@ -616,11 +640,12 @@ async fn ready(State(app): State<Shared>) -> axum::response::Response {
     } else {
         StatusCode::SERVICE_UNAVAILABLE
     };
-    (
-        status,
-        Json(json!({"ready": status == StatusCode::OK, "index": loaded, "stores": stores})),
-    )
-        .into_response()
+    let ready = api::Ready {
+        ready: status == StatusCode::OK,
+        index: loaded,
+        stores,
+    };
+    (status, Json(ready)).into_response()
 }
 
 /// Agents get 503 with a reason until there is an index to answer from.
@@ -630,15 +655,13 @@ async fn mcp_ready(
     next: axum::middleware::Next,
 ) -> axum::response::Response {
     if shared.read().map(|s| s.is_none()).unwrap_or(true) {
-        return (
-            axum::http::StatusCode::SERVICE_UNAVAILABLE,
-            [(axum::http::header::RETRY_AFTER, "60")],
-            Json(json!({"error": {
-                "code": "unavailable",
-                "message": "no index yet: an admin indexes repositories first",
-            }})),
-        )
-            .into_response();
+        let mut res = error_body(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "no index yet: an admin indexes repositories first",
+        );
+        res.headers_mut()
+            .insert(header::RETRY_AFTER, header::HeaderValue::from_static("60"));
+        return res;
     }
     next.run(req).await
 }
@@ -764,7 +787,7 @@ async fn asset(uri: axum::http::Uri) -> impl IntoResponse {
         .into_response()
 }
 
-async fn overview(who: Member, Cur(s): Cur) -> Json<Value> {
+async fn overview(who: Member, Cur(s): Cur) -> Json<api::Overview> {
     let d = &s.data;
     let entries = s.entries().await;
     let mut status: BTreeMap<String, usize> = BTreeMap::new();
@@ -779,36 +802,40 @@ async fn overview(who: Member, Cur(s): Cur) -> Json<Value> {
         .filter(|c| !c.providers.is_empty() && !c.consumers.is_empty())
         .count();
     let cross = d.edges.iter().filter(|e| e.cross_repo).count();
-    let skew: Vec<Value> = d
+    let skew = d
         .deps
         .iter()
         .filter(|x| x.skewed())
-        .map(|x| {
-            json!({"package": x.name, "publisher": x.publisher, "published": x.published,
-                   "consumer": x.consumer, "locked": x.locked})
+        .map(|x| api::Skew {
+            package: x.name.clone(),
+            publisher: x.publisher.clone(),
+            published: x.published.clone(),
+            consumer: x.consumer.clone(),
+            locked: x.locked.clone(),
         })
         .collect();
-    Json(json!({
-        "repos": d.graph.repos().into_iter().map(|(r, n)| json!({"repo": r, "symbols": n})).collect::<Vec<_>>(),
-        "symbols": d.symbols.len(),
-        "edges": d.edges.len(),
-        "cross_repo_edges": cross,
-        "contracts": d.contracts.len(),
-        "linked_contracts": linked,
-        "ledger": status,
-        "skew": skew,
+    Json(api::Overview {
+        repos: d
+            .graph
+            .repos()
+            .into_iter()
+            .map(|(repo, symbols)| api::RepoSymbols { repo, symbols })
+            .collect(),
+        symbols: d.symbols.len(),
+        edges: d.edges.len(),
+        cross_repo_edges: cross,
+        contracts: d.contracts.len(),
+        linked_contracts: linked,
+        ledger: status,
+        skew,
         // Viewers read only.
-        "writable": d.root.is_some()
-            && who.as_ref().is_none_or(|w| w.role.at_least(crate::server::Role::Member)),
-        "root": d.root,
-        "problem": d.problem,
-    }))
-}
-
-#[derive(Deserialize)]
-struct AtQ {
-    /// Index into `/api/versions` (oldest first); absent = the loaded (latest) graph.
-    at: Option<usize>,
+        writable: d.root.is_some()
+            && who
+                .as_ref()
+                .is_none_or(|w| w.role.at_least(crate::server::Role::Member)),
+        root: d.root.clone(),
+        problem: d.problem.clone(),
+    })
 }
 
 /// An error for the UI: short, with S3 replies explained and credentials removed.
@@ -823,24 +850,19 @@ fn graph_uri(s: &Session) -> Option<String> {
         .map(|r| format!("{}/_graph", r.trim_end_matches('/')))
 }
 
-async fn versions(Cur(s): Cur) -> Json<Value> {
+/// When each index version was written, oldest first.
+async fn versions(Cur(s): Cur) -> Json<Vec<String>> {
     let list = match &s.tables {
         Some(t) => t.versions().await.unwrap_or_default(),
         None => Vec::new(),
     };
-    Json(json!(list
-        .into_iter()
-        .map(|(_, _, t)| t)
-        .collect::<Vec<_>>()))
+    Json(list.into_iter().map(|(_, _, t)| t).collect())
 }
 
-async fn orgmap(Cur(s): Cur, Query(q): Query<AtQ>) -> impl IntoResponse {
+async fn orgmap(Cur(s): Cur, Query(q): Query<api::AtQuery>) -> Reply<api::OrgMap> {
     let d = &s.data;
     let Some(i) = q.at else {
-        return (
-            StatusCode::OK,
-            Json(org(&d.graph, &d.symbols, &d.edges, &d.contracts)),
-        );
+        return Ok(Json(org(&d.graph, &d.symbols, &d.edges, &d.contracts)));
     };
     let past = async {
         if let Some(v) = s.past.lock().await.get(&i) {
@@ -859,10 +881,7 @@ async fn orgmap(Cur(s): Cur, Query(q): Query<AtQ>) -> impl IntoResponse {
         s.past.lock().await.insert(i, v.clone());
         anyhow::Ok(v)
     };
-    match past.await {
-        Ok(v) => (StatusCode::OK, Json(v)),
-        Err(e) => error_body(StatusCode::BAD_REQUEST, error_text(&e)),
-    }
+    past.await.map(Json).map_err(bad)
 }
 
 /// Repos as nodes; edges aggregate cross-repo code dependencies and contract links.
@@ -871,7 +890,7 @@ fn org(
     symbols: &[crate::model::Symbol],
     edges: &[crate::model::Edge],
     contracts: &[crate::graph::ContractView],
-) -> Value {
+) -> api::OrgMap {
     let repo_of: std::collections::HashMap<String, &str> = symbols
         .iter()
         .map(|x| (x.id.render(), x.repo.0.as_str()))
@@ -913,25 +932,34 @@ fn org(
             }
         }
     }
-    let nodes: Vec<Value> = graph
+    let nodes = graph
         .repos()
         .into_iter()
-        .map(|(r, n)| json!({"id": r, "name": format!("{r} ({n})"), "repo": r, "location": ""}))
+        .map(|(r, n)| api::OrgNode {
+            id: r.clone(),
+            name: format!("{r} ({n})"),
+            repo: r,
+            location: String::new(),
+        })
         .collect();
-    let edges: Vec<Value> = links
+    let edges = links
         .into_iter()
-        .map(
-            |((a, b, k), (n, via))| json!({"src": a, "dst": b, "kind": k, "weight": n, "via": via}),
-        )
+        .map(|((src, dst, kind), (weight, via))| api::OrgEdge {
+            src,
+            dst,
+            kind: kind.into(),
+            weight,
+            via: via.into_iter().collect(),
+        })
         .collect();
-    json!({"nodes": nodes, "edges": edges})
+    api::OrgMap { nodes, edges }
 }
 
-async fn contracts(Cur(s): Cur) -> Json<Value> {
-    Json(json!(s.data.contracts))
+async fn contracts(Cur(s): Cur) -> Json<Vec<api::ContractView>> {
+    Json(s.data.contracts.clone())
 }
 
-async fn ledger(Cur(s): Cur) -> Json<Value> {
+async fn ledger(Cur(s): Cur) -> Json<Vec<Entry>> {
     let entries = s.entries().await;
     let mut v: Vec<&Entry> = entries.iter().collect();
     v.sort_by(|a, b| b.record.created.cmp(&a.record.created));
@@ -939,7 +967,7 @@ async fn ledger(Cur(s): Cur) -> Json<Value> {
 }
 
 /// What the terminal UI shows, for `comindly ui` against this server.
-async fn view(Cur(s): Cur) -> impl IntoResponse {
+async fn view(Cur(s): Cur) -> Response {
     let packages = match graph_uri(&s) {
         Some(u) => crate::index::read_packages(&u).await.unwrap_or_default(),
         None => Vec::new(),
@@ -948,7 +976,7 @@ async fn view(Cur(s): Cur) -> impl IntoResponse {
     let findings = crate::checks::run(&entries, &s.data.symbols, &s.data.edges, &packages);
     crate::checks::promote(&mut entries, &findings);
     let manual = s.manual.read().await.clone();
-    Json(crate::view::View {
+    Json(api::View {
         symbols: (&s.data.symbols[..]).into(),
         edges: (&s.data.edges[..]).into(),
         entries: entries.into(),
@@ -960,69 +988,51 @@ async fn view(Cur(s): Cur) -> impl IntoResponse {
     .into_response()
 }
 
-/// Entries as JSON with each anchor named as the graph shows it (`Class.method`).
-fn named(s: &Session, entries: &[&Entry]) -> Value {
-    let mut v = json!(entries);
-    for e in v.as_array_mut().into_iter().flatten() {
-        for a in e["record"]["anchors"].as_array_mut().into_iter().flatten() {
-            if let Some(i) = a["symbol"].as_str().and_then(|id| s.data.graph.lookup(id)) {
-                a["name"] = json!(s.data.graph.node(i).name);
-            }
+/// Entries with each anchor named as the graph shows it (`Class.method`).
+fn named(s: &Session, entries: &[&Entry]) -> Vec<Entry> {
+    let mut out: Vec<Entry> = entries.iter().map(|e| (*e).clone()).collect();
+    for a in out.iter_mut().flat_map(|e| e.record.anchors.iter_mut()) {
+        if let Some(i) = s.data.graph.lookup(&a.symbol) {
+            a.name = s.data.graph.node(i).name;
         }
     }
-    v
+    out
 }
 
-#[derive(Deserialize)]
-struct RepoQ {
-    repo: Option<String>,
-}
-
-async fn conventions(Cur(s): Cur, Query(q): Query<RepoQ>) -> Json<Value> {
+async fn conventions(Cur(s): Cur, Query(q): Query<api::RepoQuery>) -> Json<api::Conventions> {
     let manual = s.manual.read().await;
     let mine = |r: &str| q.repo.as_deref().is_none_or(|q| r == q);
-    let shown: Vec<Value> = crate::conventions::apply(s.data.conventions.clone(), &manual)
+    let conventions = crate::conventions::apply(s.data.conventions.clone(), &manual)
         .into_iter()
         .filter(|c| mine(&c.repo))
-        .map(|c| {
-            let mut v = json!(c);
-            v["id"] = json!(c.id());
-            v
+        .map(|c| api::ShownConvention {
+            id: c.id(),
+            convention: c,
         })
         .collect();
-    let hidden: Vec<_> = manual
+    let hidden = manual
         .iter()
         .filter(|m| m.hidden && mine(&m.repo))
+        .cloned()
         .collect();
-    Json(json!({ "conventions": shown, "hidden": hidden }))
-}
-
-#[derive(Deserialize)]
-struct ConventionBody {
-    /// `add`, `edit`, `hide` or `restore`.
-    action: String,
-    #[serde(default)]
-    id: String,
-    #[serde(default)]
-    repo: Option<String>,
-    #[serde(default)]
-    dimension: Option<String>,
-    #[serde(default)]
-    rule: String,
+    Json(api::Conventions {
+        conventions,
+        hidden,
+    })
 }
 
 async fn change_convention(
     who: Member,
     Cur(s): Cur,
-    Json(b): Json<ConventionBody>,
-) -> impl IntoResponse {
+    Json(b): Json<api::ConventionChange>,
+) -> Reply<api::Done> {
     match apply_convention(&s, b, &identity(who.as_deref()).actor).await {
-        Ok(msg) => (StatusCode::OK, Json(json!({"ok": true, "message": msg}))),
-        Err(e) => error_body(StatusCode::BAD_REQUEST, error_text(&e)),
+        Ok(msg) => Ok(Json(api::Done::new(msg))),
+        Err(e) => Err(bad(e)),
     }
 }
 
-async fn apply_convention(s: &Session, b: ConventionBody, actor: &str) -> Result<String> {
+async fn apply_convention(s: &Session, b: api::ConventionChange, actor: &str) -> Result<String> {
     use crate::conventions::{change, Change, Manual, Write, ORG};
     let root = s.data.root.as_deref().context("read-only UI")?;
     let mut manual = s.manual.write().await;
@@ -1060,24 +1070,14 @@ async fn apply_convention(s: &Session, b: ConventionBody, actor: &str) -> Result
     })
 }
 
-#[derive(Deserialize)]
-struct FindQ {
-    q: String,
+async fn find(Cur(s): Cur, Query(q): Query<api::FindQuery>) -> Json<Vec<Node>> {
+    Json(s.data.graph.find(&q.q, 40))
 }
 
-async fn find(Cur(s): Cur, Query(q): Query<FindQ>) -> Json<Value> {
-    Json(json!(s.data.graph.find(&q.q, 40)))
-}
-
-#[derive(Deserialize)]
-struct NodeQ {
-    focus: String,
-}
-
-async fn node(Cur(s): Cur, Query(q): Query<NodeQ>) -> impl IntoResponse {
+async fn node(Cur(s): Cur, Query(q): Query<api::FocusQuery>) -> Reply<api::NodeDetail> {
     let g = &s.data.graph;
     let Some(idx) = g.lookup(&q.focus) else {
-        return error_body(StatusCode::NOT_FOUND, "no such symbol");
+        return Err(failure(StatusCode::NOT_FOUND, "no such symbol"));
     };
     let z = g.zoom(idx);
     let ripple = g.ripple(idx, 4);
@@ -1094,34 +1094,28 @@ async fn node(Cur(s): Cur, Query(q): Query<NodeQ>) -> impl IntoResponse {
     }
     let extras = s.extras().await;
     let fid = z.focus.as_ref().map(|f| f.id.clone()).unwrap_or_default();
-    let summary = extras.enrichment.get(&fid).map(|(s, _)| s);
-    let flow = extras
-        .flows
-        .get(&fid)
-        .map(|(n, q)| json!({"narration": n, "questions": q}));
+    let summary = extras.enrichment.get(&fid).map(|(s, _)| s.clone());
+    let flow = extras.flows.get(&fid).map(|(n, q)| api::Narration {
+        narration: n.clone(),
+        questions: q.clone(),
+    });
     let entries = s.entries().await;
     let about: Vec<&Entry> = crate::ledger::about(&entries, &ids);
-    (
-        StatusCode::OK,
-        Json(json!({
-            "zoom": z,
-            "graph": neighbourhood(&z),
-            "ripple": {"total": ripple.len(), "repos": repos},
-            "ledger": named(&s, &about),
-            "summary": summary,
-            "flow": flow,
-        })),
-    )
-}
-
-#[derive(Deserialize)]
-struct SearchQ {
-    q: String,
-    repo: Option<String>,
+    Ok(Json(api::NodeDetail {
+        graph: neighbourhood(&z),
+        zoom: z,
+        ripple: api::Ripple {
+            total: ripple.len(),
+            repos,
+        },
+        ledger: named(&s, &about),
+        summary,
+        flow,
+    }))
 }
 
 /// Hybrid code search (BM25, vectors, centrality), as `comindly search` and the MCP tool.
-async fn search(Cur(s): Cur, Query(q): Query<SearchQ>) -> impl IntoResponse {
+async fn search(Cur(s): Cur, Query(q): Query<api::SearchQuery>) -> Reply<Vec<api::SearchHit>> {
     let run = async {
         let tables = s.tables.as_ref().context("no index root")?;
         let engine = s
@@ -1152,28 +1146,24 @@ async fn search(Cur(s): Cur, Query(q): Query<SearchQ>) -> impl IntoResponse {
         }
         anyhow::Ok(
             hits.into_iter()
-                .map(|h| {
-                    json!({"id": h.id, "name": h.name, "kind": h.kind, "repo": h.repo,
-                           "location": h.location, "signature": h.signature,
-                           "summary": h.summary, "dependents": h.deps})
+                .map(|h| api::SearchHit {
+                    id: h.id,
+                    name: h.name,
+                    kind: h.kind,
+                    repo: h.repo,
+                    location: h.location,
+                    signature: h.signature,
+                    summary: h.summary,
+                    dependents: h.deps,
                 })
-                .collect::<Vec<_>>(),
+                .collect(),
         )
     };
-    match run.await {
-        Ok(v) => (StatusCode::OK, Json(json!(v))),
-        Err(e) => error_body(StatusCode::BAD_REQUEST, error_text(&e)),
-    }
+    run.await.map(Json).map_err(bad)
 }
 
-#[derive(Deserialize)]
-struct ContextQ {
-    focus: String,
-    budget: Option<usize>,
-}
-
-/// The context pack for a symbol as markdown, ready to paste into an agent.
-async fn context(Cur(s): Cur, Query(q): Query<ContextQ>) -> impl IntoResponse {
+/// The context pack for a symbol as markdown, ready to paste into an agent; plain text, not JSON.
+async fn context(Cur(s): Cur, Query(q): Query<api::FocusQuery>) -> impl IntoResponse {
     let g = &s.data.graph;
     let Some(idx) = g.lookup(&q.focus) else {
         return (StatusCode::NOT_FOUND, "no such symbol".to_string());
@@ -1211,21 +1201,27 @@ async fn context(Cur(s): Cur, Query(q): Query<ContextQ>) -> impl IntoResponse {
     (StatusCode::OK, o)
 }
 
-async fn packages(Cur(s): Cur) -> Json<Value> {
-    Json(json!(s
-        .data
-        .deps
-        .iter()
-        .map(
-            |d| json!({"ecosystem": d.ecosystem, "name": d.name, "publisher": d.publisher,
-                        "published": d.published, "consumer": d.consumer,
-                        "requirement": d.requirement, "locked": d.locked, "skewed": d.skewed()})
-        )
-        .collect::<Vec<_>>()))
+async fn packages(Cur(s): Cur) -> Json<Vec<api::Package>> {
+    Json(
+        s.data
+            .deps
+            .iter()
+            .map(|d| api::Package {
+                ecosystem: d.ecosystem.clone(),
+                name: d.name.clone(),
+                publisher: d.publisher.clone(),
+                published: d.published.clone(),
+                consumer: d.consumer.clone(),
+                requirement: d.requirement.clone(),
+                locked: d.locked.clone(),
+                skewed: d.skewed(),
+            })
+            .collect(),
+    )
 }
 
 /// Setup status and how to connect agents: index location, checks, MCP tools.
-async fn setup(State(app): State<Shared>, Cur(s): Cur) -> Json<Value> {
+async fn setup(State(app): State<Shared>, Cur(s): Cur) -> Json<api::Setup> {
     let (server, team) = (app.server.clone(), app.team());
     let root = s.data.root.clone().unwrap_or_default();
     let checks = {
@@ -1234,29 +1230,40 @@ async fn setup(State(app): State<Shared>, Cur(s): Cur) -> Json<Value> {
             .await
             .unwrap_or_default()
     };
-    let tools: Vec<Value> = crate::mcp::tools()
+    let tools = crate::mcp::tools()
         .into_iter()
-        .map(|(name, description)| json!({"name": name, "description": description}))
+        .map(|(name, description)| api::Tool { name, description })
         .collect();
-    Json(json!({
-        "index": root,
-        "remote": crate::cache::is_remote(&root),
-        "version": env!("CARGO_PKG_VERSION"),
-        "checks": checks,
-        "tools": tools,
-        "agents": if server.is_some() { Vec::new() } else { crate::doctor::agents() },
-    }))
+    let agents = match server {
+        Some(_) => Vec::new(),
+        None => crate::doctor::agents()
+            .into_iter()
+            .map(String::from)
+            .collect(),
+    };
+    Json(api::Setup {
+        remote: crate::cache::is_remote(&root),
+        index: root,
+        version: env!("CARGO_PKG_VERSION").into(),
+        checks,
+        tools,
+        agents,
+    })
 }
 
 /// Nodes and labelled edges around the focus, for the canvas graph.
-fn neighbourhood(z: &Zoom) -> Value {
+fn neighbourhood(z: &Zoom) -> api::Neighbourhood {
     let Some(f) = &z.focus else {
-        return json!({"nodes": [], "edges": []});
+        return api::Neighbourhood::default();
     };
     let mut nodes: BTreeMap<&str, &Node> = BTreeMap::from([(f.id.as_str(), f)]);
-    let mut edges: Vec<Value> = Vec::new();
+    let mut edges: Vec<api::GraphEdge> = Vec::new();
     let mut add = |a: &Node, b: &Node, kind: &str| {
-        edges.push(json!({"src": a.id, "dst": b.id, "kind": kind}));
+        edges.push(api::GraphEdge {
+            src: a.id.clone(),
+            dst: b.id.clone(),
+            kind: kind.into(),
+        });
     };
     const CAP: usize = 40;
     let groups: [(&[Node], bool, &str); 5] = [
@@ -1292,15 +1299,11 @@ fn neighbourhood(z: &Zoom) -> Value {
             add(c, &r.contract, "counterpart");
         }
     }
-    json!({"nodes": nodes.values().collect::<Vec<_>>(), "edges": edges, "focus": f.id})
-}
-
-#[derive(Deserialize)]
-struct ReviewBody {
-    id: String,
-    action: String,
-    #[serde(default)]
-    reason: String,
+    api::Neighbourhood {
+        nodes: nodes.into_values().cloned().collect(),
+        edges,
+        focus: Some(f.id.clone()),
+    }
 }
 
 /// Provenance for a write from the UI: the signed-in member on a server, else this machine's user.
@@ -1328,17 +1331,17 @@ fn signer(who: Option<&crate::server::Who>) -> Option<std::path::PathBuf> {
         .flatten()
 }
 
-async fn review(who: Member, Cur(s): Cur, Json(b): Json<ReviewBody>) -> impl IntoResponse {
+async fn review(who: Member, Cur(s): Cur, Json(b): Json<api::ReviewRequest>) -> Reply<api::Done> {
     let signer = signer(who.as_deref());
     match apply_review(&s, &b, provenance(who.as_deref()), signer).await {
-        Ok(msg) => (StatusCode::OK, Json(json!({"ok": true, "message": msg}))),
-        Err(e) => error_body(StatusCode::BAD_REQUEST, error_text(&e)),
+        Ok(msg) => Ok(Json(api::Done::new(msg))),
+        Err(e) => Err(bad(e)),
     }
 }
 
 async fn apply_review(
     s: &Session,
-    b: &ReviewBody,
+    b: &api::ReviewRequest,
     prov: Provenance,
     signer: Option<std::path::PathBuf>,
 ) -> Result<String> {
@@ -1373,24 +1376,12 @@ async fn apply_review(
     Ok(format!("{} → {:?}", target.title, status))
 }
 
-#[derive(Deserialize)]
-struct RememberBody {
-    kind: String,
-    /// Symbols the record is about: ids, names or `Class.method`.
-    on: Vec<String>,
-    title: String,
-    #[serde(default)]
-    body: String,
-    #[serde(default)]
-    trigger: Option<String>,
-    #[serde(default)]
-    evidence: Vec<String>,
-    #[serde(default)]
-    fields: BTreeMap<String, String>,
-}
-
 /// A record written by the person using the UI.
-async fn remember(who: Member, Cur(s): Cur, Json(b): Json<RememberBody>) -> impl IntoResponse {
+async fn remember(
+    who: Member,
+    Cur(s): Cur,
+    Json(b): Json<api::RememberRequest>,
+) -> Reply<api::Remembered> {
     let run = async {
         let root = s.data.root.as_deref().context("read-only UI")?;
         let kind = crate::ledger::Kind::parse(&b.kind).context("unknown kind")?;
@@ -1423,18 +1414,13 @@ async fn remember(who: Member, Cur(s): Cur, Json(b): Json<RememberBody>) -> impl
         anyhow::Ok(rec.id)
     };
     match run.await {
-        Ok(id) => (StatusCode::OK, Json(json!({"ok": true, "id": id}))),
-        Err(e) => error_body(StatusCode::BAD_REQUEST, error_text(&e)),
+        Ok(id) => Ok(Json(api::Remembered { ok: true, id })),
+        Err(e) => Err(bad(e)),
     }
 }
 
-#[derive(Deserialize)]
-struct EraseBody {
-    id: String,
-}
-
 /// Permanently delete a record and the reviews about it.
-async fn erase(Cur(s): Cur, Json(b): Json<EraseBody>) -> impl IntoResponse {
+async fn erase(Cur(s): Cur, Json(b): Json<api::IdRequest>) -> Reply<api::Done> {
     let run = async {
         let root = s.data.root.as_deref().context("read-only UI")?;
         let ledger = crate::ledger::Ledger::open(root)?;
@@ -1446,8 +1432,8 @@ async fn erase(Cur(s): Cur, Json(b): Json<EraseBody>) -> impl IntoResponse {
         anyhow::Ok(format!("deleted {} record(s)", gone.len()))
     };
     match run.await {
-        Ok(msg) => (StatusCode::OK, Json(json!({"ok": true, "message": msg}))),
-        Err(e) => error_body(StatusCode::BAD_REQUEST, error_text(&e)),
+        Ok(msg) => Ok(Json(api::Done::new(msg))),
+        Err(e) => Err(bad(e)),
     }
 }
 
@@ -1564,17 +1550,11 @@ mod tests {
             ..Default::default()
         };
         let g = neighbourhood(&z);
-        assert_eq!(g["nodes"].as_array().unwrap().len(), 3);
-        let edges: Vec<(String, String)> = g["edges"]
-            .as_array()
-            .unwrap()
+        assert_eq!(g.nodes.len(), 3);
+        let edges: Vec<(String, String)> = g
+            .edges
             .iter()
-            .map(|e| {
-                (
-                    e["src"].as_str().unwrap().into(),
-                    e["dst"].as_str().unwrap().into(),
-                )
-            })
+            .map(|e| (e.src.clone(), e.dst.clone()))
             .collect();
         assert!(edges.contains(&("caller".into(), "f".into())));
         assert!(edges.contains(&("f".into(), "callee".into())));
