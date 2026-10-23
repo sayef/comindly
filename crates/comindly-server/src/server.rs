@@ -2287,4 +2287,21 @@ mod tests {
         assert!(open("key-one", "llm_api_key", &sealed, &nonce).is_none());
         assert_eq!(hint("glpat-example"), "…mple");
     }
+
+    #[test]
+    fn values_sealed_by_earlier_versions_still_open() {
+        // Sealed with chacha20poly1305 0.10.
+        let unhex = |s: &str| {
+            (0..s.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+                .collect::<Vec<u8>>()
+        };
+        let sealed = unhex("04558269f76990598e21e0fa73bff46e3b8778dc6671e982ac0d0096b4");
+        let nonce = unhex("c7063968b8df63bf60ecae5b3deba9969d937912cc1b4726");
+        assert_eq!(
+            open("fixture-key", "git:example.com", &sealed, &nonce).as_deref(),
+            Some("example-value")
+        );
+    }
 }
