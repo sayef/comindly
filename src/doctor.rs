@@ -95,9 +95,12 @@ pub fn run(cfg: &crate::config::Config, root: &str) -> Vec<Check> {
     check(
         set("OPENAI_API_KEY")
             || cfg.llm_base_url().is_some()
-            || crate::credentials::llm_key(crate::team::current().and_then(|t| t.name).as_deref())
-                .0
-                .is_some(),
+            || crate::credentials::llm_key(
+                crate::team::current().and_then(|t| t.name).as_deref(),
+                None,
+            )
+            .0
+            .is_some(),
         true,
         &format!("LLM configured (model {})", cfg.llm_model()),
         "no LLM key: summaries, flows and style guides are off (indexing works without)",

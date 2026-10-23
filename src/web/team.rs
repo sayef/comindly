@@ -43,7 +43,8 @@ pub(super) async fn get(State(app): State<Shared>) -> impl IntoResponse {
     let run = async {
         let root = root(&app).await?;
         let stored = team::load(&root).await?;
-        let key = crate::credentials::llm_key(stored.settings.name.as_deref()).1;
+        let key =
+            crate::credentials::llm_key(stored.settings.name.as_deref(), app.server.as_deref()).1;
         anyhow::Ok(json!({
             "settings": stored.settings,
             "key_source": key,
@@ -123,7 +124,7 @@ pub(super) struct Key {
 pub(super) async fn key(State(app): State<Shared>, Json(b): Json<Key>) -> impl IntoResponse {
     let run = async {
         anyhow::ensure!(
-            !crate::server::enabled(),
+            app.server.is_none(),
             "on a team server the LLM key is set under Settings → Integrations"
         );
         let root = root(&app).await?;
@@ -223,6 +224,7 @@ async fn has_index(root: &str) -> anyhow::Result<bool> {
 /// Remember `root` in the personal config and load it with its team settings.
 async fn use_location(app: &Shared, root: &str, settings: TeamSettings) -> anyhow::Result<()> {
     crate::config::update(&[("index_dir", crate::config::Setting::Text(root.to_string()))])?;
+    app.keep_config()?;
     team::set_current(settings);
     app.reload(root).await
 }

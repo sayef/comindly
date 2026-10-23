@@ -61,16 +61,11 @@ pub struct ComindlyServer {
     edges: Arc<Vec<crate::model::Edge>>,
     /// Hand results back as markdown text (default). `false` → raw JSON text.
     markdown: bool,
+    /// The key records agents write are signed with; this machine's in local mode.
+    signer: Option<std::path::PathBuf>,
 }
 
 impl ComindlyServer {
-    /// This machine's signing key for records agents write locally; none on a server.
-    fn signer(&self) -> Option<std::path::PathBuf> {
-        (!crate::server::enabled())
-            .then(crate::config::local_signing_key)
-            .flatten()
-    }
-
     /// The index root holding `_graph` and `_ledger`.
     fn ledger_root(&self) -> String {
         self.uri
@@ -175,7 +170,7 @@ impl ComindlyServer {
             .map(|(k, v)| (k, serde_json::Value::String(v)))
             .collect();
         crate::ledger::Ledger::open(&self.ledger_root())?
-            .signed_by(self.signer())
+            .signed_by(self.signer.clone())
             .put(&rec)
             .await?;
         self.wrote(&rec).await;
@@ -192,7 +187,8 @@ impl ComindlyServer {
         p: ReviewParam,
         by: crate::ledger::Provenance,
     ) -> anyhow::Result<String> {
-        let ledger = crate::ledger::Ledger::open(&self.ledger_root())?.signed_by(self.signer());
+        let ledger =
+            crate::ledger::Ledger::open(&self.ledger_root())?.signed_by(self.signer.clone());
         let records = self.records().await;
         anyhow::ensure!(
             p.id.len() >= 6,
@@ -1439,10 +1435,9 @@ fn md_guide(d: &GuideDto) -> String {
 /// client disconnects. `markdown` controls whether tool results are handed back as markdown
 /// text (default) or raw JSON.
 pub async fn serve_stdio(uri: &str, markdown: bool) -> Result<()> {
-    let service = load(uri, markdown)
-        .await?
-        .serve(rmcp::transport::io::stdio())
-        .await?;
+    let mut server = load(uri, markdown).await?;
+    server.signer = crate::config::local_signing_key();
+    let service = server.serve(rmcp::transport::io::stdio()).await?;
     service.waiting().await?;
     Ok(())
 }
@@ -1528,6 +1523,7 @@ pub async fn load(uri: &str, markdown: bool) -> Result<ComindlyServer> {
         conventions: Arc::new(conventions),
         edges: Arc::new(edges),
         markdown,
+        signer: None,
     };
     Ok(server)
 }

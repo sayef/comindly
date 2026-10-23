@@ -11,7 +11,7 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::{Cur, Shared};
+use super::{Cur, Shared, Srv};
 use std::sync::Arc;
 
 use crate::config::{Config, RepoEntry};
@@ -210,7 +210,7 @@ pub(super) struct Change {
 }
 
 /// Add and remove repositories (folders); removed ones lose comindly's worktree, not your folder.
-pub(super) async fn change(Json(c): Json<Change>) -> impl IntoResponse {
+pub(super) async fn change(State(app): State<Shared>, Json(c): Json<Change>) -> impl IntoResponse {
     let run = tokio::task::spawn_blocking(move || {
         let mut list = Config::load().repos;
         for p in &c.add {
@@ -232,6 +232,7 @@ pub(super) async fn change(Json(c): Json<Change>) -> impl IntoResponse {
             !drop
         });
         crate::config::set_repos(&list)?;
+        app.keep_config()?;
         anyhow::Ok(list.len())
     })
     .await;
@@ -358,7 +359,7 @@ pub(super) async fn begin(
         settings.guide = false;
     }
     let client = if settings.enrich || settings.flows || settings.guide {
-        let key = crate::credentials::llm_key(team.name.as_deref()).0;
+        let key = crate::credentials::llm_key(team.name.as_deref(), app.server.as_deref()).0;
         crate::llm::LlmClient::new(
             settings.llm_base_url.as_deref(),
             &settings.llm_model,
@@ -371,7 +372,7 @@ pub(super) async fn begin(
     let scip = cfg.scip();
     let mut ctx = crate::context::IndexContext::new(root.clone(), settings, log.clone())
         .with_llm(client)
-        .with_git(crate::config::git_credentials());
+        .with_git(crate::config::git_credentials(app.server.clone()));
     ctx.cancel = cancel;
     let app2 = app.clone();
     tokio::spawn(async move {
@@ -443,7 +444,7 @@ async fn moved(app: &Shared) -> anyhow::Result<Vec<String>> {
         .await
         .unwrap_or_default();
     let repos = Config::load().repos;
-    let creds = crate::config::git_credentials();
+    let creds = crate::config::git_credentials(app.server.clone());
     tokio::task::spawn_blocking(move || {
         let mut out = Vec::new();
         for r in &repos {
@@ -491,6 +492,7 @@ pub(super) struct RemoteListQ {
 
 /// The repositories of a GitHub organisation or GitLab group, with the ones already here marked.
 pub(super) async fn remote_list(
+    Srv(server): Srv,
     who: Option<axum::Extension<crate::server::Who>>,
     Json(q): Json<RemoteListQ>,
 ) -> impl IntoResponse {
@@ -510,15 +512,17 @@ pub(super) async fn remote_list(
         let auth = match given.clone() {
             Some(a) => Some(a),
             None => {
+                let server = server.clone();
                 tokio::task::spawn_blocking(move || {
-                    let token = crate::config::git_credentials().token(&host);
+                    let local = server.is_none();
+                    let token = crate::config::git_credentials(server).token(&host);
                     match token {
                         Some(token) => Some(worktree::Auth {
                             username: worktree::token_user(&host).into(),
                             token,
                         }),
-                        None if crate::server::enabled() => None,
-                        None => worktree::helper_auth(&host),
+                        None if local => worktree::helper_auth(&host),
+                        None => None,
                     }
                 })
                 .await?
@@ -528,11 +532,13 @@ pub(super) async fn remote_list(
         let mut warning = None;
         if let Some(a) = given {
             let host = source.host.clone();
-            match (crate::server::store(), who) {
-                (Some(store), Some(w)) => {
-                    if let Err(e) =
-                        store.set_secret(&w.email, &crate::server::git_secret(&host), &a.token)
-                    {
+            match (&server, who) {
+                (Some(server), Some(w)) => {
+                    if let Err(e) = server.store.set_secret(
+                        &w.email,
+                        &crate::server::git_secret(&host),
+                        &a.token,
+                    ) {
                         warning = Some(format!("the token worked but was not kept: {e:#}"));
                     }
                 }
@@ -588,7 +594,11 @@ pub(super) struct RemoteAddQ {
 }
 
 /// Add repositories by clone URL; comindly clones them into its own folder when indexing.
-pub(super) async fn remote_add(Cur(s): Cur, Json(q): Json<RemoteAddQ>) -> impl IntoResponse {
+pub(super) async fn remote_add(
+    State(app): State<Shared>,
+    Cur(s): Cur,
+    Json(q): Json<RemoteAddQ>,
+) -> impl IntoResponse {
     let run = async {
         let mut list = Config::load().repos;
         let mut added = 0;
@@ -605,6 +615,7 @@ pub(super) async fn remote_add(Cur(s): Cur, Json(q): Json<RemoteAddQ>) -> impl I
             }
         }
         crate::config::set_repos(&list)?;
+        app.keep_config()?;
         let mut shared = 0;
         if q.share {
             let root = s.data.root.clone().context("no index to share with")?;

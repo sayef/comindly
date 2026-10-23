@@ -12,22 +12,8 @@ use lancedb::arrow::arrow_array::{RecordBatch, RecordBatchIterator, StringArray}
 use lancedb::arrow::arrow_schema::{DataType, Field, Schema};
 use serde::{Deserialize, Serialize};
 
-/// `NAME` from the environment, or the contents of the file `NAME_FILE` names; read once.
+/// `NAME` from the environment, or the contents of the file `NAME_FILE` names.
 pub fn env_secret(name: &str) -> Option<String> {
-    static READ: std::sync::OnceLock<Mutex<std::collections::HashMap<String, Option<String>>>> =
-        std::sync::OnceLock::new();
-    let cache = READ.get_or_init(Default::default);
-    if let Some(v) = cache.lock().ok().and_then(|c| c.get(name).cloned()) {
-        return v;
-    }
-    let value = read_secret(name);
-    if let Ok(mut c) = cache.lock() {
-        c.insert(name.to_string(), value.clone());
-    }
-    value
-}
-
-fn read_secret(name: &str) -> Option<String> {
     if let Some(v) = std::env::var(name).ok().filter(|v| !v.trim().is_empty()) {
         return Some(v.trim().to_string());
     }
@@ -41,52 +27,139 @@ fn read_secret(name: &str) -> Option<String> {
     }
 }
 
-/// The address members reach this server at, without a trailing slash.
-pub fn public_url() -> Option<String> {
-    env_secret("COMINDLY_PUBLIC_URL").map(|u| u.trim_end_matches('/').to_string())
+/// The deployment's settings for server mode, read once when the server starts.
+#[derive(Clone)]
+pub struct ServerConfig {
+    /// The address members reach this server at, without a trailing slash.
+    pub public_url: String,
+    /// Always admins, whatever the database says.
+    pub admin_emails: Vec<String>,
+    pub sign_in: SignIn,
+    pub admin_token: Option<String>,
+    pub secret_key: String,
+    pub secret_key_previous: Option<String>,
+    pub smtp_url: Option<String>,
+    pub smtp_from: String,
+    /// Take the client address from `X-Forwarded-For`, behind a proxy you run.
+    pub trust_proxy: bool,
+    /// The deployment's LLM key, which wins over one stored here.
+    pub llm_key: Option<String>,
 }
 
-pub fn enabled() -> bool {
-    public_url().is_some()
+impl ServerConfig {
+    /// `None` without `COMINDLY_PUBLIC_URL`; an error when server mode is set up wrong.
+    pub fn from_env() -> Result<Option<ServerConfig>> {
+        let Some(url) = env_secret("COMINDLY_PUBLIC_URL") else {
+            return Ok(None);
+        };
+        let admin_emails: Vec<String> = env_secret("COMINDLY_ADMIN_EMAILS")
+            .unwrap_or_default()
+            .split([',', ' ', '\n'])
+            .map(normalize)
+            .filter(|e| e.contains('@'))
+            .collect();
+        anyhow::ensure!(
+            !admin_emails.is_empty(),
+            "server mode needs COMINDLY_ADMIN_EMAILS: who administers this server"
+        );
+        let admin_token = env_secret("COMINDLY_ADMIN_TOKEN");
+        if let Some(t) = &admin_token {
+            anyhow::ensure!(
+                t.len() >= 32,
+                "COMINDLY_ADMIN_TOKEN is too short: use at least 32 random characters (e.g. `openssl rand -base64 32`)"
+            );
+        }
+        let smtp_url = env_secret("COMINDLY_SMTP_URL");
+        let sign_in = match env_secret("COMINDLY_SIGN_IN").as_deref() {
+            Some("email") => {
+                anyhow::ensure!(
+                    smtp_url.is_some(),
+                    "COMINDLY_SIGN_IN=email needs COMINDLY_SMTP_URL"
+                );
+                SignIn::Email
+            }
+            Some("code") => SignIn::Code,
+            Some(other) => bail!("COMINDLY_SIGN_IN is `email` or `code`, not `{other}`"),
+            None if smtp_url.is_some() => SignIn::Email,
+            None => SignIn::Code,
+        };
+        Ok(Some(ServerConfig {
+            public_url: url.trim_end_matches('/').to_string(),
+            admin_emails,
+            sign_in,
+            admin_token,
+            secret_key: env_secret("COMINDLY_SECRET_KEY")
+                .context("server mode needs COMINDLY_SECRET_KEY")?,
+            secret_key_previous: env_secret("COMINDLY_SECRET_KEY_PREVIOUS"),
+            smtp_url,
+            smtp_from: env_secret("COMINDLY_SMTP_FROM")
+                .unwrap_or_else(|| "comindly <comindly@localhost>".into()),
+            trust_proxy: env_secret("COMINDLY_TRUST_PROXY")
+                .is_some_and(|v| v == "true" || v == "1"),
+            llm_key: env_secret("OPENAI_API_KEY"),
+        }))
+    }
+
+    pub fn https(&self) -> bool {
+        self.public_url.starts_with("https://")
+    }
 }
 
-/// Admins named by the deployment; always admins, whatever the database says.
-pub fn admin_emails() -> Vec<String> {
-    env_secret("COMINDLY_ADMIN_EMAILS")
-        .unwrap_or_default()
-        .split([',', ' ', '\n'])
-        .map(normalize)
-        .filter(|e| e.contains('@'))
-        .collect()
+/// A running server: its settings and its accounts.
+pub struct Server {
+    pub config: ServerConfig,
+    pub store: Store,
 }
 
-/// How members sign in: everything by email, or everything by codes admins hand out.
+impl Server {
+    /// Open the server's table under `index_root`.
+    pub fn open(index_root: &str, config: ServerConfig) -> Result<Server> {
+        let store = Store::open(index_root, &config)?;
+        Ok(Server { config, store })
+    }
+
+    /// A git host's token: the deployment's, else the one stored here.
+    pub fn git_token(&self, host: &str) -> Option<String> {
+        crate::config::env_token(host).or_else(|| self.store.secret(&git_secret(host)))
+    }
+
+    /// Send a plain-text email through `COMINDLY_SMTP_URL` (e.g. `smtps://user:pass@host`).
+    pub async fn send_mail(&self, to: &str, subject: &str, body: &str) -> Result<()> {
+        use lettre::message::header::ContentType;
+        use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
+        let url = self
+            .config
+            .smtp_url
+            .as_deref()
+            .context("no mail server configured")?;
+        let msg = Message::builder()
+            .from(
+                self.config
+                    .smtp_from
+                    .parse()
+                    .context("COMINDLY_SMTP_FROM is not an address")?,
+            )
+            .to(to.parse().context("not an email address")?)
+            .subject(subject)
+            .header(ContentType::TEXT_PLAIN)
+            .body(body.to_string())?;
+        AsyncSmtpTransport::<Tokio1Executor>::from_url(url)
+            .context("COMINDLY_SMTP_URL is not a valid smtp:// or smtps:// URL")?
+            .build()
+            .send(msg)
+            .await
+            .map_err(|e| anyhow::anyhow!("sending mail failed: {e}"))?;
+        Ok(())
+    }
+}
+
+/// How members sign in: everything by email, or everything by codes admins hand out. Email when
+/// the server can send it, else codes; `COMINDLY_SIGN_IN=email|code` decides when set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SignIn {
     Email,
     Code,
-}
-
-/// Email when the server can send it, else codes; `COMINDLY_SIGN_IN=email|code` decides when set.
-pub fn sign_in() -> Result<SignIn> {
-    match env_secret("COMINDLY_SIGN_IN").as_deref() {
-        Some("email") => {
-            anyhow::ensure!(
-                mail_configured(),
-                "COMINDLY_SIGN_IN=email needs COMINDLY_SMTP_URL"
-            );
-            Ok(SignIn::Email)
-        }
-        Some("code") => Ok(SignIn::Code),
-        Some(other) => bail!("COMINDLY_SIGN_IN is `email` or `code`, not `{other}`"),
-        None if mail_configured() => Ok(SignIn::Email),
-        None => Ok(SignIn::Code),
-    }
-}
-
-pub fn mode() -> SignIn {
-    sign_in().unwrap_or(SignIn::Code)
 }
 
 pub fn normalize(email: &str) -> String {
@@ -518,6 +591,11 @@ pub struct Store {
     uri: String,
     /// Row keys from `COMINDLY_SECRET_KEY`, then `COMINDLY_SECRET_KEY_PREVIOUS`.
     keys: Vec<[u8; 32]>,
+    /// Seals stored secrets; the previous one still opens them until they are sealed again.
+    key: String,
+    previous: Option<String>,
+    admins: Vec<String>,
+    admin_token: Option<String>,
     state: Mutex<State>,
     /// The table version `state` reflects, and when it was last compared with the table.
     seen: Mutex<(u64, chrono::DateTime<Utc>)>,
@@ -527,11 +605,15 @@ pub struct Store {
 
 impl Store {
     /// The server's table under the index location (`<index>/_server`), created when missing.
-    pub fn open(index_root: &str) -> Result<Store> {
-        let key =
-            env_secret("COMINDLY_SECRET_KEY").context("server mode needs COMINDLY_SECRET_KEY")?;
-        let previous = env_secret("COMINDLY_SECRET_KEY_PREVIOUS");
-        Store::open_keyed(index_root, &key, previous.as_deref())
+    pub fn open(index_root: &str, config: &ServerConfig) -> Result<Store> {
+        let mut store = Store::open_keyed(
+            index_root,
+            &config.secret_key,
+            config.secret_key_previous.as_deref(),
+        )?;
+        store.admins = config.admin_emails.clone();
+        store.admin_token = config.admin_token.clone();
+        Ok(store)
     }
 
     fn open_keyed(index_root: &str, key: &str, previous: Option<&str>) -> Result<Store> {
@@ -550,7 +632,7 @@ impl Store {
         Ok(store)
     }
 
-    /// The table as it is, without the server's upkeep; for processes a server starts.
+    /// The table as it is, without the server's upkeep.
     fn attach_keyed(index_root: &str, key: &str, previous: Option<&str>) -> Result<Store> {
         let uri = format!("{}/_server", index_root.trim_end_matches('/'));
         let store = Store {
@@ -560,6 +642,10 @@ impl Store {
                 .flatten()
                 .map(mac_key)
                 .collect(),
+            key: key.to_string(),
+            previous: previous.map(str::to_string),
+            admins: Vec::new(),
+            admin_token: None,
             state: Mutex::new(State::default()),
             seen: Mutex::new((0, Utc::now())),
             writing: Mutex::new(()),
@@ -681,13 +767,10 @@ impl Store {
 
     /// Names of stored secrets the current key cannot open.
     fn unreadable_secrets(&self) -> Vec<String> {
-        let Some(key) = env_secret("COMINDLY_SECRET_KEY") else {
-            return Vec::new();
-        };
         self.state()
             .secrets
             .iter()
-            .filter(|(n, s)| unseal(&key, n, s).is_none())
+            .filter(|(n, s)| unseal(&self.key, n, s).is_none())
             .map(|(n, _)| n.clone())
             .collect()
     }
@@ -726,7 +809,7 @@ impl Store {
     /// The member `email`, with deployment admins always present and admin.
     pub fn member(&self, email: &str) -> Result<Option<Who>> {
         let email = normalize(email);
-        if admin_emails().contains(&email) {
+        if self.admins.contains(&email) {
             return Ok(Some(Who {
                 email,
                 role: Role::Admin,
@@ -737,7 +820,7 @@ impl Store {
     }
 
     pub fn members(&self) -> Result<Vec<Member>> {
-        let admins = admin_emails();
+        let admins = self.admins.clone();
         let st = self.state();
         let mut out: Vec<Member> = st
             .users
@@ -772,7 +855,7 @@ impl Store {
 
     pub fn set_role(&self, by: &str, email: &str, role: Role) -> Result<()> {
         let email = normalize(email);
-        if admin_emails().contains(&email) {
+        if self.admins.contains(&email) {
             bail!("{email} is an admin by the deployment's settings");
         }
         let _w = self.write_lock();
@@ -787,7 +870,7 @@ impl Store {
     /// Remove a member with their sessions, tokens and invitations.
     pub fn remove(&self, by: &str, email: &str) -> Result<()> {
         let email = normalize(email);
-        if admin_emails().contains(&email) {
+        if self.admins.contains(&email) {
             bail!("{email} is an admin by the deployment's settings");
         }
         let _w = self.write_lock();
@@ -944,11 +1027,12 @@ impl Store {
             self.failures(&from) < MAX_REDEEM_FAILED,
             "Too many attempts from here; try again in {LOCK_MINUTES} minutes"
         );
-        if let Some(admin) = env_secret("COMINDLY_ADMIN_TOKEN") {
-            if constant_eq(token, &admin) {
-                let email = admin_emails()
-                    .into_iter()
-                    .next()
+        if let Some(admin) = &self.admin_token {
+            if constant_eq(token, admin) {
+                let email = self
+                    .admins
+                    .first()
+                    .cloned()
                     .context("set COMINDLY_ADMIN_EMAILS to sign in with the admin token")?;
                 self.audit(&email, "sign-in", "admin token");
                 return self.session_for(&email);
@@ -1076,7 +1160,7 @@ impl Store {
         let email = normalize(email);
         anyhow::ensure!(self.member(&email)?.is_some(), "{email} is not a member");
         anyhow::ensure!(
-            by == email || !admin_emails().contains(&email),
+            by == email || !self.admins.contains(&email),
             "{email} is an admin by the deployment's settings and resets their own code"
         );
         let code = new_code();
@@ -1136,11 +1220,12 @@ impl Store {
         }
         if found.is_none() {
             if let Some(b) = bearer {
-                if env_secret("COMINDLY_ADMIN_TOKEN").is_some_and(|a| constant_eq(b, &a)) {
-                    found = admin_emails()
-                        .into_iter()
-                        .next()
-                        .map(|e| (e, Via::AdminToken));
+                if self
+                    .admin_token
+                    .as_deref()
+                    .is_some_and(|a| constant_eq(b, a))
+                {
+                    found = self.admins.first().map(|e| (e.clone(), Via::AdminToken));
                 } else {
                     let h = hash(b);
                     let st = self.state();
@@ -1257,18 +1342,15 @@ impl Store {
             self.audit(by, "secret-removed", name);
             return Ok(());
         }
-        let key = env_secret("COMINDLY_SECRET_KEY")
-            .context("set COMINDLY_SECRET_KEY on the server to store tokens here")?;
-        let row = sealed(&key, name, value, by)?;
+        let row = sealed(&self.key, name, value, by)?;
         self.commit(vec![put("secret", name, &row)])?;
         self.audit(by, "secret-set", name);
         Ok(())
     }
 
     pub fn secret(&self, name: &str) -> Option<String> {
-        let key = env_secret("COMINDLY_SECRET_KEY")?;
         let row = self.state().secrets.get(name).cloned()?;
-        unseal(&key, name, &row)
+        unseal(&self.key, name, &row)
     }
 
     pub fn secret_info(&self, name: &str) -> Option<SecretInfo> {
@@ -1288,10 +1370,7 @@ impl Store {
 
     /// Re-seal secrets stored under `COMINDLY_SECRET_KEY_PREVIOUS` with the current key.
     fn rotate_key(&self) -> Result<()> {
-        let (Some(key), Some(old)) = (
-            env_secret("COMINDLY_SECRET_KEY"),
-            env_secret("COMINDLY_SECRET_KEY_PREVIOUS"),
-        ) else {
+        let (key, Some(old)) = (self.key.clone(), self.previous.clone()) else {
             return Ok(());
         };
         let rows: Vec<(String, Secret)> = self
@@ -1373,75 +1452,12 @@ fn valid_email(email: &str) -> bool {
     email.contains('@') && !email.contains(|c: char| c.is_whitespace() || c == '|')
 }
 
-static STORE: std::sync::OnceLock<Store> = std::sync::OnceLock::new();
-
-/// Open the server's table under `index_root`; done once when a server starts.
-pub fn init(index_root: &str) -> Result<&'static Store> {
-    if let Some(s) = STORE.get() {
-        return Ok(s);
-    }
-    let store = Store::open(index_root)?;
-    Ok(STORE.get_or_init(|| store))
-}
-
-/// The store, when this process runs as a server or was started by one (indexing).
-pub fn store() -> Option<&'static Store> {
-    static ATTACHED: std::sync::OnceLock<Option<Store>> = std::sync::OnceLock::new();
-    STORE.get().or_else(|| {
-        ATTACHED
-            .get_or_init(|| {
-                let key = env_secret("COMINDLY_SECRET_KEY").filter(|_| enabled())?;
-                let root = crate::config::Config::load().index_dir(None);
-                let previous = env_secret("COMINDLY_SECRET_KEY_PREVIOUS");
-                Store::attach_keyed(&root, &key, previous.as_deref())
-                    .map_err(|e| crate::ui::warn(&format!("the server's stored keys: {e:#}")))
-                    .ok()
-            })
-            .as_ref()
-    })
-}
-
 /// Secret names for a git host's token and for the LLM key.
 pub fn git_secret(host: &str) -> String {
     format!("git:{}", host.to_lowercase())
 }
 
 pub const LLM_SECRET: &str = "llm_api_key";
-
-/// A git host's token stored on this server.
-pub fn git_token(host: &str) -> Option<String> {
-    store()?.secret(&git_secret(host))
-}
-
-/// Whether sign-in links and invitations can be emailed.
-pub fn mail_configured() -> bool {
-    env_secret("COMINDLY_SMTP_URL").is_some()
-}
-
-/// Send a plain-text email through `COMINDLY_SMTP_URL` (e.g. `smtps://user:pass@host`).
-pub async fn send_mail(to: &str, subject: &str, body: &str) -> Result<()> {
-    use lettre::message::header::ContentType;
-    use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
-    let url = env_secret("COMINDLY_SMTP_URL").context("no mail server configured")?;
-    let from =
-        env_secret("COMINDLY_SMTP_FROM").unwrap_or_else(|| "comindly <comindly@localhost>".into());
-    let msg = Message::builder()
-        .from(
-            from.parse()
-                .context("COMINDLY_SMTP_FROM is not an address")?,
-        )
-        .to(to.parse().context("not an email address")?)
-        .subject(subject)
-        .header(ContentType::TEXT_PLAIN)
-        .body(body.to_string())?;
-    AsyncSmtpTransport::<Tokio1Executor>::from_url(&url)
-        .context("COMINDLY_SMTP_URL is not a valid smtp:// or smtps:// URL")?
-        .build()
-        .send(msg)
-        .await
-        .map_err(|e| anyhow::anyhow!("sending mail failed: {e}"))?;
-    Ok(())
-}
 
 #[cfg(test)]
 mod tests {

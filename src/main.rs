@@ -1478,28 +1478,24 @@ fn cmd_ui(from: Option<&str>, web: Option<(String, u16)>, open: bool) -> ExitCod
             let addr = format!("{host}:{port}");
             let listener =
                 std::net::TcpListener::bind(&addr).with_context(|| format!("bind {addr}"))?;
-            if let Some(url) = comindly::server::public_url() {
-                anyhow::ensure!(
-                    !comindly::server::admin_emails().is_empty(),
-                    "server mode needs COMINDLY_ADMIN_EMAILS: who administers this server"
-                );
-                let sign_in = comindly::server::sign_in()?;
-                if let Some(t) = comindly::server::env_secret("COMINDLY_ADMIN_TOKEN") {
-                    anyhow::ensure!(
-                        t.len() >= 32,
-                        "COMINDLY_ADMIN_TOKEN is too short: use at least 32 random characters (e.g. `openssl rand -base64 32`)"
-                    );
-                }
-                let store = comindly::server::init(&root).context("open the server table")?;
+            if let Some(cfg) = comindly::server::ServerConfig::from_env()? {
+                let (url, sign_in) = (cfg.public_url.clone(), cfg.sign_in);
+                let server =
+                    comindly::server::Server::open(&root, cfg).context("open the server table")?;
+                let store = &server.store;
                 let config = comindly::config::config_path();
                 // The kept copy is the server's settings; the file is what commands read.
                 match store.kept_config() {
                     Some(kept) => {
                         std::fs::create_dir_all(config.parent().context("config dir")?)?;
                         std::fs::write(&config, kept)?;
-                        comindly::ui::note("settings and repository list loaded from the index location");
+                        comindly::ui::note(
+                            "settings and repository list loaded from the index location",
+                        );
                     }
-                    None if config.exists() => store.keep_config(&std::fs::read_to_string(&config)?)?,
+                    None if config.exists() => {
+                        store.keep_config(&std::fs::read_to_string(&config)?)?
+                    }
                     None => {}
                 }
                 comindly::ui::ok(&format!("comindly server for {url}, listening on {addr}"));
@@ -1507,7 +1503,11 @@ fn cmd_ui(from: Option<&str>, web: Option<(String, u16)>, open: bool) -> ExitCod
                     comindly::server::SignIn::Email => "members sign in by email",
                     comindly::server::SignIn::Code => "members sign in with codes admins hand out",
                 });
-                return comindly::web::serve(data, listener, comindly::web::Access::Server);
+                return comindly::web::serve(
+                    data,
+                    listener,
+                    comindly::web::Access::Server(Arc::new(server)),
+                );
             }
             let token = comindly::config::ui_token()?;
             let url = format!("http://localhost:{port}/?token={token}");
@@ -1714,7 +1714,7 @@ fn team_run(what: Option<TeamWhat>, root: &str) -> anyhow::Result<()> {
                 "not set",
             );
             show("format", s.format.clone(), "md");
-            let source = match comindly::credentials::llm_key(s.name.as_deref()).1 {
+            let source = match comindly::credentials::llm_key(s.name.as_deref(), None).1 {
                 comindly::credentials::Source::Team => "your key for this team (credentials file)",
                 comindly::credentials::Source::Default => "your default key (credentials file)",
                 comindly::credentials::Source::Environment => "OPENAI_API_KEY",
@@ -1825,7 +1825,10 @@ fn cmd_join(index: &str) -> ExitCode {
         comindly::config::update(&[("index_dir", comindly::config::Setting::Text(root.clone()))])?;
         let name = stored.settings.name.clone();
         comindly::ui::ok(&format!("joined {}", name.as_deref().unwrap_or(&root)));
-        if comindly::credentials::llm_key(name.as_deref()).0.is_none() {
+        if comindly::credentials::llm_key(name.as_deref(), None)
+            .0
+            .is_none()
+        {
             comindly::ui::note(
                 "for LLM steps, add your API key: `comindly team key` (or set OPENAI_API_KEY)",
             );
@@ -2554,7 +2557,7 @@ where
         settings.guide = steps.guide;
         let wants_llm = steps.enrich || steps.flows || steps.guide;
         let llm = if wants_llm {
-            comindly::config::llm_client(&settings, team.name.as_deref())
+            comindly::config::llm_client(&settings, team.name.as_deref(), None)
         } else {
             None
         };
@@ -2564,7 +2567,7 @@ where
             Arc::new(comindly::ui::Terminal::new()),
         )
         .with_llm(llm)
-        .with_git(comindly::config::git_credentials());
+        .with_git(comindly::config::git_credentials(None));
         let cancel = ctx.cancel.clone();
         tokio::spawn(async move {
             if tokio::signal::ctrl_c().await.is_ok() {

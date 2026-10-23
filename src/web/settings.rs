@@ -8,7 +8,7 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::{Cur, Shared};
+use super::{Cur, Shared, Srv};
 use crate::config::{Config, Setting};
 
 fn fail(e: anyhow::Error) -> (StatusCode, Json<Value>) {
@@ -18,12 +18,12 @@ fn fail(e: anyhow::Error) -> (StatusCode, Json<Value>) {
     )
 }
 
-pub(super) async fn get(Cur(s): Cur) -> Json<Value> {
+pub(super) async fn get(Srv(server): Srv, Cur(s): Cur) -> Json<Value> {
     let cfg = Config::load();
     let root = s.data.root.clone().unwrap_or_default();
-    let key = tokio::task::spawn_blocking(|| {
+    let key = tokio::task::spawn_blocking(move || {
         let team = crate::team::current().and_then(|t| t.name);
-        crate::credentials::llm_key(team.as_deref()).1
+        crate::credentials::llm_key(team.as_deref(), server.as_deref()).1
     })
     .await
     .unwrap_or(crate::credentials::Source::None);
@@ -96,6 +96,7 @@ pub(super) async fn save(State(app): State<Shared>, Json(c): Json<Changes>) -> i
             message = format!("saved; now showing {dir}");
         }
         crate::config::update(&changes)?;
+        app.keep_config()?;
         anyhow::Ok(message)
     };
     match run.await {

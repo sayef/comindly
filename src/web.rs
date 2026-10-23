@@ -111,6 +111,8 @@ struct AppState {
     current: RwLock<Arc<Session>>,
     job: tokio::sync::Mutex<repos::Job>,
     watch: tokio::sync::Mutex<repos::Watch>,
+    /// Members, sign-in and stored secrets, in server mode.
+    server: Option<Arc<crate::server::Server>>,
     /// What agents reach at `/mcp` on a server.
     mcp: Option<crate::mcp::Shared>,
     mcp_generation: Arc<std::sync::atomic::AtomicU64>,
@@ -129,6 +131,20 @@ impl axum::extract::FromRequestParts<Shared> for Cur {
         app: &Shared,
     ) -> std::result::Result<Self, Self::Rejection> {
         Ok(Cur(app.current.read().await.clone()))
+    }
+}
+
+/// The server, in server mode.
+struct Srv(Option<Arc<crate::server::Server>>);
+
+impl axum::extract::FromRequestParts<Shared> for Srv {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(
+        _: &mut axum::http::request::Parts,
+        app: &Shared,
+    ) -> std::result::Result<Self, Self::Rejection> {
+        Ok(Srv(app.server.clone()))
     }
 }
 
@@ -186,6 +202,15 @@ impl Session {
 }
 
 impl AppState {
+    /// A server keeps `config.toml` with its accounts, so a new container starts with it.
+    fn keep_config(&self) -> Result<()> {
+        if let Some(s) = &self.server {
+            let text = std::fs::read_to_string(crate::config::config_path()).unwrap_or_default();
+            s.store.keep_config(&text)?;
+        }
+        Ok(())
+    }
+
     /// Load the index at `root` and make it the one every request sees.
     async fn reload(&self, root: &str) -> Result<()> {
         let owned = root.to_string();
@@ -227,19 +252,23 @@ impl AppState {
 /// Who the UI lets in: whoever holds the local link's token, or signed-in members of a server.
 pub enum Access {
     Local(String),
-    Server,
+    Server(Arc<crate::server::Server>),
 }
 
 /// Serve the UI on `listener` until the process ends.
 pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Result<()> {
     let rt = crate::rt::shared();
     let root = data.root.clone();
-    let server = matches!(access, Access::Server);
+    let server = match &access {
+        Access::Server(s) => Some(s.clone()),
+        Access::Local(_) => None,
+    };
     let state = Arc::new(AppState {
         current: RwLock::new(Arc::new(rt.block_on(Session::open(data)))),
         job: Default::default(),
         watch: Default::default(),
-        mcp: server.then(Default::default),
+        mcp: server.as_ref().map(|_| Default::default()),
+        server,
         mcp_generation: Default::default(),
     });
     if let Some(root) = root {
@@ -286,7 +315,7 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
         Access::Local(token) => app
             .layer(axum::middleware::from_fn_with_state(Arc::new(token), guard))
             .layer(axum::middleware::from_fn(local_only)),
-        Access::Server => app
+        Access::Server(server) => app
             .route("/api/auth/link", post(auth::request_link))
             .route("/api/auth/redeem", post(auth::redeem))
             .route("/api/auth/code", post(auth::sign_in_code))
@@ -304,10 +333,13 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
             .merge({
                 let shared = state.mcp.clone().unwrap_or_default();
                 Router::new()
-                    .nest_service("/mcp", crate::mcp::http(shared.clone(), auth::hosts()))
+                    .nest_service(
+                        "/mcp",
+                        crate::mcp::http(shared.clone(), auth::hosts(&server.config)),
+                    )
                     .layer(axum::middleware::from_fn_with_state(shared, mcp_ready))
             })
-            .layer(axum::middleware::from_fn(auth::guard)),
+            .layer(axum::middleware::from_fn_with_state(server, auth::guard)),
     }
     .with_state(state);
     listener.set_nonblocking(true)?;
@@ -910,7 +942,7 @@ async fn packages(Cur(s): Cur) -> Json<Value> {
 }
 
 /// Setup status and how to connect agents: index location, checks, MCP tools.
-async fn setup(Cur(s): Cur) -> Json<Value> {
+async fn setup(Srv(server): Srv, Cur(s): Cur) -> Json<Value> {
     let root = s.data.root.clone().unwrap_or_default();
     let checks = {
         let root = root.clone();
@@ -930,7 +962,7 @@ async fn setup(Cur(s): Cur) -> Json<Value> {
         "version": env!("CARGO_PKG_VERSION"),
         "checks": checks,
         "tools": tools,
-        "agents": if crate::server::enabled() { Vec::new() } else { crate::doctor::agents() },
+        "agents": if server.is_some() { Vec::new() } else { crate::doctor::agents() },
     }))
 }
 

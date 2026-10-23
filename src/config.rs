@@ -60,14 +60,9 @@ pub struct RepoEntry {
     pub remote: Option<String>,
 }
 
-/// Write `config.toml`; a server also keeps it with its accounts, so a new container starts with it.
 fn write_config(path: &Path, text: &str) -> Result<()> {
     std::fs::create_dir_all(path.parent().context("config dir")?)?;
-    std::fs::write(path, text).with_context(|| format!("write {}", path.display()))?;
-    if let Some(store) = crate::server::store() {
-        store.keep_config(text)?;
-    }
-    Ok(())
+    std::fs::write(path, text).with_context(|| format!("write {}", path.display()))
 }
 
 /// Replace the repository list in `config.toml`.
@@ -378,12 +373,13 @@ pub async fn index_settings(root: &str) -> crate::context::Settings {
     crate::context::Settings::resolve(&team, &Config::load())
 }
 
-/// An LLM client for `settings`, with the key for `team` from this machine or this server.
+/// An LLM client for `settings`, with the key for `team` from this machine or `server`.
 pub fn llm_client(
     settings: &crate::context::Settings,
     team: Option<&str>,
+    server: Option<&crate::server::Server>,
 ) -> Option<crate::llm::LlmClient> {
-    let key = crate::credentials::llm_key(team).0;
+    let key = crate::credentials::llm_key(team, server).0;
     crate::llm::LlmClient::new(
         settings.llm_base_url.as_deref(),
         &settings.llm_model,
@@ -445,13 +441,12 @@ pub fn env_token(host: &str) -> Option<String> {
 }
 
 /// Git tokens for indexing: the deployment's, then on a server the ones stored there.
-pub fn git_credentials() -> std::sync::Arc<dyn crate::worktree::Credentials> {
-    std::sync::Arc::new(|host: &str| {
-        env_token(host).or_else(|| {
-            crate::server::enabled()
-                .then(|| crate::server::git_token(host))
-                .flatten()
-        })
+pub fn git_credentials(
+    server: Option<std::sync::Arc<crate::server::Server>>,
+) -> std::sync::Arc<dyn crate::worktree::Credentials> {
+    std::sync::Arc::new(move |host: &str| match &server {
+        Some(s) => s.git_token(host),
+        None => env_token(host),
     })
 }
 
