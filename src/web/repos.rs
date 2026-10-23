@@ -250,9 +250,9 @@ pub(super) async fn start(
 ) -> impl IntoResponse {
     let by = who.map(|w| w.email.clone());
     match begin(&app, q.llm, q.drop_unlisted, None, by).await {
-        Ok(()) => (
+        Ok(id) => (
             StatusCode::OK,
-            Json(json!({"ok": true, "message": "indexing started"})),
+            Json(json!({"ok": true, "message": "indexing started", "id": id})),
         ),
         Err(e) => fail(e),
     }
@@ -266,7 +266,7 @@ pub(super) async fn begin(
     drop_unlisted: bool,
     why: Option<String>,
     by: Option<String>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<String> {
     let session = app.current.read().await.clone();
     let root = session.data.root.clone().context("read-only UI")?;
     if !drop_unlisted {
@@ -312,7 +312,7 @@ pub(super) async fn begin(
     let scip = settings.scip;
     let git = crate::config::git_credentials(app.server.clone());
     let app2 = app.clone();
-    app.jobs.start("index", by, move |job| {
+    let job = app.jobs.start("index", by, move |job| {
         if let Some(w) = why {
             job.emit(Event::new(Level::Info, Kind::Note, w));
         }
@@ -348,7 +348,7 @@ pub(super) async fn begin(
             }
         })
     })?;
-    Ok(())
+    Ok(job.record().id)
 }
 
 /// What the automatic re-index last found.
@@ -372,7 +372,7 @@ pub(super) async fn watch(app: Shared) {
             Ok(m) => {
                 let why = format!("Automatic re-index: {} moved", m.join(", "));
                 match begin(&app, false, false, Some(why.clone()), None).await {
-                    Ok(()) => why,
+                    Ok(_) => why,
                     Err(e) => format!("{why}, not started: {e:#}"),
                 }
             }

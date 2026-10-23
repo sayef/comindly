@@ -18,6 +18,7 @@ use crate::graph::{Node, Zoom};
 use crate::ledger::{Entry, Provenance, Record, RelationKind, Status};
 use crate::tui::Data;
 
+mod answers;
 mod auth;
 mod flows;
 mod jobs;
@@ -373,6 +374,13 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
         .route("/api/v1/index", get(repos::job).post(repos::start))
         .route("/api/v1/index/cancel", post(repos::cancel))
         .route("/api/v1/index/watch", get(repos::watch_state))
+        .route("/api/v1/answer/find", get(answers::find))
+        .route("/api/v1/answer/search", get(answers::search))
+        .route("/api/v1/answer/why", get(answers::why))
+        .route("/api/v1/answer/ledger", get(answers::ledger))
+        .route("/api/v1/answer/flow", get(answers::flow))
+        .route("/api/v1/answer/contracts", get(answers::contracts))
+        .route("/api/v1/answer/conventions", get(answers::conventions))
         .route("/api/v1/jobs", get(jobs::list))
         .route("/api/v1/jobs/{id}", get(jobs::one))
         .route("/api/v1/jobs/{id}/events", get(jobs::events))
@@ -1184,24 +1192,42 @@ fn identity(who: Option<&crate::server::Who>) -> crate::ledger::Identity {
 
 type Member = Option<axum::Extension<crate::server::Who>>;
 
+/// Records written here are signed with this machine's key in local mode; a server does not sign.
+fn signer(who: Option<&crate::server::Who>) -> Option<std::path::PathBuf> {
+    who.is_none()
+        .then(crate::config::local_signing_key)
+        .flatten()
+}
+
 async fn review(who: Member, Cur(s): Cur, Json(b): Json<ReviewBody>) -> impl IntoResponse {
-    match apply_review(&s, &b, provenance(who.as_deref())).await {
+    let signer = signer(who.as_deref());
+    match apply_review(&s, &b, provenance(who.as_deref()), signer).await {
         Ok(msg) => (StatusCode::OK, Json(json!({"ok": true, "message": msg}))),
         Err(e) => error_body(StatusCode::BAD_REQUEST, error_text(&e)),
     }
 }
 
-async fn apply_review(s: &Session, b: &ReviewBody, prov: Provenance) -> Result<String> {
+async fn apply_review(
+    s: &Session,
+    b: &ReviewBody,
+    prov: Provenance,
+    signer: Option<std::path::PathBuf>,
+) -> Result<String> {
     let root = s.data.root.as_deref().context("read-only UI")?;
     let (kind, _) = crate::ledger::review_action(&b.action).context("unknown action")?;
-    let ledger = crate::ledger::Ledger::open(root)?;
+    let ledger = crate::ledger::Ledger::open(root)?.signed_by(signer);
     let target = {
         let entries = s.entries().await;
-        entries
+        let exact = entries.iter().find(|e| e.record.id == b.id);
+        let prefixed: Vec<_> = entries
             .iter()
-            .find(|e| e.record.id == b.id)
-            .map(|e| e.record.clone())
-            .context("no such record")?
+            .filter(|e| e.record.id.starts_with(&b.id))
+            .collect();
+        match (exact, prefixed.as_slice()) {
+            (Some(e), _) | (None, &[e]) => e.record.clone(),
+            (None, []) => anyhow::bail!("no ledger record `{}`", b.id),
+            (None, _) => anyhow::bail!("`{}` matches several records; give more of the id", b.id),
+        }
     };
     if matches!(kind, RelationKind::Retracts) && target.kind == crate::ledger::Kind::Relation {
         anyhow::bail!("relations cannot be retracted");
@@ -1212,7 +1238,7 @@ async fn apply_review(s: &Session, b: &ReviewBody, prov: Provenance) -> Result<S
     let fresh = crate::ledger::derive(&records, &s.data.symbols, &crate::config::local_verifier());
     let status = fresh
         .iter()
-        .find(|e| e.record.id == b.id)
+        .find(|e| e.record.id == target.id)
         .map_or(Status::Active, |e| e.status);
     *s.entries.write().await = fresh;
     Ok(format!("{} → {:?}", target.title, status))
@@ -1260,7 +1286,7 @@ async fn remember(who: Member, Cur(s): Cur, Json(b): Json<RememberBody>) -> impl
         for (k, v) in b.fields.into_iter().filter(|(_, v)| !v.trim().is_empty()) {
             rec.fields.insert(k, Value::String(v));
         }
-        let ledger = crate::ledger::Ledger::open(root)?;
+        let ledger = crate::ledger::Ledger::open(root)?.signed_by(signer(who.as_deref()));
         ledger.put(&rec).await?;
         let records = ledger.all().await?;
         *s.entries.write().await =

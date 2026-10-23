@@ -13,6 +13,7 @@ pub mod app;
 pub mod backends;
 pub mod cache;
 pub mod checks;
+pub mod client;
 pub mod config;
 pub mod configvals;
 pub mod context;

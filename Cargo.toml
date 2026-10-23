@@ -74,7 +74,7 @@ globset = "0.4"
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
 yaml-rust2 = "0.13"
 hcl-rs = "0.19"
-reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "query"] }
 
 [profile.release]
 lto = "thin"

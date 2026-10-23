@@ -1,5 +1,6 @@
-//! `~/.config/comindly/credentials`: your LLM API keys, a default and optionally one per team name.
-//! Created readable only by you and never shared; `OPENAI_API_KEY` is the fallback.
+//! `~/.config/comindly/credentials`: your LLM API keys, a default and optionally one per team name,
+//! and the server `comindly login` signed you in to. Readable only by you and never shared;
+//! `OPENAI_API_KEY` is the fallback key.
 
 use std::path::PathBuf;
 
@@ -12,6 +13,28 @@ struct File {
     llm_api_key: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     team: Vec<Entry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    server: Option<Login>,
+}
+
+/// A server and the personal access token `comindly login` received for it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Login {
+    pub url: String,
+    pub token: String,
+    pub email: String,
+}
+
+/// The server you are signed in to, if any.
+pub fn login() -> Option<Login> {
+    read().server
+}
+
+/// Remember the server you signed in to, or forget it with `None`.
+pub fn set_login(login: Option<Login>) -> Result<()> {
+    let mut f = read();
+    f.server = login;
+    write(&f)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -89,18 +112,21 @@ pub fn set_llm_key(team: Option<&str>, key: &str) -> Result<()> {
         }
         None => f.llm_api_key = (!key.is_empty()).then(|| key.to_string()),
     }
+    write(&f)
+}
+
+fn write(f: &File) -> Result<()> {
     let p = path();
     std::fs::create_dir_all(p.parent().context("config dir")?)?;
     let text = format!(
-        "# comindly API keys: a default, and one per team name if needed. Keep this file private.\n\n{}",
-        toml::to_string(&f)?
+        "# comindly API keys and server sign-in. Keep this file private.\n\n{}",
+        toml::to_string(f)?
     );
     let tmp = p.with_extension("tmp");
-    std::fs::write(&tmp, text)?;
+    let mut open = std::fs::OpenOptions::new();
+    open.write(true).create(true).truncate(true);
     #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
-    }
+    std::os::unix::fs::OpenOptionsExt::mode(&mut open, 0o600);
+    std::io::Write::write_all(&mut open.open(&tmp)?, text.as_bytes())?;
     std::fs::rename(&tmp, &p).with_context(|| format!("write {}", p.display()))
 }

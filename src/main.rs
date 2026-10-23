@@ -10,6 +10,8 @@ use std::sync::Arc;
 
 use comindly::model::{Edge, Symbol};
 
+mod remote;
+
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 
 /// Cross-repo code intelligence for coding agents.
@@ -19,6 +21,13 @@ use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 #[derive(Parser)]
 #[command(name = "comindly", version, about, long_about = None)]
 struct Cli {
+    /// Ask this comindly server instead of a local index (default: `COMINDLY_SERVER`, else the
+    /// server `comindly login` signed you in to)
+    #[arg(long, global = true)]
+    server: Option<String>,
+    /// Use the index on this machine even when signed in to a server
+    #[arg(long, global = true, conflicts_with = "server")]
+    local: bool,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -378,6 +387,13 @@ enum Cmd {
         #[command(subcommand)]
         what: EvalWhat,
     },
+    /// Sign in to a comindly server by approving this command line in your browser
+    Login {
+        /// The server's address, e.g. https://comindly.example.com
+        url: String,
+    },
+    /// Forget the server sign-in on this machine
+    Logout,
     /// Your preferences on this machine: show, set, import, export, history
     Config {
         #[command(subcommand)]
@@ -499,6 +515,11 @@ fn main() -> ExitCode {
         Ok(c) => c,
         Err(e) => e.exit(),
     };
+    if let Some(c) = remote::client(cli.server.as_deref(), cli.local) {
+        if let Some(code) = remote::dispatch(&c, &cli.cmd) {
+            return code;
+        }
+    }
     match cli.cmd {
         Cmd::Index {
             repo,
@@ -729,6 +750,8 @@ fn main() -> ExitCode {
                 },
         } => cmd_eval_graph(&fixture, verbose, scip.as_deref(), &repo),
         Cmd::Config { action } => cmd_config(action),
+        Cmd::Login { url } => cmd_login(&url),
+        Cmd::Logout => cmd_logout(),
     }
 }
 
@@ -2397,6 +2420,66 @@ fn cmd_eval_graph(fixture: &str, verbose: bool, scip: Option<&str>, repos: &[Str
         }
     }
     ExitCode::SUCCESS
+}
+
+fn cmd_login(url: &str) -> ExitCode {
+    let url = url.trim().trim_end_matches('/').to_string();
+    let host = std::process::Command::new("hostname")
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|h| !h.is_empty())
+        .unwrap_or_else(|| "this machine".into());
+    let client = format!("comindly CLI on {host}");
+    let approved = comindly::rt::block_on(comindly::client::login(&url, &client, |link, code| {
+        comindly::ui::step(&format!("approve this sign-in in your browser: {link}"));
+        comindly::ui::field("code", code);
+        comindly::ui::note(
+            "check that the page shows the same code; waiting for approval (Ctrl-C to stop)",
+        );
+        if std::io::IsTerminal::is_terminal(&std::io::stderr()) {
+            open_in_browser(link);
+        }
+    }));
+    let saved = approved.and_then(|a| {
+        comindly::credentials::set_login(Some(comindly::credentials::Login {
+            url: url.clone(),
+            token: a.token,
+            email: a.email.clone(),
+        }))?;
+        Ok(a.email)
+    });
+    match saved {
+        Ok(email) => {
+            comindly::ui::ok(&format!("signed in to {url} as {email}"));
+            comindly::ui::note("find, search, why, ledger, flow, contracts, conventions, remember, review and link now ask the server; --local uses the index here");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            comindly::ui::err(&format!("{e:#}"));
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn cmd_logout() -> ExitCode {
+    match comindly::credentials::login() {
+        None => {
+            comindly::ui::note("not signed in to a server");
+            ExitCode::SUCCESS
+        }
+        Some(l) => match comindly::credentials::set_login(None) {
+            Ok(()) => {
+                comindly::ui::ok(&format!("signed out of {} on this machine", l.url));
+                comindly::ui::note("the access token stays valid until you revoke it in the app (Settings → Your access)");
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                comindly::ui::err(&format!("{e:#}"));
+                ExitCode::FAILURE
+            }
+        },
+    }
 }
 
 fn cmd_config(action: Option<ConfigAction>) -> ExitCode {
