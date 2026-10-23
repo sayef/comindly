@@ -413,6 +413,16 @@ export interface AccessToken {
   name: string;
   created: string;
   last_used: string | null;
+  /** `null` when the token never expires. */
+  expires: string | null;
+  expired: boolean;
+}
+
+export interface AuditEntry {
+  at: string;
+  actor: string;
+  action: string;
+  detail: string;
 }
 
 /** A token or key the server uses; its value never reaches the browser. */
@@ -443,8 +453,11 @@ export const api = {
   removeMember: (email: string) => post("/api/v1/members/remove", { email }),
   revokeInvite: (email: string) => post("/api/v1/members/revoke", { email }),
   tokens: () => get<{ tokens: AccessToken[] }>("/api/v1/tokens"),
-  createToken: (name: string) => post<Done & { token: string }>("/api/v1/tokens", { name }),
+  createToken: (name: string, expires_in_days: number | null) =>
+    post<Done & { token: string }>("/api/v1/tokens", { name, expires_in_days }),
   revokeToken: (id: string) => post("/api/v1/tokens/revoke", { id }),
+  audit: (before?: string | null) =>
+    get<{ entries: AuditEntry[]; next: string | null }>(`/api/v1/audit${before ? `?before=${encodeURIComponent(before)}` : ""}`),
   secrets: () => get<{ secrets: SecretState[]; can_store: boolean }>("/api/v1/secrets"),
   setSecret: (name: string, value: string) => post("/api/v1/secrets", { name, value }),
   overview: () => get<Overview>("/api/v1/overview"),

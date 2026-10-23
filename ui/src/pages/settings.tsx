@@ -177,6 +177,9 @@ export function SettingsShell() {
             <NavLink to="/settings/integrations" className={tab}>
               Integrations
             </NavLink>
+            <NavLink to="/settings/audit" className={tab}>
+              Audit
+            </NavLink>
           </>
         )}
         {server && (

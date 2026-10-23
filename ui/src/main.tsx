@@ -17,7 +17,7 @@ import { PackagesPage } from "@/pages/packages";
 import { RepositoriesPage } from "@/pages/repositories";
 import { SettingsPage, SettingsShell } from "@/pages/settings";
 import { SetupPage } from "@/pages/setup";
-import { AccessPage, IntegrationsPage, MembersPage } from "@/pages/access";
+import { AccessPage, AuditPage, IntegrationsPage, MembersPage } from "@/pages/access";
 import { SignInPage } from "@/pages/signin";
 import { DevicePage } from "@/pages/device";
 import { ApiError, api } from "@/lib/api";
@@ -79,6 +79,7 @@ createRoot(document.getElementById("root")!).render(
                     <Route path="repositories" element={<RepositoriesPage />} />
                     <Route path="members" element={<MembersPage />} />
                     <Route path="integrations" element={<IntegrationsPage />} />
+                    <Route path="audit" element={<AuditPage />} />
                     <Route path="access" element={<AccessPage />} />
                   </Route>
                   <Route path="repositories" element={<Navigate to="/settings/repositories" replace />} />
