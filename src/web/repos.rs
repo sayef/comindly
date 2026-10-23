@@ -224,7 +224,7 @@ pub(super) async fn change(State(app): State<Shared>, Json(c): Json<Change>) -> 
         list.retain(|r| {
             let drop = gone.contains(&absolute(&r.path));
             if drop {
-                let _ = worktree::remove(Path::new(&r.path));
+                let _ = worktree::remove(&crate::config::cache_dir(), Path::new(&r.path));
             }
             !drop
         });
@@ -368,9 +368,14 @@ pub(super) async fn begin(
         None
     };
     let scip = cfg.scip();
-    let mut ctx = crate::context::IndexContext::new(root.clone(), settings, log.clone())
-        .with_llm(client)
-        .with_git(crate::config::git_credentials(app.server.clone()));
+    let mut ctx = crate::context::IndexContext::new(
+        root.clone(),
+        settings,
+        log.clone(),
+        crate::config::cache_dir(),
+    )
+    .with_llm(client)
+    .with_git(crate::config::git_credentials(app.server.clone()));
     ctx.cancel = cancel;
     let app2 = app.clone();
     tokio::spawn(async move {

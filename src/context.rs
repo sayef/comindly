@@ -85,10 +85,17 @@ pub struct IndexContext {
     pub git: Arc<dyn Credentials>,
     pub report: Reporter,
     pub cancel: CancellationToken,
+    /// Where comindly keeps its checkouts of each repository's default branch.
+    pub cache: std::path::PathBuf,
 }
 
 impl IndexContext {
-    pub fn new(root: impl Into<String>, settings: Settings, events: Arc<dyn EventSink>) -> Self {
+    pub fn new(
+        root: impl Into<String>,
+        settings: Settings,
+        events: Arc<dyn EventSink>,
+        cache: std::path::PathBuf,
+    ) -> Self {
         IndexContext {
             root: root.into(),
             settings,
@@ -96,6 +103,7 @@ impl IndexContext {
             git: Arc::new(NoCredentials),
             report: Reporter::new(events),
             cancel: CancellationToken::new(),
+            cache,
         }
     }
 

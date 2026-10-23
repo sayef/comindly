@@ -195,6 +195,11 @@ pub fn ui_token() -> Result<String> {
 }
 
 /// `$XDG_DATA_HOME/comindly`, else `~/.local/share/comindly`: the default index and managed clones.
+/// comindly's cache folder on this machine: worktrees, verified signatures.
+pub fn cache_dir() -> PathBuf {
+    home_path("~/.cache/comindly")
+}
+
 pub fn data_dir() -> String {
     data_home().join("comindly").to_string_lossy().into_owned()
 }
@@ -370,8 +375,7 @@ pub fn git_credentials(
 }
 
 pub fn local_verifier() -> crate::signing::Verifier {
-    let cache = std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache/comindly/verified"));
-    crate::signing::Verifier::new(local_allowed_signers(), cache)
+    crate::signing::Verifier::new(local_allowed_signers(), Some(cache_dir().join("verified")))
 }
 
 /// Who this machine records as: a pseudonymous actor id, and a name unless names are switched off

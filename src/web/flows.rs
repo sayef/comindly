@@ -110,7 +110,8 @@ pub(super) async fn source(Conf(cfg): Conf, Query(q): Query<SourceQ>) -> impl In
             .find(|r| crate::worktree::name(Path::new(&r.path)) == q.repo)
             .ok_or_else(|| anyhow::anyhow!("{} has no folder on this machine", q.repo))?;
         let repo = Path::new(&entry.path);
-        let root = crate::worktree::checkout_dir(repo).unwrap_or_else(|| repo.to_path_buf());
+        let root = crate::worktree::checkout_dir(&crate::config::cache_dir(), repo)
+            .unwrap_or_else(|| repo.to_path_buf());
         let root = std::fs::canonicalize(&root)?;
         let file = std::fs::canonicalize(root.join(path))?;
         anyhow::ensure!(file.starts_with(&root), "{path} is outside the repository");

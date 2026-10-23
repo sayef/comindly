@@ -1597,7 +1597,10 @@ fn cmd_repo_list(what: Option<ReposWhat>, from: Option<&str>) -> ExitCode {
                     .iter()
                     .any(|x| *x == name || absolute(x) == absolute(&r.path));
                 if gone {
-                    let _ = comindly::worktree::remove(Path::new(&r.path));
+                    let _ = comindly::worktree::remove(
+                        &comindly::config::cache_dir(),
+                        Path::new(&r.path),
+                    );
                 }
                 !gone
             });
@@ -2565,6 +2568,7 @@ where
             root,
             settings,
             Arc::new(comindly::ui::Terminal::new()),
+            comindly::config::cache_dir(),
         )
         .with_llm(llm)
         .with_git(comindly::config::git_credentials(None));

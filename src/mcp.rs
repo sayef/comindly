@@ -63,6 +63,10 @@ pub struct ComindlyServer {
     markdown: bool,
     /// The key records agents write are signed with; this machine's in local mode.
     signer: Option<std::path::PathBuf>,
+    /// Who records are written for, in local mode; on a server, the member whose token is used.
+    identity: crate::ledger::Identity,
+    /// The agent's name, when set rather than taken from the MCP handshake.
+    agent_name: Option<String>,
 }
 
 impl ComindlyServer {
@@ -97,10 +101,15 @@ impl ComindlyServer {
         }
     }
 
-    /// The calling agent: `COMINDLY_AGENT`, else the client name from the MCP handshake; over
-    /// HTTP on a server, working for the member whose token it uses.
-    fn agent(ctx: &rmcp::service::RequestContext<rmcp::RoleServer>) -> crate::ledger::Provenance {
-        let name = crate::config::env("COMINDLY_AGENT")
+    /// The calling agent, from its MCP handshake unless named; over HTTP on a server, working for
+    /// the member whose token it uses.
+    fn agent(
+        &self,
+        ctx: &rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> crate::ledger::Provenance {
+        let name = self
+            .agent_name
+            .clone()
             .or_else(|| Some(ctx.peer.peer_info()?.client_info.name.clone()));
         let who = ctx
             .extensions
@@ -111,7 +120,7 @@ impl ComindlyServer {
                 actor: format!("actor-{}", &blake3::hash(w.email.as_bytes()).to_hex()[..10]),
                 name: Some(w.email.clone()),
             },
-            None => crate::config::local_identity(),
+            None => self.identity.clone(),
         };
         crate::ledger::Provenance::agent("mcp", name, &identity)
     }
@@ -883,7 +892,7 @@ impl ComindlyServer {
         ctx: rmcp::service::RequestContext<rmcp::RoleServer>,
         Parameters(p): Parameters<RememberParam>,
     ) -> CallToolResult {
-        let result = self.write_record(p, Self::agent(&ctx)).await;
+        let result = self.write_record(p, self.agent(&ctx)).await;
         let dto = LedgerDto {
             ok: result.is_ok(),
             message: result.unwrap_or_else(|e| format!("not recorded: {e:#}")),
@@ -901,7 +910,7 @@ impl ComindlyServer {
         ctx: rmcp::service::RequestContext<rmcp::RoleServer>,
         Parameters(p): Parameters<ReviewParam>,
     ) -> CallToolResult {
-        let result = self.write_review(p, Self::agent(&ctx)).await;
+        let result = self.write_review(p, self.agent(&ctx)).await;
         let dto = LedgerDto {
             ok: result.is_ok(),
             message: result.unwrap_or_else(|e| format!("not recorded: {e:#}")),
@@ -1437,6 +1446,8 @@ fn md_guide(d: &GuideDto) -> String {
 pub async fn serve_stdio(uri: &str, markdown: bool) -> Result<()> {
     let mut server = load(uri, markdown, crate::config::Config::load().fresh()).await?;
     server.signer = crate::config::local_signing_key();
+    server.identity = crate::config::local_identity();
+    server.agent_name = crate::config::env("COMINDLY_AGENT");
     let service = server.serve(rmcp::transport::io::stdio()).await?;
     service.waiting().await?;
     Ok(())
@@ -1522,6 +1533,8 @@ pub async fn load(uri: &str, markdown: bool, fresh: std::time::Duration) -> Resu
         edges: Arc::new(edges),
         markdown,
         signer: None,
+        identity: Default::default(),
+        agent_name: None,
     };
     Ok(server)
 }

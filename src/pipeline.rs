@@ -91,8 +91,8 @@ pub fn checkout<'a>(
                 })
                 .await??;
             }
-            let (dir, git) = (path.clone(), ctx.git.clone());
-            let c = blocking(move || crate::worktree::prepare(&dir, git.as_ref()))
+            let (dir, git, cache) = (path.clone(), ctx.git.clone(), ctx.cache.clone());
+            let c = blocking(move || crate::worktree::prepare(&cache, &dir, git.as_ref()))
                 .await?
                 .with_context(|| path.display().to_string())?;
             r.done(format!(

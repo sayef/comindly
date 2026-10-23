@@ -212,24 +212,22 @@ pub fn remote_url(repo: &Path) -> Option<String> {
     git(repo, &["remote", "get-url", "origin"]).ok()
 }
 
-/// comindly's checkout of `repo`'s default branch, if one has been made.
-pub fn checkout_dir(repo: &Path) -> Option<PathBuf> {
-    worktree_dir(repo).ok().filter(|d| d.join(".git").exists())
+/// comindly's checkout of `repo`'s default branch under `cache`, if one has been made.
+pub fn checkout_dir(cache: &Path, repo: &Path) -> Option<PathBuf> {
+    worktree_dir(cache, repo)
+        .ok()
+        .filter(|d| d.join(".git").exists())
 }
 
-fn worktree_dir(repo: &Path) -> Result<PathBuf> {
+fn worktree_dir(cache: &Path, repo: &Path) -> Result<PathBuf> {
     let abs = std::fs::canonicalize(repo).with_context(|| format!("{}", repo.display()))?;
     let key = blake3::hash(abs.to_string_lossy().as_bytes()).to_hex();
-    let home = std::env::var_os("HOME").context("HOME")?;
-    Ok(PathBuf::from(home)
-        .join(".cache/comindly/worktrees")
-        .join(&key[..12])
-        .join(name(repo)))
+    Ok(cache.join("worktrees").join(&key[..12]).join(name(repo)))
 }
 
 /// Fetch the remote's default branch and check it out in comindly's worktree, detached, so your
 /// folder and branches are never touched. Offline, the last known default branch is used.
-pub fn prepare(repo: &Path, creds: &dyn Credentials) -> Result<Checkout> {
+pub fn prepare(cache: &Path, repo: &Path, creds: &dyn Credentials) -> Result<Checkout> {
     if !repo.join(".git").exists() {
         bail!("{} is not a git repository", repo.display());
     }
@@ -266,7 +264,7 @@ pub fn prepare(repo: &Path, creds: &dyn Credentials) -> Result<Checkout> {
     } else {
         branch.clone()
     };
-    let dir = worktree_dir(repo)?;
+    let dir = worktree_dir(cache, repo)?;
     let _ = git(repo, &["worktree", "prune"]);
     if dir.join(".git").exists() {
         git_auth(
@@ -296,8 +294,8 @@ pub fn prepare(repo: &Path, creds: &dyn Credentials) -> Result<Checkout> {
 }
 
 /// Remove comindly's worktree for `repo` (your folder is untouched).
-pub fn remove(repo: &Path) -> Result<()> {
-    let dir = worktree_dir(repo)?;
+pub fn remove(cache: &Path, repo: &Path) -> Result<()> {
+    let dir = worktree_dir(cache, repo)?;
     if dir.exists() {
         let d = dir.to_string_lossy();
         git(repo, &["worktree", "remove", "--force", &d])?;
@@ -445,7 +443,7 @@ mod tests {
         g(&origin, &["add", "."]);
         g(&origin, &["commit", "--quiet", "-m", "two"]);
 
-        let c = prepare(&mine, &NoCredentials).unwrap();
+        let c = prepare(&base.join("cache"), &mine, &NoCredentials).unwrap();
         assert_eq!(c.target, "origin/main");
         assert!(
             c.dir.join("b.py").exists(),
@@ -456,10 +454,10 @@ mod tests {
         assert!(mine.join("wip.py").exists(), "your folder is untouched");
         g(&mine, &["checkout", "--quiet", "main"]);
         assert!(
-            prepare(&mine, &NoCredentials).is_ok(),
+            prepare(&base.join("cache"), &mine, &NoCredentials).is_ok(),
             "a second run reuses the worktree"
         );
-        remove(&mine).unwrap();
+        remove(&base.join("cache"), &mine).unwrap();
         assert!(!c.dir.exists());
         assert_eq!(scan(&base, 1).len(), 2);
         std::fs::remove_dir_all(&base).ok();
@@ -483,7 +481,7 @@ mod tests {
         ensure_clone(&url, &mine, &NoCredentials).unwrap();
         let (branch, commit) = remote_default(&mine, &NoCredentials).unwrap();
         assert_eq!(branch, "trunk");
-        let c = prepare(&mine, &NoCredentials).unwrap();
+        let c = prepare(&base.join("cache"), &mine, &NoCredentials).unwrap();
         assert_eq!(c.target, "origin/trunk");
         assert_eq!(c.commit, commit[..c.commit.len()]);
         assert!(c.dir.join("a.py").exists());
