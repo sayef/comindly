@@ -1577,7 +1577,6 @@ dependencies = [
  "lance-io",
  "lancedb",
  "lettre",
- "libc",
  "model2vec-rs",
  "muda",
  "objc2",

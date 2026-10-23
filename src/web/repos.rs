@@ -12,21 +12,53 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::{Cur, Shared};
+use std::sync::Arc;
+
 use crate::config::{Config, RepoEntry};
+use crate::events::{Event, EventSink, Kind, Level};
 use crate::worktree;
 
 /// The current or last indexing run.
 #[derive(Default)]
 pub(super) struct Job {
+    id: Option<String>,
     running: bool,
-    /// The indexer's process group, to stop it.
-    pid: Option<u32>,
+    cancel: Option<tokio_util::sync::CancellationToken>,
     cancelled: bool,
     ok: Option<bool>,
-    /// The indexer's events: `timestamp`, `level`, `kind`, `step`, `message` and fields.
-    events: Vec<Value>,
+    log: Arc<JobLog>,
     started: Option<String>,
     finished: Option<String>,
+}
+
+/// A job's events, kept for the app and passed on to the server's log.
+#[derive(Default)]
+pub(super) struct JobLog {
+    id: String,
+    events: std::sync::Mutex<Vec<Event>>,
+    out: crate::ui::Terminal,
+}
+
+impl EventSink for JobLog {
+    fn emit(&self, mut e: Event) {
+        e.job_id = Some(self.id.clone());
+        let mut events = self.events.lock().unwrap_or_else(|p| p.into_inner());
+        // Progress replaces the previous progress of the same step, so the log stays short.
+        if e.kind == Kind::Progress {
+            if let Some(last) = events
+                .last_mut()
+                .filter(|l| l.kind == Kind::Progress && l.message == e.message)
+            {
+                *last = e.clone();
+                drop(events);
+                self.out.emit(e);
+                return;
+            }
+        }
+        events.push(e.clone());
+        drop(events);
+        self.out.emit(e);
+    }
 }
 
 fn fail(e: anyhow::Error) -> (StatusCode, Json<Value>) {
@@ -216,14 +248,13 @@ pub(super) async fn change(Json(c): Json<Change>) -> impl IntoResponse {
 
 /// Stop the running indexer and everything it started.
 pub(super) async fn cancel(State(app): State<Shared>) -> impl IntoResponse {
-    let mut j = app.job.lock().await;
-    match j.pid.filter(|_| j.running) {
-        Some(pid) => {
-            j.cancelled = true;
-            super::stop_group(pid);
+    let j = app.job.lock().await;
+    match j.cancel.as_ref().filter(|_| j.running) {
+        Some(token) => {
+            token.cancel();
             (
                 StatusCode::OK,
-                Json(json!({"ok": true, "message": "indexing cancelled"})),
+                Json(json!({"ok": true, "message": "cancelling; work already saved stays"})),
             )
         }
         None => (
@@ -233,24 +264,16 @@ pub(super) async fn cancel(State(app): State<Shared>) -> impl IntoResponse {
     }
 }
 
-/// An event the server adds to the indexer's own.
-fn event(level: &str, kind: &str, message: &str) -> Value {
-    json!({
-        "timestamp": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-        "level": level,
-        "kind": kind,
-        "message": message,
-    })
-}
-
 pub(super) async fn job(State(app): State<Shared>) -> Json<Value> {
     let j = app.job.lock().await;
-    let from = j.events.len().saturating_sub(400);
+    let events = j.log.events.lock().map(|e| e.clone()).unwrap_or_default();
+    let from = events.len().saturating_sub(400);
     Json(json!({
+        "id": j.id,
         "running": j.running,
         "cancelled": j.cancelled,
         "ok": j.ok,
-        "events": &j.events[from..],
+        "events": &events[from..],
         "started": j.started,
         "finished": j.finished,
     }))
@@ -302,93 +325,76 @@ pub(super) async fn begin(
             missing.join(", ")
         );
     }
+    let id = uuid::Uuid::new_v4().simple().to_string();
+    let log = Arc::new(JobLog {
+        id: id.clone(),
+        ..Default::default()
+    });
+    let cancel = tokio_util::sync::CancellationToken::new();
     {
         let mut j = app.job.lock().await;
         anyhow::ensure!(!j.running, "indexing is already running");
         *j = Job {
+            id: Some(id),
             running: true,
+            cancel: Some(cancel.clone()),
+            log: log.clone(),
             started: Some(chrono::Utc::now().to_rfc3339()),
-            events: why.into_iter().map(|w| event("info", "note", &w)).collect(),
             ..Default::default()
         };
     }
-    let mut cmd = tokio::process::Command::new(std::env::current_exe()?);
-    cmd.args(["link", "--incremental", "--index-dir", &root]);
-    if !llm {
-        cmd.arg("--no-llm");
+    if let Some(w) = why {
+        log.emit(Event::new(Level::Info, Kind::Note, w));
     }
-    // A server's stored keys are read from the same index location.
-    cmd.env("COMINDLY_INDEX_DIR", &root)
-        .env("COMINDLY_LOG_FORMAT", "json")
-        .env("NO_COLOR", "1")
-        .env("CLICOLOR", "0")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-    super::own_group(&mut cmd);
-    let mut child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(e) => {
-            app.job.lock().await.running = false;
-            return Err(e.into());
-        }
+    let cfg = Config::load();
+    let team = crate::team::load(&root)
+        .await
+        .map(|t| t.settings)
+        .unwrap_or_default();
+    let mut settings = crate::context::Settings::resolve(&team, &cfg);
+    if !llm {
+        settings.enrich = false;
+        settings.flows = false;
+        settings.guide = false;
+    }
+    let client = if settings.enrich || settings.flows || settings.guide {
+        let key = crate::credentials::llm_key(team.name.as_deref()).0;
+        crate::llm::LlmClient::new(
+            settings.llm_base_url.as_deref(),
+            &settings.llm_model,
+            key.as_deref(),
+        )
+        .ok()
+    } else {
+        None
     };
-    app.job.lock().await.pid = child.id();
+    let scip = cfg.scip();
+    let mut ctx =
+        crate::context::IndexContext::new(root.clone(), settings, log.clone()).with_llm(client);
+    ctx.cancel = cancel;
     let app2 = app.clone();
     tokio::spawn(async move {
-        use tokio::io::{AsyncBufReadExt, BufReader};
-        type Pipe = Box<dyn tokio::io::AsyncRead + Send + Unpin>;
-        let follow = |r: Option<Pipe>| {
-            let app = app2.clone();
-            async move {
-                let Some(r) = r else { return };
-                let mut lines = BufReader::new(r).lines();
-                while let Ok(Some(l)) = lines.next_line().await {
-                    let l = strip_ansi(&l);
-                    if !l.trim().is_empty() {
-                        let l = crate::storage::without_userinfo(&l);
-                        let mut e = serde_json::from_str::<Value>(&l)
-                            .ok()
-                            .filter(Value::is_object)
-                            .unwrap_or_else(|| event("info", "note", &l));
-                        e["source"] = "index".into();
-                        // Also in the server's own output, for the platform's logs.
-                        if crate::ui::json_logs() {
-                            eprintln!("{e}");
-                        } else {
-                            eprintln!("index: {}", e["message"].as_str().unwrap_or_default());
-                        }
-                        app.job.lock().await.events.push(e);
-                    }
-                }
-            }
+        let run = async {
+            let sources = crate::pipeline::checkout(&ctx, &cfg.repos).await?;
+            crate::pipeline::link(&ctx, sources, true, scip).await
         };
-        let out = child.stdout.take().map(|s| Box::new(s) as Pipe);
-        let err = child.stderr.take().map(|s| Box::new(s) as Pipe);
-        tokio::join!(follow(out), follow(err));
-        let cancelled = app2.job.lock().await.cancelled;
-        let ok = !cancelled && child.wait().await.map(|s| s.success()).unwrap_or(false);
-        if cancelled {
-            let _ = child.wait().await;
-            app2.job
-                .lock()
-                .await
-                .events
-                .push(event("warn", "warning", "Cancelled."));
+        let result = run.await;
+        let cancelled = matches!(&result, Err(e) if e.is::<crate::context::Cancelled>());
+        let ok = result.is_ok();
+        match &result {
+            Ok(_) => {}
+            Err(_) if cancelled => ctx.report.warn("Cancelled; what was already saved stays."),
+            Err(e) => ctx.report.error(crate::storage::explain(&format!("{e:#}"))),
         }
         if ok {
             if let Err(e) = app2.reload(&root).await {
-                let msg = format!("reload failed: {e:#}");
-                app2.job
-                    .lock()
-                    .await
-                    .events
-                    .push(event("error", "error", &msg));
+                ctx.report.error(format!("reload failed: {e:#}"));
             }
         }
         let mut j = app2.job.lock().await;
         j.running = false;
-        j.pid = None;
+        j.cancel = None;
+        j.cancelled = cancelled;
         j.ok = Some(ok);
         j.finished = Some(chrono::Utc::now().to_rfc3339());
     });
@@ -463,26 +469,6 @@ pub(super) async fn watch_state(State(app): State<Shared>) -> Json<Value> {
         "enabled": Config::load().auto_index == Some(true),
         "last": *app.watch.lock().await,
     }))
-}
-
-fn strip_ansi(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '\u{1b}' {
-            if chars.peek() == Some(&'[') {
-                chars.next();
-                for d in chars.by_ref() {
-                    if d.is_ascii_alphabetic() {
-                        break;
-                    }
-                }
-            }
-        } else if c != '\r' {
-            out.push(c);
-        }
-    }
-    out
 }
 
 /// A clone URL reduced to host and path, so HTTPS and SSH forms of one repository compare equal.

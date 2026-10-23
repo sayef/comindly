@@ -65,291 +65,297 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> 
 }
 
 /// Bring each configured repository to its default branch in comindly's own checkout.
-pub async fn checkout(
-    ctx: &IndexContext,
-    repos: &[crate::config::RepoEntry],
-) -> Result<Vec<Source>> {
-    anyhow::ensure!(
-        !repos.is_empty(),
-        "no repositories: pass folders, or add them with `comindly repos add <folder>`"
-    );
-    let r = &ctx.report;
-    r.step(format!("Checking out {} repo(s)", repos.len()));
-    let mut out = Vec::new();
-    for repo in repos {
-        ctx.check()?;
-        let path = PathBuf::from(crate::config::expand_tilde(&repo.path));
-        if let Some(url) = repo.remote.clone() {
-            if !path.exists() {
-                r.note(format!("cloning {url}"));
+pub fn checkout<'a>(
+    ctx: &'a IndexContext,
+    repos: &'a [crate::config::RepoEntry],
+) -> futures::future::BoxFuture<'a, Result<Vec<Source>>> {
+    Box::pin(async move {
+        anyhow::ensure!(
+            !repos.is_empty(),
+            "no repositories: pass folders, or add them with `comindly repos add <folder>`"
+        );
+        let r = &ctx.report;
+        r.step(format!("Checking out {} repo(s)", repos.len()));
+        let mut out = Vec::new();
+        for repo in repos {
+            ctx.check()?;
+            let path = PathBuf::from(crate::config::expand_tilde(&repo.path));
+            if let Some(url) = repo.remote.clone() {
+                if !path.exists() {
+                    r.note(format!("cloning {url}"));
+                }
+                let dest = path.clone();
+                blocking(move || {
+                    crate::worktree::ensure_clone(&url, &dest)
+                        .map_err(|e| anyhow::anyhow!("{url}: {e:#}"))
+                })
+                .await??;
             }
-            let dest = path.clone();
-            blocking(move || {
-                crate::worktree::ensure_clone(&url, &dest)
-                    .map_err(|e| anyhow::anyhow!("{url}: {e:#}"))
-            })
-            .await??;
-        }
-        let dir = path.clone();
-        let c = blocking(move || crate::worktree::prepare(&dir))
-            .await?
-            .with_context(|| path.display().to_string())?;
-        r.done(format!(
-            "{} @ {} {}",
-            crate::worktree::name(&path),
-            c.target,
-            c.commit
-        ));
-        if let Some(why) = &c.stale {
-            r.warn(format!(
-                "could not fetch, indexing the last fetched state: {why}"
+            let dir = path.clone();
+            let c = blocking(move || crate::worktree::prepare(&dir))
+                .await?
+                .with_context(|| path.display().to_string())?;
+            r.done(format!(
+                "{} @ {} {}",
+                crate::worktree::name(&path),
+                c.target,
+                c.commit
             ));
+            if let Some(why) = &c.stale {
+                r.warn(format!(
+                    "could not fetch, indexing the last fetched state: {why}"
+                ));
+            }
+            out.push(Source::at(c.dir));
         }
-        out.push(Source::at(c.dir));
-    }
-    Ok(out)
+        Ok(out)
+    })
 }
 
 /// Parse `sources`, bind references across them, persist the graph and run the optional steps.
-pub async fn link(
-    ctx: &IndexContext,
+pub fn link<'a>(
+    ctx: &'a IndexContext,
     sources: Vec<Source>,
     incremental: bool,
     scip: crate::scip::Mode,
-) -> Result<LinkReport> {
-    if let Some(bad) = sources.iter().find(|s| !s.path.is_dir()) {
-        anyhow::bail!("no such repo directory: {}", bad.path.display());
-    }
-    let r = &ctx.report;
-    r.step(format!("Parsing {} repo(s)", sources.len()));
-    let mut symbols: Vec<Symbol> = Vec::new();
-    let mut edges: Vec<Edge> = Vec::new();
-    let mut facts = Vec::new();
-    for s in &sources {
-        ctx.check()?;
-        let (name, path) = (s.name.clone(), s.path.clone());
-        let (out, scip_note) = blocking(move || -> Result<_> {
-            let mut o = crate::parse::parse_repo(&path, &name)
-                .with_context(|| format!("{name}: parse failed"))?;
-            let note = attach_scip(scip, &path, &name, &mut o)?;
-            Ok((o, note))
-        })
-        .await??;
-        r.note(format!(
-            "{}: {} symbols, {} files",
-            s.name,
-            out.symbols.len(),
-            out.facts.len()
-        ));
-        if let Some(n) = scip_note {
-            r.note(n);
+) -> futures::future::BoxFuture<'a, Result<LinkReport>> {
+    Box::pin(async move {
+        if let Some(bad) = sources.iter().find(|s| !s.path.is_dir()) {
+            anyhow::bail!("no such repo directory: {}", bad.path.display());
         }
-        symbols.extend(out.symbols);
-        edges.extend(out.edges);
-        facts.extend(out.facts);
-    }
-
-    ctx.check()?;
-    let (symbols, resolved, facts) = blocking(move || {
-        let resolved = crate::resolve::resolve(&symbols, &edges, &facts);
-        let mut symbols = symbols;
-        symbols.extend(resolved.symbols.iter().cloned());
-        (symbols, resolved, facts)
-    })
-    .await?;
-    report_resolution(ctx, &resolved);
-    let edges = resolved.edges;
-    let dependencies = dependencies(&edges);
-
-    let dst = ctx.graph();
-    r.step("Persisting");
-    r.note(format!("writing org graph to {dst}"));
-    let roots: Vec<(String, PathBuf)> = sources
-        .iter()
-        .map(|s| (s.name.clone(), s.path.clone()))
-        .collect();
-    let packages = scan_packages(ctx, roots.clone()).await?;
-    let recipes = mine_recipes(ctx, roots.clone()).await?;
-    let explain = |e: anyhow::Error| {
-        anyhow::anyhow!(
-            "write failed: {}",
-            crate::storage::explain(&format!("{e:#}"))
-        )
-    };
-    let (sv, ev) = crate::index::write_graph(&dst, &symbols, &edges)
-        .await
-        .map_err(explain)?;
-    crate::index::write_facts(&dst, &facts)
-        .await
-        .map_err(explain)?;
-    crate::index::write_packages(&dst, &packages)
-        .await
-        .map_err(explain)?;
-    crate::index::write_recipes(&dst, &recipes)
-        .await
-        .map_err(explain)?;
-    r.done(format!(
-        "org graph: symbols v{sv}, edges v{ev} (latest pointer)"
-    ));
-    let (sc, ec) = crate::index::count_rows(&dst)
-        .await
-        .context("read-back failed")?;
-    r.note(format!("read back: {sc} symbols, {ec} edges"));
-
-    let paths: Vec<(String, PathBuf)> = roots.clone();
-    let heads = blocking(move || {
-        paths
-            .iter()
-            .filter_map(|(name, p)| {
-                crate::git::head_commit(p)
-                    .ok()
-                    .map(|commit| crate::index::IndexedRepo {
-                        name: name.clone(),
-                        commit,
-                        remote: crate::worktree::remote_url(p),
-                    })
+        let r = &ctx.report;
+        r.step(format!("Parsing {} repo(s)", sources.len()));
+        let mut symbols: Vec<Symbol> = Vec::new();
+        let mut edges: Vec<Edge> = Vec::new();
+        let mut facts = Vec::new();
+        for s in &sources {
+            ctx.check()?;
+            let (name, path) = (s.name.clone(), s.path.clone());
+            let (out, scip_note) = blocking(move || -> Result<_> {
+                let mut o = crate::parse::parse_repo(&path, &name)
+                    .with_context(|| format!("{name}: parse failed"))?;
+                let note = attach_scip(scip, &path, &name, &mut o)?;
+                Ok((o, note))
             })
-            .collect::<Vec<_>>()
-    })
-    .await?;
-    let stale: HashSet<String> = if incremental {
-        let stale = stale_ids(&dst, roots.clone(), &symbols).await?;
-        r.note(format!(
-            "incremental: {} of {} symbols stale",
-            stale.len(),
-            symbols.len()
+            .await??;
+            r.note(format!(
+                "{}: {} symbols, {} files",
+                s.name,
+                out.symbols.len(),
+                out.facts.len()
+            ));
+            if let Some(n) = scip_note {
+                r.note(n);
+            }
+            symbols.extend(out.symbols);
+            edges.extend(out.edges);
+            facts.extend(out.facts);
+        }
+
+        ctx.check()?;
+        let (symbols, resolved, facts) = blocking(move || {
+            let resolved = crate::resolve::resolve(&symbols, &edges, &facts);
+            let mut symbols = symbols;
+            symbols.extend(resolved.symbols.iter().cloned());
+            (symbols, resolved, facts)
+        })
+        .await?;
+        report_resolution(ctx, &resolved);
+        let edges = resolved.edges;
+        let dependencies = dependencies(&edges);
+
+        let dst = ctx.graph();
+        r.step("Persisting");
+        r.note(format!("writing org graph to {dst}"));
+        let roots: Vec<(String, PathBuf)> = sources
+            .iter()
+            .map(|s| (s.name.clone(), s.path.clone()))
+            .collect();
+        let packages = scan_packages(ctx, roots.clone()).await?;
+        let recipes = mine_recipes(ctx, roots.clone()).await?;
+        let explain = |e: anyhow::Error| {
+            anyhow::anyhow!(
+                "write failed: {}",
+                crate::storage::explain(&format!("{e:#}"))
+            )
+        };
+        let (sv, ev) = crate::index::write_graph(&dst, &symbols, &edges)
+            .await
+            .map_err(explain)?;
+        crate::index::write_facts(&dst, &facts)
+            .await
+            .map_err(explain)?;
+        crate::index::write_packages(&dst, &packages)
+            .await
+            .map_err(explain)?;
+        crate::index::write_recipes(&dst, &recipes)
+            .await
+            .map_err(explain)?;
+        r.done(format!(
+            "org graph: symbols v{sv}, edges v{ev} (latest pointer)"
         ));
-        stale
-    } else {
-        symbols.iter().map(|s| s.id.render()).collect()
-    };
+        let (sc, ec) = crate::index::count_rows(&dst)
+            .await
+            .context("read-back failed")?;
+        r.note(format!("read back: {sc} symbols, {ec} edges"));
 
-    let symbols = Arc::new(symbols);
-    let edges = Arc::new(edges);
-    enrich_all(ctx, &dst, &symbols, &edges, &stale, incremental, &roots).await?;
-    crate::index::write_repo_commits(&dst, &heads).await?;
+        let paths: Vec<(String, PathBuf)> = roots.clone();
+        let heads = blocking(move || {
+            paths
+                .iter()
+                .filter_map(|(name, p)| {
+                    crate::git::head_commit(p)
+                        .ok()
+                        .map(|commit| crate::index::IndexedRepo {
+                            name: name.clone(),
+                            commit,
+                            remote: crate::worktree::remote_url(p),
+                        })
+                })
+                .collect::<Vec<_>>()
+        })
+        .await?;
+        let stale: HashSet<String> = if incremental {
+            let stale = stale_ids(&dst, roots.clone(), &symbols).await?;
+            r.note(format!(
+                "incremental: {} of {} symbols stale",
+                stale.len(),
+                symbols.len()
+            ));
+            stale
+        } else {
+            symbols.iter().map(|s| s.id.render()).collect()
+        };
 
-    Ok(LinkReport {
-        symbols: symbols.len(),
-        edges: edges.len(),
-        cross_repo_edges: edges.iter().filter(|e| e.cross_repo).count(),
-        dependencies,
+        let symbols = Arc::new(symbols);
+        let edges = Arc::new(edges);
+        enrich_all(ctx, &dst, &symbols, &edges, &stale, incremental, &roots).await?;
+        crate::index::write_repo_commits(&dst, &heads).await?;
+
+        Ok(LinkReport {
+            symbols: symbols.len(),
+            edges: edges.len(),
+            cross_repo_edges: edges.iter().filter(|e| e.cross_repo).count(),
+            dependencies,
+        })
     })
 }
 
 /// Index one repository into the shared index: the whole repository, or with `incremental` only
 /// the files changed since `since` (or the commit recorded last time).
-pub async fn index_repo(
-    ctx: &IndexContext,
+pub fn index_repo<'a>(
+    ctx: &'a IndexContext,
     source: Source,
     incremental: bool,
     since: Option<String>,
     scip: crate::scip::Mode,
-) -> Result<()> {
-    anyhow::ensure!(
-        source.path.is_dir(),
-        "no such repo directory: {}",
-        source.path.display()
-    );
-    let r = &ctx.report;
-    let dst = ctx.graph();
-    let incremental = incremental || since.is_some();
-    if incremental {
-        let base = match since {
-            Some(s) => Some(s),
-            None => crate::index::read_repo_meta(&dst).await.ok().flatten(),
-        };
-        match base {
-            Some(base) => return index_changes(ctx, &source, &base).await,
-            None => r.note("no recorded base commit — doing a full index"),
+) -> futures::future::BoxFuture<'a, Result<()>> {
+    Box::pin(async move {
+        anyhow::ensure!(
+            source.path.is_dir(),
+            "no such repo directory: {}",
+            source.path.display()
+        );
+        let r = &ctx.report;
+        let dst = ctx.graph();
+        let incremental = incremental || since.is_some();
+        if incremental {
+            let base = match since {
+                Some(s) => Some(s),
+                None => crate::index::read_repo_meta(&dst).await.ok().flatten(),
+            };
+            match base {
+                Some(base) => return index_changes(ctx, &source, &base).await,
+                None => r.note("no recorded base commit — doing a full index"),
+            }
         }
-    }
 
-    r.step(format!("Indexing {}", source.name));
-    let (name, path) = (source.name.clone(), source.path.clone());
-    let (symbols, edges, facts) = blocking(move || -> Result<_> {
-        let mut out = crate::parse::parse_repo(&path, &name)
-            .map_err(|e| anyhow::anyhow!(crate::storage::explain(&format!("{e:#}"))))?;
-        attach_scip(scip, &path, &name, &mut out)?;
-        let resolved = crate::resolve::resolve(&out.symbols, &out.edges, &out.facts);
-        let mut symbols = out.symbols;
-        symbols.extend(resolved.symbols);
-        Ok((symbols, resolved.edges, out.facts))
-    })
-    .await??;
+        r.step(format!("Indexing {}", source.name));
+        let (name, path) = (source.name.clone(), source.path.clone());
+        let (symbols, edges, facts) = blocking(move || -> Result<_> {
+            let mut out = crate::parse::parse_repo(&path, &name)
+                .map_err(|e| anyhow::anyhow!(crate::storage::explain(&format!("{e:#}"))))?;
+            attach_scip(scip, &path, &name, &mut out)?;
+            let resolved = crate::resolve::resolve(&out.symbols, &out.edges, &out.facts);
+            let mut symbols = out.symbols;
+            symbols.extend(resolved.symbols);
+            Ok((symbols, resolved.edges, out.facts))
+        })
+        .await??;
 
-    let mut by_kind: BTreeMap<String, usize> = BTreeMap::new();
-    for s in &symbols {
-        *by_kind.entry(format!("{:?}", s.kind)).or_default() += 1;
-    }
-    let calls = edges.iter().filter(|e| e.kind == EdgeKind::Calls).count();
-    let contains = edges
-        .iter()
-        .filter(|e| e.kind == EdgeKind::Contains)
-        .count();
-    r.note(format!("symbols: {}", symbols.len()));
-    for (k, n) in &by_kind {
-        r.note(format!("{k:<10} {n}"));
-    }
-    r.note(format!(
-        "edges: {} (contains={contains}, calls={calls})",
-        edges.len()
-    ));
+        let mut by_kind: BTreeMap<String, usize> = BTreeMap::new();
+        for s in &symbols {
+            *by_kind.entry(format!("{:?}", s.kind)).or_default() += 1;
+        }
+        let calls = edges.iter().filter(|e| e.kind == EdgeKind::Calls).count();
+        let contains = edges
+            .iter()
+            .filter(|e| e.kind == EdgeKind::Contains)
+            .count();
+        r.note(format!("symbols: {}", symbols.len()));
+        for (k, n) in &by_kind {
+            r.note(format!("{k:<10} {n}"));
+        }
+        r.note(format!(
+            "edges: {} (contains={contains}, calls={calls})",
+            edges.len()
+        ));
 
-    r.step("Persisting");
-    r.note(format!("writing graph to {dst}"));
-    let roots = vec![(source.name.clone(), source.path.clone())];
-    let explain = |e: anyhow::Error| {
-        anyhow::anyhow!(
-            "write failed: {}",
-            crate::storage::explain(&format!("{e:#}"))
+        r.step("Persisting");
+        r.note(format!("writing graph to {dst}"));
+        let roots = vec![(source.name.clone(), source.path.clone())];
+        let explain = |e: anyhow::Error| {
+            anyhow::anyhow!(
+                "write failed: {}",
+                crate::storage::explain(&format!("{e:#}"))
+            )
+        };
+        let (sv, ev) = crate::index::write_graph(&dst, &symbols, &edges)
+            .await
+            .map_err(explain)?;
+        crate::index::write_facts(&dst, &facts)
+            .await
+            .map_err(explain)?;
+        // Keep other repositories' package and recipe rows in a shared index.
+        let mut packages: Vec<_> = crate::index::read_packages(&dst)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|p| p.repo != source.name)
+            .collect();
+        packages.extend(scan_packages(ctx, roots.clone()).await?);
+        crate::index::write_packages(&dst, &packages)
+            .await
+            .map_err(explain)?;
+        let mut recipes: Vec<_> = crate::index::read_recipes(&dst)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|c| c.repo != source.name)
+            .collect();
+        recipes.extend(mine_recipes(ctx, roots.clone()).await?);
+        crate::index::write_recipes(&dst, &recipes)
+            .await
+            .map_err(explain)?;
+        r.done(format!("graph: symbols v{sv}, edges v{ev}"));
+        let p = source.path.clone();
+        if let Ok(head) = blocking(move || crate::git::head_commit(&p)).await? {
+            let _ = crate::index::write_repo_meta(&dst, &source.name, &head).await;
+            r.note(format!("recorded commit {}", short(&head)));
+        }
+
+        let all: HashSet<String> = symbols.iter().map(|s| s.id.render()).collect();
+        enrich_all(
+            ctx,
+            &dst,
+            &Arc::new(symbols),
+            &Arc::new(edges),
+            &all,
+            false,
+            &roots,
         )
-    };
-    let (sv, ev) = crate::index::write_graph(&dst, &symbols, &edges)
         .await
-        .map_err(explain)?;
-    crate::index::write_facts(&dst, &facts)
-        .await
-        .map_err(explain)?;
-    // Keep other repositories' package and recipe rows in a shared index.
-    let mut packages: Vec<_> = crate::index::read_packages(&dst)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|p| p.repo != source.name)
-        .collect();
-    packages.extend(scan_packages(ctx, roots.clone()).await?);
-    crate::index::write_packages(&dst, &packages)
-        .await
-        .map_err(explain)?;
-    let mut recipes: Vec<_> = crate::index::read_recipes(&dst)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|c| c.repo != source.name)
-        .collect();
-    recipes.extend(mine_recipes(ctx, roots.clone()).await?);
-    crate::index::write_recipes(&dst, &recipes)
-        .await
-        .map_err(explain)?;
-    r.done(format!("graph: symbols v{sv}, edges v{ev}"));
-    let p = source.path.clone();
-    if let Ok(head) = blocking(move || crate::git::head_commit(&p)).await? {
-        let _ = crate::index::write_repo_meta(&dst, &source.name, &head).await;
-        r.note(format!("recorded commit {}", short(&head)));
-    }
-
-    let all: HashSet<String> = symbols.iter().map(|s| s.id.render()).collect();
-    enrich_all(
-        ctx,
-        &dst,
-        &Arc::new(symbols),
-        &Arc::new(edges),
-        &all,
-        false,
-        &roots,
-    )
-    .await
+    })
 }
 
 /// Reparse only the files changed since `base`, drop what they owned, re-bind, and rewrite.
@@ -624,14 +630,18 @@ async fn summaries(
     for chunk in todo.chunks(CHECKPOINT) {
         let out = run_llm(
             ctx,
-            chunk,
-            |s| {
+            chunk
+                .iter()
+                .map(|s| {
+                    (
+                        s.name.clone(),
+                        s.signature.clone().unwrap_or_default(),
+                        s.file_path.clone(),
+                    )
+                })
+                .collect(),
+            |(n, sig, path)| {
                 let llm = llm.clone();
-                let (n, sig, path) = (
-                    s.name.clone(),
-                    s.signature.clone().unwrap_or_default(),
-                    s.file_path.clone(),
-                );
                 async move { llm.enrich_symbol(&n, &sig, &path).await.ok() }
             },
             |d| {
@@ -678,19 +688,20 @@ async fn summaries(
 
 /// One LLM call per item, `concurrency` at a time; `Err` when cancelled, with the calls that
 /// finished before the cancellation in their positions.
-async fn run_llm<'a, I, T, F, Fut>(
+async fn run_llm<I, T, F, Fut>(
     ctx: &IndexContext,
-    items: &'a [I],
+    items: Vec<I>,
     call: F,
     mut each: impl FnMut(&Option<T>),
 ) -> std::result::Result<Vec<Option<T>>, Vec<Option<T>>>
 where
-    F: Fn(&'a I) -> Fut,
-    Fut: std::future::Future<Output = Option<T>>,
+    F: Fn(I) -> Fut,
+    Fut: std::future::Future<Output = Option<T>> + Send + 'static,
+    T: Send + 'static,
 {
     let mut out = Vec::with_capacity(items.len());
     let mut stream =
-        futures::stream::iter(items.iter().map(&call)).buffered(ctx.settings.llm_concurrency);
+        futures::stream::iter(items.into_iter().map(call)).buffered(ctx.settings.llm_concurrency);
     loop {
         tokio::select! {
             _ = ctx.cancel.cancelled() => return Err(out),
@@ -770,11 +781,20 @@ async fn style_guides(
         let mut done = 0u64;
         let bodies = run_llm(
             ctx,
-            &sections,
-            |sec| {
+            sections
+                .iter()
+                .map(|sec| {
+                    (
+                        sec.title.clone(),
+                        sec.guidance.clone(),
+                        sec.evidence.clone(),
+                    )
+                })
+                .collect(),
+            |(title, guidance, evidence)| {
                 let (llm, repo) = (llm.clone(), repo.clone());
                 async move {
-                    llm.guide_section(&repo, &sec.title, &sec.guidance, &sec.evidence)
+                    llm.guide_section(&repo, &title, &guidance, &evidence)
                         .await
                         .ok()
                 }
@@ -909,10 +929,13 @@ async fn walkthroughs(
     for chunk in todo.chunks(CHECKPOINT) {
         let out = run_llm(
             ctx,
-            chunk,
-            |(_, name, sig, trace)| {
+            chunk
+                .iter()
+                .map(|(_, name, sig, trace)| (name.clone(), sig.clone(), trace.clone()))
+                .collect(),
+            |(name, sig, trace)| {
                 let llm = llm.clone();
-                async move { llm.narrate_flow(name, sig, trace).await.ok() }
+                async move { llm.narrate_flow(&name, &sig, &trace).await.ok() }
             },
             |_| {
                 done += 1;

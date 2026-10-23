@@ -37,6 +37,9 @@ pub struct Event {
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub step: Option<String>,
+    /// The job this event belongs to, when it runs as one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub job_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub done: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -57,6 +60,7 @@ impl Event {
             kind,
             message: message.into(),
             step: None,
+            job_id: None,
             done: None,
             total: None,
             tokens_in: None,
