@@ -175,19 +175,28 @@ arguments, and reads take the verifier. The web app holds the loaded index (`vie
 
 Indexing runs inside the server as a job, not as a child process.
 
-- **One at a time.** A job has an id, a kind, who started it, a status (running, succeeded, failed,
-  cancelled, interrupted) and its events. Starting another while one runs is refused.
+- **One at a time, in order.** A job has an id, a kind, who started it, a status (queued, running,
+  succeeded, failed, cancelled, interrupted) and its events. Starting one while another runs queues it;
+  up to 5 wait, and a request identical to a waiting one (same kind and options) returns that job
+  instead of adding another. The running job never absorbs a request, since its input may already be
+  stale. A queued job reads the repository list and settings when it starts, not when it was asked
+  for. The automatic re-index queues the same way.
 - **Cancellation.** A `CancellationToken` checked between units of work; cancelling stops LLM requests
-  in flight and leaves everything already saved in place.
+  in flight and leaves everything already saved in place. Cancelling a queued job takes it out of the
+  queue without starting it.
 - **Resumable steps.** Summaries, flow walkthroughs and style guides are saved as they are written and
   reused while their input is unchanged, so a cancelled or interrupted job continues where it stopped.
 - **Events.** Each job's events are kept with its record (the last 400; progress replaces earlier
   progress of the same step), streamed live (`/api/v1/jobs/{id}/events`, server-sent events) and
-  written to the log. The record is saved when the job starts, every 15 seconds and when it ends.
-- **Restarts.** A job still marked running at start-up was cut off and is marked interrupted.
+  written to the log. The record is saved when it is queued, when it starts, every 15 seconds and
+  when it ends. Following a queued job streams a note with its position until it starts.
+- **Restarts.** A job still marked running or queued at start-up is marked interrupted; a queued one
+  says it never ran. Queued work is not run after a restart: what it would do is code, not data, and
+  rebuilding it from a stale request could index what nobody asked for any more. On SIGTERM the
+  waiting jobs are marked the same way.
 
 The command line runs the same pipeline in the foreground and renders its events in the terminal; with
-a server, `comindly link` starts the server's job and follows its events instead.
+a server, `comindly link` starts or queues the server's job and follows its events instead.
 
 ## Backends
 

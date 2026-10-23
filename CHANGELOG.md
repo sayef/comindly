@@ -20,6 +20,10 @@ All notable changes to this project are documented here. The format follows
 - Indexing jobs on a server keep a record: who started them, their status and their events, also after a
   restart. `/api/v1/jobs` lists them and `/api/v1/jobs/{id}/events` streams a running job's events.
   A job cut off by a crash shows as interrupted.
+- Indexing jobs queue: starting one while another runs (from the app, `comindly link` or the automatic
+  re-index) waits its turn instead of being refused. Up to 5 wait; asking again for the same indexing
+  returns the waiting job. The app and `comindly link` show "Queued" with the position and can cancel
+  it; queued jobs left by a restart are marked interrupted.
 - `GET /ready` for orchestrators: `200` once an index is loaded and the accounts can be read.
 - `comindly config` shows your preferences; `set`, `import <file> [--override]`, `export [file]` and
   `history` change them, read and write them as TOML, and list earlier versions.

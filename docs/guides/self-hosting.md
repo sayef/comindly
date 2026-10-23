@@ -121,9 +121,11 @@ and HTTPS in front. Without signing in, `GET /health` answers `200` while the pr
 and `GET /ready` answers `200` once an index is loaded and the accounts can be read (`503` with the
 reason until then).
 
-Indexing runs inside the server as a job. On SIGTERM the server stops taking requests, lets a running
-job stop at its next checkpoint and saves its record; a job cut off by a crash shows as interrupted after
-the restart. Summaries and walkthroughs already written are kept either way, so the next run continues
+Indexing runs inside the server as a job, one at a time; starting one while another runs queues it
+(up to 5, and asking again for the same thing returns the job already waiting). On SIGTERM the server
+stops taking requests, lets a running job stop at its next checkpoint and saves its record; a job cut
+off by a crash shows as interrupted after the restart, and queued jobs that never ran are marked
+interrupted too, to be started again. Summaries and walkthroughs already written are kept either way, so the next run continues
 where it stopped. It keeps clones of repositories under `/data`; a volume there saves cloning
 them again after a restart but is not required.
 
@@ -209,8 +211,10 @@ the settings it kept from its configuration file into its database and the index
 The app and the command line use the same JSON API under `/api/v1`, signed in with the session cookie
 or a personal access token (`Authorization: Bearer <token>`). Errors have one shape,
 `{"error": {"code": "…", "message": "…"}}`, with an HTTP status that matches. Indexing jobs are under
-`/api/v1/jobs`: their status, their events, and `/api/v1/jobs/{id}/events` streams a running job's
-events as server-sent events.
+`/api/v1/jobs`: their status (a queued one with its `position`), their events, and
+`/api/v1/jobs/{id}/events` streams a job's events as server-sent events, waiting while it is queued.
+`POST /api/v1/index` answers with the job's `id`, its `status` (`running` or `queued`) and `position`;
+`POST /api/v1/jobs/{id}/cancel` stops a running job or takes a queued one out of the queue.
 
 ## Trying it locally
 
