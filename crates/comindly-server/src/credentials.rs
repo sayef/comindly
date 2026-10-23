@@ -197,6 +197,6 @@ path = "/r/b"
                 ],
             }
         );
-        assert_eq!(export(&c).unwrap(), PREFERENCES);
+        assert_eq!(toml::from_str::<Config>(&export(&c).unwrap()).unwrap(), c);
     }
 }

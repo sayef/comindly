@@ -261,7 +261,7 @@ fn ev_stack(ctx: &Ctx) -> String {
     let read = |n: &str| std::fs::read_to_string(ctx.root.join(n)).ok();
     let mut deps: Vec<String> = Vec::new();
     if let Some(t) = read("pyproject.toml") {
-        if let Ok(v) = t.parse::<toml::Value>() {
+        if let Ok(v) = t.parse::<toml::Table>() {
             if let Some(a) = v
                 .get("project")
                 .and_then(|p| p.get("dependencies"))

@@ -76,7 +76,7 @@ impl RepoPackages {
                 py_roots.extend(python_roots(root, &dir, &text));
             } else if m.file_name() == "Cargo.toml" {
                 if let Some(name) = text
-                    .parse::<toml::Value>()
+                    .parse::<toml::Table>()
                     .ok()
                     .and_then(|v| v.get("package")?.get("name")?.as_str().map(str::to_string))
                 {
@@ -241,7 +241,7 @@ fn join(dir: &str, rel: &str) -> String {
 /// Source roots declared by a `pyproject.toml` in repo-relative `dir`.
 fn python_roots(root: &Path, dir: &str, text: &str) -> Vec<String> {
     let mut out = vec![dir.to_string()];
-    let Ok(v) = text.parse::<toml::Value>() else {
+    let Ok(v) = text.parse::<toml::Table>() else {
         return out;
     };
     let tool = v.get("tool");
@@ -461,6 +461,14 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&strip_jsonc(src)).unwrap();
         assert_eq!(v["a"], "x//y");
         assert_eq!(v["p"], serde_json::json!([1, 2]));
+    }
+
+    #[test]
+    fn pyproject_source_roots() {
+        let text =
+            "[project]\nname = \"x\"\n\n[tool.setuptools.packages.find]\nwhere = [\"lib\"]\n";
+        let roots = python_roots(Path::new("/nonexistent"), "svc", text);
+        assert_eq!(roots, ["svc", "svc/lib"]);
     }
 
     #[test]

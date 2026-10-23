@@ -78,7 +78,7 @@ pub fn scan(root: &Path, repo: &str) -> Vec<PackageRow> {
             };
         match name.as_str() {
             "pyproject.toml" => {
-                let Some(v) = read().and_then(|t| t.parse::<toml::Value>().ok()) else {
+                let Some(v) = read().and_then(|t| t.parse::<toml::Table>().ok()) else {
                     continue;
                 };
                 let locks = python_locks(dir);
@@ -180,7 +180,7 @@ pub fn scan(root: &Path, repo: &str) -> Vec<PackageRow> {
                 }
             }
             "Cargo.toml" => {
-                let Some(v) = read().and_then(|t| t.parse::<toml::Value>().ok()) else {
+                let Some(v) = read().and_then(|t| t.parse::<toml::Table>().ok()) else {
                     continue;
                 };
                 let locks = cargo_locks(dir);
@@ -285,7 +285,7 @@ fn python_locks(dir: &Path) -> HashMap<String, String> {
     for f in ["uv.lock", "poetry.lock"] {
         let Some(v) = std::fs::read_to_string(dir.join(f))
             .ok()
-            .and_then(|t| t.parse::<toml::Value>().ok())
+            .and_then(|t| t.parse::<toml::Table>().ok())
         else {
             continue;
         };
@@ -310,7 +310,7 @@ fn cargo_locks(dir: &Path) -> HashMap<String, String> {
     let mut out = HashMap::new();
     let Some(v) = std::fs::read_to_string(dir.join("Cargo.lock"))
         .ok()
-        .and_then(|t| t.parse::<toml::Value>().ok())
+        .and_then(|t| t.parse::<toml::Table>().ok())
     else {
         return out;
     };
