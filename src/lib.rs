@@ -8,6 +8,7 @@
 pub mod model;
 
 #[cfg(target_os = "macos")]
+pub mod answers;
 pub mod app;
 pub mod backends;
 pub mod cache;

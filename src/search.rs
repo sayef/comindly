@@ -14,6 +14,7 @@ use crate::model::{Symbol, SymbolKind};
 pub type Enrichment = HashMap<String, (String, Vec<String>)>;
 
 /// One ranked search result.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SearchHit {
     pub id: String,
     pub name: String,

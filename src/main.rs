@@ -570,17 +570,13 @@ fn main() -> ExitCode {
             let fmt = if md { Some("md".to_string()) } else { format };
             let fmt = fmt.unwrap_or_else(|| settings_for(index_dir.as_deref()).format);
             let markdown = matches!(fmt.as_str(), "md" | "markdown");
-            let repos: Vec<&str> = repo.iter().map(String::as_str).collect();
-            cmd_search(&query.join(" "), index_dir.as_deref(), &repos, markdown)
+            cmd_search(&query.join(" "), index_dir.as_deref(), &repo, markdown)
         }
         Cmd::Find {
             query,
             index_dir,
             repo,
-        } => {
-            let repos: Vec<&str> = repo.iter().map(String::as_str).collect();
-            cmd_find(&query, index_dir.as_deref(), &repos)
-        }
+        } => cmd_find(&query, index_dir.as_deref(), &repo),
         Cmd::Repos { what, index_dir } => cmd_repo_list(what, index_dir.as_deref()),
         Cmd::Stats { index_dir, repo } => {
             let repos: Vec<&str> = repo.iter().map(String::as_str).collect();
@@ -882,9 +878,7 @@ fn print_group(label: &str, nodes: &[comindly::graph::Node], limit: usize) {
     comindly::ui::field(label, &format!("{}{suffix}", names.join(", ")));
 }
 
-/// `comindly search <query...> --from <uri>` — semantic search reranked by graph centrality,
-/// definition-boost, and test-file penalty (semble's fusion ideas + our unique graph signal).
-fn cmd_search(query: &str, from: Option<&str>, repos: &[&str], markdown: bool) -> ExitCode {
+fn cmd_search(query: &str, from: Option<&str>, repos: &[String], markdown: bool) -> ExitCode {
     let uri = comindly::config::Config::load().graph_dir(from);
     let uri = uri.as_str();
 
@@ -922,10 +916,9 @@ fn cmd_search(query: &str, from: Option<&str>, repos: &[&str], markdown: bool) -
             .collect();
 
     // Native LanceDB hybrid retrieval (BM25 + vector, RRF-fused) + comindly's code-aware boosts
-    // and dependency-graph centrality — shared with the `search` MCP tool. When scoping to a
-    // repo, over-fetch then filter so we still return a full page.
-    let limit = if repos.is_empty() { 12 } else { 60 };
-    let mut hits = match comindly::search::hybrid_blocking(
+    // and dependency-graph centrality — shared with the `search` MCP tool.
+    let limit = comindly::answers::search_limit(repos);
+    let hits = match comindly::search::hybrid_blocking(
         uri, &by_id, &g, &enrich, &embedder, query, limit,
     ) {
         Ok(h) => h,
@@ -936,36 +929,38 @@ fn cmd_search(query: &str, from: Option<&str>, repos: &[&str], markdown: bool) -
             return ExitCode::FAILURE;
         }
     };
-    if !repos.is_empty() {
-        hits.retain(|h| repos.iter().any(|r| h.repo.eq_ignore_ascii_case(r)));
-        hits.truncate(12);
-    }
+    render_search(
+        query,
+        &comindly::answers::search(query, hits, repos),
+        markdown,
+    )
+}
 
+fn render_search(query: &str, s: &comindly::answers::Search, markdown: bool) -> ExitCode {
     if markdown {
-        print!("{}", comindly::search::markdown(query, &hits));
-    } else {
-        comindly::ui::header(&format!("search: \"{query}\""));
-        if hits.is_empty() {
-            comindly::ui::note(
-                "no matches — try a broader query (or the index was built with --no-embed)",
-            );
-            return ExitCode::SUCCESS;
-        }
-        let mut t =
-            comindly::ui::table(&["score", "symbol", "kind", "deps", "location", "summary"]);
-        for h in &hits {
-            t.add_row(vec![
-                format!("{:.3}", h.score),
-                h.name.clone(),
-                h.kind.to_string(),
-                h.deps.to_string(),
-                h.location.clone(),
-                h.summary.clone().unwrap_or_default(),
-            ]);
-        }
-        comindly::ui::right_align(&mut t, &[0, 3]); // score, deps
-        println!("{t}");
+        print!("{}", s.markdown);
+        return ExitCode::SUCCESS;
     }
+    comindly::ui::header(&format!("search: \"{query}\""));
+    if s.hits.is_empty() {
+        comindly::ui::note(
+            "no matches — try a broader query (or the index was built with --no-embed)",
+        );
+        return ExitCode::SUCCESS;
+    }
+    let mut t = comindly::ui::table(&["score", "symbol", "kind", "deps", "location", "summary"]);
+    for h in &s.hits {
+        t.add_row(vec![
+            format!("{:.3}", h.score),
+            h.name.clone(),
+            h.kind.to_string(),
+            h.deps.to_string(),
+            h.location.clone(),
+            h.summary.clone().unwrap_or_default(),
+        ]);
+    }
+    comindly::ui::right_align(&mut t, &[0, 3]); // score, deps
+    println!("{t}");
     ExitCode::SUCCESS
 }
 
@@ -977,17 +972,15 @@ fn read_graph_or_err(from: Option<&str>) -> Result<(Vec<Symbol>, Vec<Edge>), ()>
 }
 
 /// `comindly find <query>` — locate symbols by name/descriptor/path substring.
-fn cmd_find(query: &str, from: Option<&str>, repos: &[&str]) -> ExitCode {
+fn cmd_find(query: &str, from: Option<&str>, repos: &[String]) -> ExitCode {
     let Ok((symbols, edges)) = read_graph_or_err(from) else {
         return ExitCode::FAILURE;
     };
     let g = comindly::graph::CodeGraph::build(&symbols, &edges);
-    // Over-fetch when filtering by repo so a full page survives the filter.
-    let mut hits = g.find(query, if repos.is_empty() { 30 } else { 200 });
-    if !repos.is_empty() {
-        hits.retain(|n| repos.iter().any(|r| n.repo.eq_ignore_ascii_case(r)));
-        hits.truncate(30);
-    }
+    render_find(query, &comindly::answers::find(&g, query, repos))
+}
+
+fn render_find(query: &str, hits: &[comindly::graph::Node]) -> ExitCode {
     comindly::ui::header(&format!(
         "find: \"{query}\" ({})",
         plural(hits.len(), "match")
@@ -997,7 +990,7 @@ fn cmd_find(query: &str, from: Option<&str>, repos: &[&str]) -> ExitCode {
         return ExitCode::SUCCESS;
     }
     let mut t = comindly::ui::table(&["symbol", "kind", "repo", "location", "id"]);
-    for n in &hits {
+    for n in hits {
         t.add_row(vec![
             n.name.clone(),
             n.kind.clone(),
@@ -1303,17 +1296,19 @@ fn cmd_why(focus: &str, from: Option<&str>) -> ExitCode {
         }
     };
     let g = comindly::graph::CodeGraph::build(&symbols, &edges);
-    let Some((name, ids)) = g.scope_of(focus) else {
-        comindly::ui::err(&format!("no symbol matches `{focus}`"));
-        return ExitCode::FAILURE;
-    };
     let records = comindly::ledger::all_blocking(&cfg.index_dir(from)).unwrap_or_default();
     let entries = comindly::ledger::derive(&records, &symbols, &comindly::config::local_verifier());
-    let about = comindly::ledger::about(&entries, &ids);
-    println!(
-        "{}",
-        comindly::ledger::markdown(&format!("why `{name}`"), &about)
-    );
+    match comindly::answers::why(&g, &entries, focus) {
+        Some(w) => render_why(&w),
+        None => {
+            comindly::ui::err(&format!("no symbol matches `{focus}`"));
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn render_why(w: &comindly::answers::Why) -> ExitCode {
+    println!("{}", w.markdown);
     ExitCode::SUCCESS
 }
 
@@ -1364,44 +1359,25 @@ fn cmd_ledger(from: Option<&str>, inbox: bool, check: bool, compact: bool) -> Ex
             return ExitCode::FAILURE;
         }
     };
-    let mut entries =
-        comindly::ledger::derive(&records, &symbols, &comindly::config::local_verifier());
-    if check {
-        let packages =
-            comindly::index::read_packages_blocking(&cfg.graph_dir(from)).unwrap_or_default();
-        let findings = comindly::checks::run(&entries, &symbols, &edges, &packages);
-        if findings.is_empty() {
-            comindly::ui::ok("no constraint carries a check (add one with --field check=...)");
-            return ExitCode::SUCCESS;
-        }
-        println!(
-            "## Constraint checks\n\n{}",
-            comindly::checks::markdown(&findings, None)
-        );
-        let failed = findings
-            .iter()
-            .any(|f| f.severity == "must" && !f.violations.is_empty());
-        return if failed {
-            ExitCode::FAILURE
-        } else {
-            ExitCode::SUCCESS
-        };
-    }
+    let entries = comindly::ledger::derive(&records, &symbols, &comindly::config::local_verifier());
     let packages =
         comindly::index::read_packages_blocking(&cfg.graph_dir(from)).unwrap_or_default();
-    let findings = comindly::checks::run(&entries, &symbols, &edges, &packages);
-    comindly::checks::promote(&mut entries, &findings);
-    let shown = comindly::ledger::inbox(&entries, inbox);
-    let title = if inbox { "Ledger inbox" } else { "Ledger" };
-    println!("{}", comindly::ledger::markdown(title, &shown));
-    let revived = comindly::checks::revivals(&entries, &packages);
-    if !revived.is_empty() {
-        println!("## Retry conditions met\n");
-        for (e, why) in revived {
-            println!("- {} — {why}", comindly::ledger::line(e));
-        }
+    render_ledger(&comindly::answers::ledger(
+        entries, &symbols, &edges, &packages, inbox, check,
+    ))
+}
+
+fn render_ledger(l: &comindly::answers::Ledger) -> ExitCode {
+    if let Some(note) = &l.note {
+        comindly::ui::ok(note);
+    } else {
+        print!("{}", l.markdown);
     }
-    ExitCode::SUCCESS
+    if l.failed {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
 }
 
 fn cmd_erase(ids: &[String], actor: Option<&str>, yes: bool, from: Option<&str>) -> ExitCode {
@@ -2164,7 +2140,6 @@ fn load_conventions(
 }
 
 fn cmd_conventions(from: Option<&str>, repo: Option<&str>) -> ExitCode {
-    use comindly::conventions::{Origin, ORG};
     let (all, manual) = match load_conventions(from) {
         Ok(x) => x,
         Err(e) => {
@@ -2172,11 +2147,14 @@ fn cmd_conventions(from: Option<&str>, repo: Option<&str>) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    render_conventions(&comindly::answers::conventions(all, &manual, repo))
+}
+
+fn render_conventions(c: &comindly::answers::Conventions) -> ExitCode {
+    use comindly::conventions::{Origin, ORG};
     let mut by_repo: BTreeMap<&str, Vec<&comindly::conventions::Convention>> = BTreeMap::new();
-    for c in &all {
-        if repo.is_none_or(|r| c.repo == r || c.repo == ORG) {
-            by_repo.entry(c.repo.as_str()).or_default().push(c);
-        }
+    for c in &c.conventions {
+        by_repo.entry(c.repo.as_str()).or_default().push(c);
     }
     for (r, cs) in by_repo {
         comindly::ui::header(if r == ORG { "Org baseline" } else { r });
@@ -2195,13 +2173,9 @@ fn cmd_conventions(from: Option<&str>, repo: Option<&str>) -> ExitCode {
             }
         }
     }
-    let hidden: Vec<_> = manual
-        .iter()
-        .filter(|m| m.hidden && repo.is_none_or(|r| m.repo == r || m.repo == ORG))
-        .collect();
-    if !hidden.is_empty() {
+    if !c.hidden.is_empty() {
         comindly::ui::header("Hidden (comindly conventions restore <id>)");
-        for m in hidden {
+        for m in &c.hidden {
             comindly::ui::field(&m.dimension, &format!("{}  [{}, {}]", m.rule, m.id, m.repo));
         }
     }
@@ -2296,8 +2270,10 @@ fn cmd_contracts(from: Option<&str>, kind: Option<&str>, dangling: bool) -> Exit
         }
     };
     let g = comindly::graph::CodeGraph::build(&symbols, &edges);
-    let total = g.contracts(None, false).len();
-    let views = g.contracts(kind, dangling);
+    render_contracts(&comindly::answers::contracts(&g, kind, dangling))
+}
+
+fn render_contracts(c: &comindly::answers::Contracts) -> ExitCode {
     let list = |ns: &[comindly::graph::Node]| {
         let set: BTreeSet<String> = ns
             .iter()
@@ -2319,14 +2295,18 @@ fn cmd_contracts(from: Option<&str>, kind: Option<&str>, dangling: bool) -> Exit
     table
         .load_preset(comfy_table::presets::UTF8_FULL)
         .set_header(vec!["contract", "provided by", "used by"]);
-    for v in &views {
+    for v in &c.views {
         table.add_row(vec![
             v.contract.name.clone(),
             list(&v.providers),
             list(&v.consumers),
         ]);
     }
-    comindly::ui::header(&format!("Contracts — {} shown of {total}", views.len()));
+    comindly::ui::header(&format!(
+        "Contracts — {} shown of {}",
+        c.views.len(),
+        c.total
+    ));
     println!("{table}");
     ExitCode::SUCCESS
 }
@@ -2458,8 +2438,6 @@ fn repo_name(path: &str) -> String {
     }
 }
 
-/// `comindly flow <focus> --from <uri>` — the pre-generated flow walkthrough for an entry point (if
-/// the index was built with `--flows`), followed by its live forward call trace.
 fn cmd_flow(focus: &str, from: Option<&str>) -> ExitCode {
     let uri = comindly::config::Config::load().graph_dir(from);
     let uri = uri.as_str();
@@ -2471,47 +2449,52 @@ fn cmd_flow(focus: &str, from: Option<&str>) -> ExitCode {
         }
     };
     let g = comindly::graph::CodeGraph::build(&symbols, &edges);
-    let Some(idx) = g.lookup(focus) else {
-        comindly::ui::err(&format!("no symbol matching `{focus}`"));
-        return ExitCode::FAILURE;
-    };
-    let fid = g.zoom(idx).focus.map(|n| n.id);
-
-    // Pre-generated narration, if present.
-    if let Some(fid) = &fid {
-        let stored = comindly::index::read_flows_blocking(uri)
+    let stored = |fid: &str| {
+        comindly::index::read_flows_blocking(uri)
             .ok()
             .flatten()
             .unwrap_or_default()
             .into_iter()
-            .find(|(id, _, _)| &id.render() == fid);
-        match stored {
-            Some((_, narr, queries)) => {
-                comindly::ui::header(&format!("flow: {focus}"));
-                println!("{narr}\n");
-                if !queries.is_empty() {
-                    comindly::ui::field("Ask", &queries.join(" · "));
-                }
-            }
-            None => comindly::ui::note(&format!(
-                "no pre-generated narration for `{focus}` — showing the raw trace; run `index/link --flows` to narrate"
-            )),
+            .find(|(id, _, _)| id.render() == fid)
+            .map(|(_, narr, queries)| (narr, queries))
+    };
+    match comindly::answers::flow(&g, focus, stored) {
+        Some(f) => render_flow(&f),
+        None => {
+            comindly::ui::err(&format!("no symbol matching `{focus}`"));
+            ExitCode::FAILURE
         }
     }
+}
 
-    // Live forward call trace.
-    let hops = g.thread(idx, 4);
-    comindly::ui::header(&format!("flow trace from `{focus}` ({} steps)", hops.len()));
-    if hops.is_empty() {
+fn render_flow(f: &comindly::answers::Flow) -> ExitCode {
+    let focus = &f.focus;
+    match &f.narration {
+        Some((narr, queries)) => {
+            comindly::ui::header(&format!("flow: {focus}"));
+            println!("{narr}\n");
+            if !queries.is_empty() {
+                comindly::ui::field("Ask", &queries.join(" · "));
+            }
+        }
+        None => comindly::ui::note(&format!(
+            "no pre-generated narration for `{focus}` — showing the raw trace; run `index/link --flows` to narrate"
+        )),
+    }
+    comindly::ui::header(&format!(
+        "flow trace from `{focus}` ({} steps)",
+        f.steps.len()
+    ));
+    if f.steps.is_empty() {
         comindly::ui::note("no outgoing calls from here");
     } else {
         let mut t = comindly::ui::table(&["depth", "via", "symbol", "location"]);
-        for h in &hops {
+        for h in &f.steps {
             t.add_row(vec![
                 format!("d{}", h.depth),
-                h.via.to_string(),
-                h.node.name.clone(),
-                h.node.location.clone(),
+                h.via.clone(),
+                h.name.clone(),
+                h.location.clone(),
             ]);
         }
         comindly::ui::right_align(&mut t, &[0]);

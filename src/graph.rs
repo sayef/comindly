@@ -43,7 +43,7 @@ pub const PROVIDES: &[EdgeKind] = &[
 ];
 
 /// A node as returned to callers — flat, printable, agent-friendly.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Node {
     pub id: String,
     pub name: String,
@@ -96,7 +96,7 @@ pub struct ContractRole {
 }
 
 /// A contract with everyone on each side.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ContractView {
     pub contract: Node,
     pub providers: Vec<Node>,
