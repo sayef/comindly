@@ -228,7 +228,9 @@ person whose token the agent uses.
 
 - `/api/v1`: JSON. The web app and the command line use it. The answers the read commands print
   (`/api/v1/answer/*`) are the types in `comindly_core::answers`, computed by the same functions locally
-  and on a server, so `--server` prints what a local run does.
+  and on a server, so `--server` prints what a local run does. `/api/v1/view` sends the terminal UI
+  `comindly_core::view::View` (symbols, edges, ledger entries, conventions, dependencies), gzip-compressed;
+  the client rebuilds the graph and contracts from it.
 - Errors: one shape, `{ "error": { "code", "message" } }`, with HTTP status codes that mean what they say.
 - `/mcp`: MCP over streamable HTTP for agents, with a personal access token.
 - `/health` (alive) and `/ready` (an index is loaded and the accounts can be read).

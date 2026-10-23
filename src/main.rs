@@ -315,7 +315,7 @@ enum Cmd {
         #[arg(long, default_value = "0.0.0.0")]
         host: String,
     },
-    /// The web UI in its own window (macOS)
+    /// The web UI in its own window (macOS); a server's app when you use one
     App {
         #[arg(long = "index-dir")]
         index_dir: Option<String>,

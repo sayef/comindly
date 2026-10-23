@@ -10,6 +10,12 @@ call. Links to other sites open in your browser.
 Started from a terminal, it sees your shell's environment (storage credentials for an index in a bucket). Linux
 and Windows: use the web UI.
 
+Against a server (after `comindly login <url>`, or with `--server <url>`), the window opens that
+server's app instead, and the title shows which server. You sign in in the window as in a browser,
+and it remembers the session. A sign-in link from an email opens in your browser; to sign the window
+in with it, copy the link and choose **View → Open Link from Clipboard** (<kbd>⌘L</kbd>). `--local`,
+or an explicit `--index-dir`, opens this machine's index as before.
+
 ## Web UI
 
 `comindly ui --web [--port 7878] [--open]` serves the same UI on 127.0.0.1 only. A team server runs
@@ -152,4 +158,12 @@ pan. Dark by default; the header toggles a light theme. Against a read-only inde
 ## Terminal UI
 
 `comindly ui` is the compact terminal view: overview, contracts, ledger (with a timeline), explorer and
-conventions.
+conventions. On the ledger tab, <kbd>c</kbd> confirms and <kbd>x</kbd> retracts the selected record;
+<kbd>r</kbd> reads the index again.
+
+Against a server (after `comindly login <url>`, or with `--server <url>`), it shows the server's index
+and names the server in its title. Reviews go to the server under your name; a viewer's are refused
+with a message in the status line. The server's index changes as it re-indexes and colleagues add
+records: press <kbd>r</kbd> to fetch it again. The whole view is fetched at once, compressed (about
+10 KB for the example company; a large index is tens of MB). `--local`, or an explicit `--index-dir`,
+uses the index on this machine.

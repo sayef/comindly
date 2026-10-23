@@ -45,7 +45,9 @@ same command prints locally; writes are recorded as you, with your role on the s
 reads the changes from git on this machine and asks the server what they touch. `explore` with repo
 folders parses them here. `link` starts indexing on the server and shows its progress here;
 Ctrl-C cancels it there. The server indexes its own repository list, so `link` takes no folders and
-`index` is refused.
+`index` is refused. `ui` shows the server's index in the terminal (reviews go to the server, <kbd>r</kbd>
+fetches it again), and `app` opens the server's web app in the window, where you sign in. `ui --web`
+always serves this machine's index.
 
 `--server <url>` (or `COMINDLY_SERVER`) picks a server for one command; `COMINDLY_TOKEN` stands in for
 a sign-in, for CI. `--local`, or an explicit `--index-dir`, uses the index on this machine. Every other

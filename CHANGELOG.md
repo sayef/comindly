@@ -18,6 +18,12 @@ All notable changes to this project are documented here. The format follows
   what a local run prints (`preflight` reads the changes from git here); `link` starts indexing there and follows it, and Ctrl-C
   cancels it there. `--server <url>`, `COMINDLY_SERVER` and `COMINDLY_TOKEN` (for CI) pick a server for
   one command; `--local` uses the index on this machine.
+- `comindly ui` against a server: the terminal UI shows the server's index (`GET /api/v1/view`,
+  gzip-compressed), sends reviews to the server with your role, and fetches it again with `r`, which
+  also re-reads a local index.
+- `comindly app` against a server: the window opens the server's web app, with the server in its
+  title; you sign in in the window, and **View → Open Link from Clipboard** signs it in with an
+  emailed link.
 - Indexing jobs on a server keep a record: who started them, their status and their events, also after a
   restart. `/api/v1/jobs` lists them and `/api/v1/jobs/{id}/events` streams a running job's events.
   A job cut off by a crash shows as interrupted.
