@@ -161,8 +161,9 @@ search index and ledger behind an `Arc`, swapped atomically when a new index ver
   (`spawn_blocking`), so request handling stays responsive while a large index builds.
 - I/O (object storage, LLM requests, git hosting APIs) is async. LLM requests share one client with a
   per-call concurrency limit from the settings.
-- Git operations use git2 on the blocking pool instead of the `git` program, so cloning, fetching and
-  checkouts need nothing installed. `ssh-keygen` remains only for optional record signing.
+- Cloning, fetching and checkouts use the `git` program on the blocking pool: partial clones
+  (`--filter=blob:none`) and the machine's credential helpers need it. Cancellation takes effect
+  between repositories. `ssh-keygen` is used only for optional record signing.
 
 ## Jobs
 
@@ -229,7 +230,7 @@ The CLI keeps `config.toml` for one person's preferences and credentials.
 1. **Pipeline into core.** Move indexing (`cmd_link` and the `run_*` steps, now in the CLI binary) into
    `core::pipeline` as an async `Indexer` that reports events and honours cancellation.
 2. **One runtime.** Replace the `*_blocking` wrappers (33 functions, each building a runtime) with async
-   calls; CPU work moves to the blocking pool; git2 replaces the `git` program.
+   calls; CPU work moves to the blocking pool.
 3. **Contexts.** Introduce `IndexContext` and `ServerConfig`; remove `team::current()`, the store
    singletons and `Config::load()` / environment reads below `main` (today in `llm`, `ledger`, `signing`,
    `embed`, `mcp`, `server`, `web`).
