@@ -4,6 +4,7 @@
 use anyhow::{bail, Context, Result};
 use serde::{de::DeserializeOwned, Serialize};
 
+use crate::api;
 use crate::events::Event;
 
 #[derive(Clone)]
@@ -37,7 +38,7 @@ impl Client {
     pub async fn get<T: DeserializeOwned>(
         &self,
         path: &str,
-        query: &[(&str, String)],
+        query: &(impl Serialize + ?Sized),
     ) -> Result<T> {
         let r = self
             .request(reqwest::Method::GET, path)
@@ -60,7 +61,7 @@ impl Client {
     pub async fn revoke_own_token(&self) -> Result<bool> {
         let r = self
             .request(reqwest::Method::POST, "/api/v1/auth/token/revoke")
-            .json(&serde_json::json!({}))
+            .json(&serde_json::Map::new())
             .send()
             .await;
         if r.as_ref()
@@ -68,7 +69,7 @@ impl Client {
         {
             return Ok(false);
         }
-        self.read::<serde_json::Value>(r).await.map(|_| true)
+        self.read::<api::Done>(r).await.map(|_| true)
     }
 
     async fn read<T: DeserializeOwned>(&self, r: reqwest::Result<reqwest::Response>) -> Result<T> {
@@ -77,11 +78,11 @@ impl Client {
         if status.is_success() {
             return r.json().await.context("unexpected answer from the server");
         }
-        let body: serde_json::Value = r.json().await.unwrap_or_default();
-        let message = body["error"]["message"]
-            .as_str()
-            .map(str::to_string)
-            .unwrap_or_else(|| format!("the server answered {status}"));
+        let message = r
+            .json::<api::ErrorBody>()
+            .await
+            .map(|b| b.error.message)
+            .unwrap_or_else(|_| format!("the server answered {status}"));
         if status == reqwest::StatusCode::UNAUTHORIZED && self.token.is_none() {
             bail!("{message}: sign in with `comindly login {}`", self.base);
         }
@@ -140,41 +141,32 @@ pub struct Approved {
 /// Sign in to `base` as `client`: `show` gets the address and code to approve in the browser, then
 /// the server is polled until someone approves or denies it, or it expires.
 pub async fn login(base: &str, client: &str, show: impl FnOnce(&str, &str)) -> Result<Approved> {
-    #[derive(serde::Deserialize)]
-    struct Start {
-        device_code: String,
-        user_code: String,
-        verify_url: String,
-        interval: u64,
-    }
-    #[derive(serde::Deserialize)]
-    struct Poll {
-        status: String,
-        token: Option<String>,
-        email: Option<String>,
-        expires: Option<String>,
-    }
     let c = Client::new(base, None);
-    let start: Start = c
+    let start: api::DeviceStart = c
         .post(
             "/api/v1/auth/device/start",
-            &serde_json::json!({"client": client}),
+            &api::DeviceStartRequest {
+                client: client.to_string(),
+            },
         )
         .await?;
     show(&start.verify_url, &start.user_code);
+    let poll = api::DeviceTokenRequest {
+        device_code: start.device_code.clone(),
+    };
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(start.interval.max(1))).await;
-        let p: Poll = c
-            .post(
-                "/api/v1/auth/device/token",
-                &serde_json::json!({"device_code": start.device_code}),
-            )
-            .await?;
-        if p.status == "approved" {
+        let p: api::DeviceToken = c.post("/api/v1/auth/device/token", &poll).await?;
+        if let api::DeviceToken::Approved {
+            token,
+            email,
+            expires,
+        } = p
+        {
             return Ok(Approved {
-                token: p.token.context("no token in the answer")?,
-                email: p.email.unwrap_or_default(),
-                expires: p.expires,
+                token,
+                email,
+                expires,
             });
         }
     }

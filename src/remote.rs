@@ -3,8 +3,8 @@
 
 use std::process::ExitCode;
 
+use comindly::api;
 use comindly::client::Client;
-use serde_json::json;
 
 use crate::{Cmd, ConventionsWhat};
 
@@ -32,18 +32,23 @@ pub fn client(server: Option<&str>, local: bool) -> Option<Client> {
 
 /// Doctor's line for the server: who this machine is signed in as, and whether that still works.
 pub fn sign_in_check(c: &Client) -> comindly::doctor::Check {
-    let me = comindly::rt::block_on(c.get::<serde_json::Value>("/api/v1/auth/me", &[]));
+    let me = comindly::rt::block_on(c.get::<api::Me>("/api/v1/auth/me", &()));
     let (ok, message) = match me {
-        Ok(m) if m["signed_in"] == true => (
+        Ok(api::Me::Server {
+            signed_in: true,
+            email,
+            role,
+            ..
+        }) => (
             true,
             format!(
                 "signed in to {} as {} ({})",
                 c.base(),
-                m["email"].as_str().unwrap_or("?"),
-                m["role"].as_str().unwrap_or("?")
+                email.as_deref().unwrap_or("?"),
+                role.map_or("?".into(), |r| format!("{r:?}").to_lowercase())
             ),
         ),
-        Ok(m) if m["mode"] == "server" => (
+        Ok(api::Me::Server { .. }) => (
             false,
             format!(
                 "not signed in to {0}, or the sign-in has ended: run `comindly login {0}`",
@@ -62,8 +67,7 @@ pub fn sign_in_check(c: &Client) -> comindly::doctor::Check {
 
 /// Run `cmd` against the server when it is one the server answers; `None` runs it locally.
 pub fn dispatch(c: &Client, cmd: &Cmd) -> Option<ExitCode> {
-    let q = |pairs: &[(&'static str, String)]| pairs.to_vec();
-    let csv = |r: &[String]| r.join(",");
+    let csv = |r: &[String]| Some(r.join(",")).filter(|r| !r.is_empty());
     Some(match cmd {
         Cmd::Find {
             query,
@@ -72,7 +76,10 @@ pub fn dispatch(c: &Client, cmd: &Cmd) -> Option<ExitCode> {
         } => show(
             c.get(
                 "/api/v1/answer/find",
-                &q(&[("q", query.clone()), ("repos", csv(repo))]),
+                &api::AnswerQuery {
+                    q: query.clone(),
+                    repos: csv(repo),
+                },
             ),
             |hits: Vec<comindly::graph::Node>| crate::render_find(query, &hits),
         ),
@@ -91,7 +98,10 @@ pub fn dispatch(c: &Client, cmd: &Cmd) -> Option<ExitCode> {
             show(
                 c.get(
                     "/api/v1/answer/search",
-                    &q(&[("q", query.clone()), ("repos", csv(repo))]),
+                    &api::AnswerQuery {
+                        q: query.clone(),
+                        repos: csv(repo),
+                    },
                 ),
                 |s| crate::render_search(&query, &s, markdown),
             )
@@ -100,7 +110,12 @@ pub fn dispatch(c: &Client, cmd: &Cmd) -> Option<ExitCode> {
             focus,
             index_dir: None,
         } => show(
-            c.get("/api/v1/answer/why", &q(&[("focus", focus.clone())])),
+            c.get(
+                "/api/v1/answer/why",
+                &api::AnswerFocus {
+                    focus: focus.clone(),
+                },
+            ),
             |w| crate::render_why(&w),
         ),
         Cmd::Ledger {
@@ -111,7 +126,10 @@ pub fn dispatch(c: &Client, cmd: &Cmd) -> Option<ExitCode> {
         } => show(
             c.get(
                 "/api/v1/answer/ledger",
-                &q(&[("inbox", inbox.to_string()), ("check", check.to_string())]),
+                &api::LedgerQuery {
+                    inbox: *inbox,
+                    check: *check,
+                },
             ),
             |l| crate::render_ledger(&l),
         ),
@@ -119,7 +137,12 @@ pub fn dispatch(c: &Client, cmd: &Cmd) -> Option<ExitCode> {
             focus,
             index_dir: None,
         } => show(
-            c.get("/api/v1/answer/flow", &q(&[("focus", focus.clone())])),
+            c.get(
+                "/api/v1/answer/flow",
+                &api::AnswerFocus {
+                    focus: focus.clone(),
+                },
+            ),
             |f| crate::render_flow(&f),
         ),
         Cmd::Explore {
@@ -127,21 +150,32 @@ pub fn dispatch(c: &Client, cmd: &Cmd) -> Option<ExitCode> {
             index_dir: None,
             repos,
         } if repos.is_empty() => show(
-            c.get("/api/v1/answer/explore", &q(&[("focus", focus.clone())])),
+            c.get(
+                "/api/v1/answer/explore",
+                &api::AnswerFocus {
+                    focus: focus.clone(),
+                },
+            ),
             |e| crate::render_explore(focus, &e),
         ),
         Cmd::Stats {
             index_dir: None,
             repo,
         } => show(
-            c.get("/api/v1/answer/stats", &q(&[("repos", csv(repo))])),
+            c.get(
+                "/api/v1/answer/stats",
+                &api::StatsQuery { repos: csv(repo) },
+            ),
             |s| crate::render_stats(&s),
         ),
         Cmd::Packages {
             index_dir: None,
             skew,
         } => show(
-            c.get("/api/v1/answer/packages", &q(&[("skew", skew.to_string())])),
+            c.get(
+                "/api/v1/answer/packages",
+                &api::PackagesQuery { skew: *skew },
+            ),
             |d: Vec<comindly::manifests::InternalDep>| crate::render_packages(&d),
         ),
         Cmd::Preflight {
@@ -155,7 +189,10 @@ pub fn dispatch(c: &Client, cmd: &Cmd) -> Option<ExitCode> {
                 Err(code) => return Some(code),
             };
             show(
-                c.post("/api/v1/answer/preflight", &json!({"changes": changes})),
+                c.post(
+                    "/api/v1/answer/preflight",
+                    &api::PreflightRequest { changes },
+                ),
                 |p| crate::render_preflight(&p, *strict),
             )
         }
@@ -164,9 +201,11 @@ pub fn dispatch(c: &Client, cmd: &Cmd) -> Option<ExitCode> {
             kind,
             dangling,
         } => {
-            let mut params = q(&[("dangling", dangling.to_string())]);
-            params.extend(kind.clone().map(|k| ("kind", k)));
-            show(c.get("/api/v1/answer/contracts", &params), |a| {
+            let query = api::ContractsQuery {
+                kind: kind.clone(),
+                dangling: *dangling,
+            };
+            show(c.get("/api/v1/answer/contracts", &query), |a| {
                 crate::render_contracts(&a)
             })
         }
@@ -177,11 +216,7 @@ pub fn dispatch(c: &Client, cmd: &Cmd) -> Option<ExitCode> {
         } => show(
             c.get(
                 "/api/v1/answer/conventions",
-                &repo
-                    .clone()
-                    .map(|r| ("repo", r))
-                    .into_iter()
-                    .collect::<Vec<_>>(),
+                &api::RepoQuery { repo: repo.clone() },
             ),
             |a| crate::render_conventions(&a),
         ),
@@ -190,15 +225,22 @@ pub fn dispatch(c: &Client, cmd: &Cmd) -> Option<ExitCode> {
             index_dir: None,
             repo,
         } => {
+            let change = |action: &str, id: &str, rule: &str| api::ConventionChange {
+                action: action.into(),
+                id: id.into(),
+                repo: None,
+                dimension: None,
+                rule: rule.into(),
+            };
             let body = match what {
-                ConventionsWhat::Add { rule, dimension } => {
-                    json!({"action": "add", "rule": rule, "dimension": dimension, "repo": repo})
-                }
-                ConventionsWhat::Edit { id, rule } => {
-                    json!({"action": "edit", "id": id, "rule": rule})
-                }
-                ConventionsWhat::Rm { id } => json!({"action": "hide", "id": id}),
-                ConventionsWhat::Restore { id } => json!({"action": "restore", "id": id}),
+                ConventionsWhat::Add { rule, dimension } => api::ConventionChange {
+                    repo: repo.clone(),
+                    dimension: Some(dimension.clone()),
+                    ..change("add", "", rule)
+                },
+                ConventionsWhat::Edit { id, rule } => change("edit", id, rule),
+                ConventionsWhat::Rm { id } => change("hide", id, ""),
+                ConventionsWhat::Restore { id } => change("restore", id, ""),
             };
             done(c.post("/api/v1/conventions", &body))
         }
@@ -212,18 +254,21 @@ pub fn dispatch(c: &Client, cmd: &Cmd) -> Option<ExitCode> {
             field,
             index_dir: None,
         } => {
-            let fields: serde_json::Map<String, serde_json::Value> = field
-                .iter()
-                .filter_map(|f| f.split_once('='))
-                .map(|(k, v)| (k.trim().to_string(), v.trim().into()))
-                .collect();
-            let req = json!({"kind": kind, "on": on, "title": title, "body": body,
-                             "trigger": trigger, "evidence": evidence, "fields": fields});
-            show(c.post("/api/v1/remember", &req), |r: serde_json::Value| {
-                comindly::ui::ok(&format!(
-                    "recorded {kind} `{title}` ({})",
-                    r["id"].as_str().unwrap_or("")
-                ));
+            let req = api::RememberRequest {
+                kind: kind.clone(),
+                on: on.clone(),
+                title: title.clone(),
+                body: body.clone(),
+                trigger: trigger.clone(),
+                evidence: evidence.clone(),
+                fields: field
+                    .iter()
+                    .filter_map(|f| f.split_once('='))
+                    .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+                    .collect(),
+            };
+            show(c.post("/api/v1/remember", &req), |r: api::Remembered| {
+                comindly::ui::ok(&format!("recorded {kind} `{title}` ({})", r.id));
                 ExitCode::SUCCESS
             })
         }
@@ -234,7 +279,11 @@ pub fn dispatch(c: &Client, cmd: &Cmd) -> Option<ExitCode> {
             index_dir: None,
         } => done(c.post(
             "/api/v1/review",
-            &json!({"id": id, "action": action, "reason": reason}),
+            &api::ReviewRequest {
+                id: id.clone(),
+                action: action.clone(),
+                reason: reason.clone(),
+            },
         )),
         Cmd::Link {
             repos,
@@ -303,10 +352,10 @@ where
 /// Print the server's message for a change.
 fn done<F>(answer: F) -> ExitCode
 where
-    F: std::future::Future<Output = anyhow::Result<serde_json::Value>> + Send,
+    F: std::future::Future<Output = anyhow::Result<api::Done>> + Send,
 {
     show(answer, |r| {
-        comindly::ui::ok(r["message"].as_str().unwrap_or("done"));
+        comindly::ui::ok(&r.message);
         ExitCode::SUCCESS
     })
 }
@@ -316,17 +365,17 @@ where
 fn index(c: &Client, llm: bool) -> ExitCode {
     use comindly::events::EventSink;
     let run = async {
-        let started: serde_json::Value = c
+        let started: api::IndexStarted = c
             .post(
                 "/api/v1/index",
-                &json!({"llm": llm, "drop_unlisted": false}),
+                &api::IndexRequest {
+                    llm,
+                    drop_unlisted: false,
+                },
             )
             .await?;
-        let id = started["id"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("the server did not say which job started"))?
-            .to_string();
-        match started["position"].as_u64() {
+        let id = started.id;
+        match started.position {
             Some(_) => comindly::ui::note(&format!(
                 "waiting on {} (job {id}); it starts when the jobs before it end",
                 c.base()
@@ -339,19 +388,23 @@ fn index(c: &Client, llm: bool) -> ExitCode {
         tokio::select! {
             r = &mut follow => r?,
             _ = tokio::signal::ctrl_c() => {
-                let r: serde_json::Value =
-                    c.post(&format!("/api/v1/jobs/{id}/cancel"), &json!({})).await?;
-                comindly::ui::warn(r["message"].as_str().unwrap_or("cancelling the job on the server"));
+                let r: api::Done = c
+                    .post(&format!("/api/v1/jobs/{id}/cancel"), &serde_json::Map::new())
+                    .await?;
+                comindly::ui::warn(&r.message);
                 follow.await?;
             }
         }
-        let job: serde_json::Value = c.get(&format!("/api/v1/jobs/{id}"), &[]).await?;
-        anyhow::Ok(job["job"]["status"].as_str().unwrap_or("").to_string())
+        let job: api::JobDetail = c.get(&format!("/api/v1/jobs/{id}"), &()).await?;
+        anyhow::Ok(job.job.status)
     };
     match comindly::rt::block_on(run) {
-        Ok(status) if status == "succeeded" => ExitCode::SUCCESS,
+        Ok(api::Status::Succeeded) => ExitCode::SUCCESS,
         Ok(status) => {
-            comindly::ui::err(&format!("the job ended {status}"));
+            comindly::ui::err(&format!(
+                "the job ended {}",
+                format!("{status:?}").to_lowercase()
+            ));
             ExitCode::FAILURE
         }
         Err(e) => {

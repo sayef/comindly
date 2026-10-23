@@ -155,7 +155,7 @@ pub fn run(open: Open) -> anyhow::Result<()> {
             })(),
             Open::Server(url) => {
                 let c = crate::client::Client::new(&url, None);
-                crate::rt::block_on(c.get::<serde_json::Value>("/api/v1/auth/me", &[])).map(|_| {
+                crate::rt::block_on(c.get::<crate::api::Me>("/api/v1/auth/me", &())).map(|_| {
                     let _ = proxy.send_event(Msg::Ready(format!("{url}/")));
                 })
             }

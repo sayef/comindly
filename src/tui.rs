@@ -43,7 +43,7 @@ pub struct App {
 
 /// The terminal UI's data from a server's `/api/v1/view`.
 pub fn fetch(c: &crate::client::Client) -> Result<Data> {
-    let view: crate::view::View = crate::rt::block_on(c.get("/api/v1/view", &[]))?;
+    let view: crate::view::View = crate::rt::block_on(c.get("/api/v1/view", &()))?;
     if let Some(problem) = view.problem.as_ref().filter(|_| view.symbols.is_empty()) {
         anyhow::bail!("{} has no index yet: {problem}", c.base());
     }
@@ -168,13 +168,17 @@ impl App {
                 crate::ledger::RelationKind::Retracts => "retract",
                 _ => "confirm",
             };
-            let body = serde_json::json!({"id": id, "action": action, "reason": ""});
-            let sent: Result<serde_json::Value> =
+            let body = crate::api::ReviewRequest {
+                id,
+                action: action.into(),
+                reason: String::new(),
+            };
+            let sent: Result<crate::api::Done> =
                 crate::rt::block_on(c.post("/api/v1/review", &body));
             self.status = match sent {
                 Err(e) => format!("not recorded: {e:#}"),
                 Ok(r) => {
-                    let msg = r["message"].as_str().unwrap_or("recorded").to_string();
+                    let msg = r.message;
                     match fetch(c) {
                         Ok(data) => {
                             self.data = prepare(data);
