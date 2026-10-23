@@ -86,7 +86,10 @@ Until the first index exists, agents get `503` with the reason; they connect onc
 indexed. Nothing is installed on the developer's machine, and no storage credentials leave the server. A
 personal access token is for agents and scripts: it reads and writes the index and the ledger, but
 cannot manage the account, its tokens, members or the server's secrets; that needs signing in.
-Records an agent writes say which member it works for; after each re-index, agents get the new
+A token lasts 30 days, 90 days (the default), a year or without expiry, chosen when it is created.
+An expired token stops working and shows as expired under Settings → Your access; it is removed 30
+days later. Through the API, `POST /api/v1/tokens` takes `{"name": "…", "expires_in_days": 90}`
+(`null` for no expiry). Records an agent writes say which member it works for; after each re-index, agents get the new
 index without reconnecting. Ledger records written in the app carry the member's address.
 
 ## The command line
@@ -102,7 +105,8 @@ the code and approves. The command line then has its own personal access token, 
 machine, and `find`, `search`, `why`, `ledger`, `flow`, `contracts`, `conventions`, `remember`,
 `review` and `link` ask the server ([Command line](../reference/cli.md#against-a-server)). Admins can
 start indexing with `comindly link` and follow it in the terminal. `comindly logout` forgets the
-sign-in on that machine; the token can be revoked under Settings → Your access.
+sign-in on that machine; the token can be revoked under Settings → Your access. It expires after 90
+days; the command line then says so and asks to run `comindly login` again.
 
 ![Approving a command line's sign-in](../assets/screenshots/device.webp#only-light)
 ![Approving a command line's sign-in](../assets/screenshots/device-dark.webp#only-dark)
@@ -113,6 +117,15 @@ Settings → Integrations shows each token the server uses and where it comes fr
 One the deployment provides wins and is read-only there; otherwise an admin pastes one, and it is
 stored encrypted with `COMINDLY_SECRET_KEY`. Read-only tokens are enough: a GitLab group access token
 with `read_repository` and `read_api`, or a fine-grained GitHub token with Contents and Metadata read.
+
+## Audit log
+
+Admins see who changed what under Settings → Audit, newest first: sign-ins and sign-outs, joining,
+invitations, role changes, removals, sign-in code resets, tokens created and revoked, command-line
+sign-ins approved or denied, secrets saved or removed, and changes to the repositories. Token values and
+codes are never recorded. The log is also at `GET /api/v1/audit` (admins, signed in): `limit`
+(default 50, at most 500), `before` (the previous page's `next`), and optional `actor` and `action`
+filters. Its rows are signed like the rest of the accounts.
 
 ## Deploying
 

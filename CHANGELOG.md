@@ -28,6 +28,11 @@ All notable changes to this project are documented here. The format follows
 - `comindly config` shows your preferences; `set`, `import <file> [--override]`, `export [file]` and
   `history` change them, read and write them as TOML, and list earlier versions.
 - The index's shared settings also hold `scip` and `auto_index`.
+- Personal access tokens expire: 30 days, 90 days (the default), a year or never, chosen when one is
+  created. Expired tokens stop working, show as expired and are removed 30 days later. A command line's
+  token from `comindly login` lasts 90 days; when it expires, the command says to sign in again.
+- An audit log for admins: Settings → Audit and `GET /api/v1/audit`, newest first, with paging and
+  filters by who and what. Sign-outs are recorded too; token values and codes never are.
 - comindly is also published as `comindly-core` (the engine, including indexing as an async,
   cancellable pipeline that reports events), `comindly-server` and `comindly-ui`.
 

@@ -205,6 +205,7 @@ What the server stores and how it signs people in are traits, with comindly's de
 | Trait | Default |
 |---|---|
 | `AccountStore` (members, roles, invitations, sessions, codes, personal access tokens) | signed LanceDB table at the index location (`_server`) |
+| `AuditLog` (who changed what, for admins) | the same table |
 | `Authenticator` (session cookie or bearer token → who) | the same table, plus the deployment's admin token |
 | `DeviceSignIn` (command-line sign-in approved in the browser) | the same table; the issued token sealed until collected |
 | `SecretStore` (git and LLM tokens) | the same table, values encrypted with `COMINDLY_SECRET_KEY` |
