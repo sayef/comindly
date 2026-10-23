@@ -6,6 +6,7 @@ use serde::{de::DeserializeOwned, Serialize};
 
 use crate::events::Event;
 
+#[derive(Clone)]
 pub struct Client {
     base: String,
     token: Option<String>,

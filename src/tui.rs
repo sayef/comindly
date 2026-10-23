@@ -37,18 +37,27 @@ pub struct App {
     /// Last action's outcome, shown in the help line.
     status: String,
     quit: bool,
+    /// The server the data came from; reviews and reloads then go there.
+    server: Option<crate::client::Client>,
+}
+
+/// The terminal UI's data from a server's `/api/v1/view`.
+pub fn fetch(c: &crate::client::Client) -> Result<Data> {
+    let view: crate::view::View = crate::rt::block_on(c.get("/api/v1/view", &[]))?;
+    if let Some(problem) = view.problem.as_ref().filter(|_| view.symbols.is_empty()) {
+        anyhow::bail!("{} has no index yet: {problem}", c.base());
+    }
+    Ok(Data::from_view(view))
 }
 
 impl App {
-    pub fn new(mut data: Data) -> App {
-        let measured = std::mem::take(&mut data.conventions);
-        data.conventions = crate::conventions::apply(measured, &data.manual);
+    pub fn new(data: Data) -> App {
         let mut lists: [ListState; 6] = Default::default();
         for l in &mut lists {
             l.select(Some(0));
         }
         App {
-            data,
+            data: prepare(data),
             tab: 0,
             lists,
             inner: ListState::default().with_selected(Some(0)),
@@ -58,7 +67,14 @@ impl App {
             found: Vec::new(),
             status: String::new(),
             quit: false,
+            server: None,
         }
+    }
+
+    /// Show data fetched from `server`, and send reviews and reloads there.
+    pub fn on_server(mut self, server: crate::client::Client) -> App {
+        self.server = Some(server);
+        self
     }
 
     pub fn run(mut self) -> Result<()> {
@@ -117,14 +133,59 @@ impl App {
             KeyCode::Char('x') if self.tab == 2 => {
                 self.review(crate::ledger::RelationKind::Retracts)
             }
+            KeyCode::Char('r') => self.reload(),
             KeyCode::Char('J') => step(&mut self.inner, 1, usize::MAX),
             KeyCode::Char('K') => step(&mut self.inner, -1, usize::MAX),
             _ => {}
         }
     }
 
+    /// Read the index again, from the server or the index root.
+    fn reload(&mut self) {
+        let loaded = match (&self.server, &self.data.root) {
+            (Some(c), _) => fetch(c),
+            (None, Some(root)) => Data::load(root, &crate::config::local_verifier()),
+            (None, None) => return,
+        };
+        self.status = match loaded {
+            Ok(data) => {
+                self.data = prepare(data);
+                self.refresh();
+                "reloaded".into()
+            }
+            Err(e) => format!("not reloaded: {e:#}"),
+        };
+    }
+
     /// Confirm or retract the selected ledger record as a human reviewer.
     fn review(&mut self, kind: crate::ledger::RelationKind) {
+        if let Some(c) = &self.server {
+            let selected = self.lists[2].selected().unwrap_or(0);
+            let Some(id) = self.entries().get(selected).map(|e| e.record.id.clone()) else {
+                return;
+            };
+            let action = match kind {
+                crate::ledger::RelationKind::Retracts => "retract",
+                _ => "confirm",
+            };
+            let body = serde_json::json!({"id": id, "action": action, "reason": ""});
+            let sent: Result<serde_json::Value> =
+                crate::rt::block_on(c.post("/api/v1/review", &body));
+            self.status = match sent {
+                Err(e) => format!("not recorded: {e:#}"),
+                Ok(r) => {
+                    let msg = r["message"].as_str().unwrap_or("recorded").to_string();
+                    match fetch(c) {
+                        Ok(data) => {
+                            self.data = prepare(data);
+                            msg
+                        }
+                        Err(e) => format!("{msg}; not reloaded: {e:#}"),
+                    }
+                }
+            };
+            return;
+        }
         let Some(root) = self.data.root.clone() else {
             self.status = "read-only: no index root".into();
             return;
@@ -255,7 +316,10 @@ impl App {
                 .map(|(i, t)| format!("{} {t}", i + 1)),
         )
         .select(self.tab)
-        .block(Block::bordered().title(" comindly "))
+        .block(Block::bordered().title(match &self.server {
+            Some(c) => format!(" comindly · {} ", c.base()),
+            None => " comindly ".to_string(),
+        }))
         .highlight_style(Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD));
         f.render_widget(tabs, top);
         match self.tab {
@@ -275,9 +339,9 @@ impl App {
                 format!("  filter: {}", self.filter)
             };
             let actions = if self.tab == 2 {
-                " · c confirm · x retract"
+                " · c confirm · x retract · r reload"
             } else {
-                ""
+                " · r reload"
             };
             let status = if self.status.is_empty() {
                 String::new()
@@ -631,6 +695,13 @@ impl App {
             &mut self.inner,
         );
     }
+}
+
+/// Measured conventions with the team's changes applied, as the tabs show them.
+fn prepare(mut data: Data) -> Data {
+    let measured = std::mem::take(&mut data.conventions);
+    data.conventions = crate::conventions::apply(measured, &data.manual);
+    data
 }
 
 fn step(state: &mut ListState, by: i64, len: usize) {

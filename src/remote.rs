@@ -258,6 +258,29 @@ pub fn dispatch(c: &Client, cmd: &Cmd) -> Option<ExitCode> {
             );
             ExitCode::FAILURE
         }
+        Cmd::Ui {
+            index_dir: None,
+            web: false,
+            ..
+        } => match comindly::tui::fetch(c)
+            .and_then(|data| comindly::tui::App::new(data).on_server(c.clone()).run())
+        {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                comindly::ui::err(&format!("{e:#}"));
+                ExitCode::FAILURE
+            }
+        },
+        #[cfg(target_os = "macos")]
+        Cmd::App { index_dir: None } => {
+            match comindly::app::run(comindly::app::Open::Server(c.base().to_string())) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => {
+                    comindly::ui::err(&format!("{e:#}"));
+                    ExitCode::FAILURE
+                }
+            }
+        }
         _ => return None,
     })
 }
