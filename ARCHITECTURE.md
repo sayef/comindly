@@ -250,7 +250,15 @@ API keys and the server sign-in stay in a credentials file readable only by its 
 
 - Every message is an event: timestamp, level, kind, step, message and fields (counts, tokens, cost).
   `COMINDLY_LOG_FORMAT=json` writes one JSON object per line; otherwise readable lines.
-- A job's events carry its `job_id`.
+- Logs go through `tracing`; the server renders them in the formats above, and core still only reports
+  events to a sink, reading no environment.
+- Every HTTP request gets a request id (a safe incoming `X-Request-Id`, else a new one), returned in
+  `X-Request-Id` and carried as `request_id` by every log line written while handling it. A job's
+  events carry its `job_id` and the `request_id` that started it; the job record keeps it too.
+- One access line per request (method, path without query, status, duration, member email). `/health`
+  and `/ready`, and every request to the local app, log it at debug.
+- With `OTEL_EXPORTER_OTLP_ENDPOINT` set, spans per request and per job go out over OTLP/HTTP. The
+  exporter sits behind the `otel` cargo feature (on by default) and is configured at startup.
 - Graceful shutdown: on SIGTERM or Ctrl-C, stop accepting requests, let a running job stop at its next
   checkpoint and save its record.
 

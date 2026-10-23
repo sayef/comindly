@@ -26,7 +26,10 @@ Secret Manager mounts), so rotating one is a change in your secret store and a r
 | `GH_TOKEN`, `GITLAB_TOKEN` | optional | Repository access, if you keep it with the deployment rather than in the app. `GH_TOKEN` is used for github.com, `GITLAB_TOKEN` for gitlab.com. |
 | `COMINDLY_GITLAB_HOSTS` | for self-managed GitLab | Comma-separated hosts that also get `GITLAB_TOKEN`, e.g. `gitlab.example.com`. |
 | `OPENAI_API_KEY` | optional | LLM key, likewise; `COMINDLY_LLM_BASE_URL` for any OpenAI-compatible endpoint. |
-| `COMINDLY_LOG_FORMAT` | the image sets it | `json`: one JSON event per line (timestamp, level, step, message, counts, tokens, cost) for Datadog, CloudWatch or Loki. Unset: readable lines. |
+| `COMINDLY_LOG_FORMAT` | the image sets it | `json`: one JSON event per line (timestamp, level, kind, step, message, `job_id`, `request_id`, counts, tokens, cost) for Datadog, CloudWatch or Loki. Unset: readable lines. |
+| `COMINDLY_LOG_LEVEL` | optional | `error`, `warn`, `info` (default) or `debug`. `debug` adds access lines for `/health` and `/ready`. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | optional | Send traces over OTLP/HTTP (protobuf) to this collector, e.g. `http://otel-collector:4318`: a span per request (request id, method, route, status) and per indexing job (job id, the request that started it). Unset: no export. `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` and `OTEL_EXPORTER_OTLP_HEADERS` work as usual. |
+| `OTEL_SERVICE_NAME` | optional | The service name on exported traces; `comindly` by default. |
 | `COMINDLY_TRUST_PROXY` | behind a proxy | `true` when a proxy you run sets `X-Forwarded-For`, so sign-in limits apply per client. |
 
 Members, sessions, personal tokens, stored secrets, the repositories the server indexes and the record
@@ -233,6 +236,13 @@ or a personal access token (`Authorization: Bearer <token>`). Errors have one sh
 `/api/v1/jobs/{id}/events` streams a job's events as server-sent events, waiting while it is queued.
 `POST /api/v1/index` answers with the job's `id`, its `status` (`running` or `queued`) and `position`;
 `POST /api/v1/jobs/{id}/cancel` stops a running job or takes a queued one out of the queue.
+
+Every response carries an `X-Request-Id`. Send your own (up to 64 letters, digits, `-`, `_` or `.`) and
+it is kept; otherwise the server makes one. The id is on every log line written while the request is
+handled, on its access line and its trace span, and an indexing job records the id of the request that
+started it. Each request gets one access line at info level: method, path without the query string,
+status, time in milliseconds, the request id and the member's email when signed in; never tokens or
+cookies.
 
 ## Trying it locally
 

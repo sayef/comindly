@@ -44,6 +44,14 @@ All notable changes to this project are documented here. The format follows
   token from `comindly login` lasts 90 days; when it expires, the command says to sign in again.
 - An audit log for admins: Settings → Audit and `GET /api/v1/audit`, newest first, with paging and
   filters by who and what. Sign-outs are recorded too; token values and codes never are.
+- Every response carries an `X-Request-Id` (a safe one sent by the caller is kept), and every log line
+  written while handling a request carries it as `request_id`. An indexing job records the request that
+  started it.
+- An access line per request: method, path, status, time, request id and the member's email, never
+  tokens or cookies. Health checks log it at debug; `COMINDLY_LOG_LEVEL` sets the level.
+- Traces over OTLP/HTTP when `OTEL_EXPORTER_OTLP_ENDPOINT` is set: a span per request and per indexing
+  job; `OTEL_SERVICE_NAME` names the service (`comindly` by default). Builds without it:
+  `--no-default-features`.
 - comindly is also published as `comindly-core` (the engine, including indexing as an async,
   cancellable pipeline that reports events), `comindly-server` and `comindly-ui`.
 
@@ -64,6 +72,7 @@ All notable changes to this project are documented here. The format follows
 - Indexing from the app or the server runs inside the process as a job; cancelling stops it at its next
   checkpoint, LLM requests in flight included.
 - Admins named in `COMINDLY_ADMIN_EMAILS` cannot be demoted in the app.
+- Logs are written through `tracing`; readable and JSON lines keep their format and field names.
 
 ### Removed
 
