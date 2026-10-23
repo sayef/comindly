@@ -32,7 +32,7 @@ pub(super) async fn get(Cur(s): Cur) -> Json<Value> {
         "index_dir": cfg.index_dir,
         "index_effective": root,
         "author_name": cfg.author_name,
-        "author_effective": crate::ledger::author_name(),
+        "author_effective": crate::config::local_identity().name,
         "record_names": cfg.record_names.unwrap_or(true),
         "llm_base_url": cfg.llm_base_url,
         "llm_model": cfg.llm_model(),

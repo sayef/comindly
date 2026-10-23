@@ -64,6 +64,13 @@ pub struct ComindlyServer {
 }
 
 impl ComindlyServer {
+    /// This machine's signing key for records agents write locally; none on a server.
+    fn signer(&self) -> Option<std::path::PathBuf> {
+        (!crate::server::enabled())
+            .then(crate::config::local_signing_key)
+            .flatten()
+    }
+
     /// The index root holding `_graph` and `_ledger`.
     fn ledger_root(&self) -> String {
         self.uri
@@ -100,16 +107,18 @@ impl ComindlyServer {
     fn agent(ctx: &rmcp::service::RequestContext<rmcp::RoleServer>) -> crate::ledger::Provenance {
         let name = crate::config::env("COMINDLY_AGENT")
             .or_else(|| Some(ctx.peer.peer_info()?.client_info.name.clone()));
-        let mut p = crate::ledger::Provenance::agent("mcp", name);
         let who = ctx
             .extensions
             .get::<axum::http::request::Parts>()
             .and_then(|parts| parts.extensions.get::<crate::server::Who>());
-        if let Some(w) = who {
-            p.actor = format!("actor-{}", &blake3::hash(w.email.as_bytes()).to_hex()[..10]);
-            p.name = Some(w.email.clone());
-        }
-        p
+        let identity = match who {
+            Some(w) => crate::ledger::Identity {
+                actor: format!("actor-{}", &blake3::hash(w.email.as_bytes()).to_hex()[..10]),
+                name: Some(w.email.clone()),
+            },
+            None => crate::config::local_identity(),
+        };
+        crate::ledger::Provenance::agent("mcp", name, &identity)
     }
 
     /// Trusted (T2+), still-relevant ledger records about these symbols, as compact lines.
@@ -119,7 +128,7 @@ impl ComindlyServer {
             return Vec::new();
         }
         let symbols: Vec<Symbol> = self.symbols.values().cloned().collect();
-        let entries = crate::ledger::derive(&records, &symbols);
+        let entries = crate::ledger::derive(&records, &symbols, &crate::config::local_verifier());
         crate::ledger::about(&entries, ids)
             .into_iter()
             .filter(|e| e.trust >= crate::ledger::Trust::T2)
@@ -166,6 +175,7 @@ impl ComindlyServer {
             .map(|(k, v)| (k, serde_json::Value::String(v)))
             .collect();
         crate::ledger::Ledger::open(&self.ledger_root())?
+            .signed_by(self.signer())
             .put(&rec)
             .await?;
         self.wrote(&rec).await;
@@ -182,7 +192,7 @@ impl ComindlyServer {
         p: ReviewParam,
         by: crate::ledger::Provenance,
     ) -> anyhow::Result<String> {
-        let ledger = crate::ledger::Ledger::open(&self.ledger_root())?;
+        let ledger = crate::ledger::Ledger::open(&self.ledger_root())?.signed_by(self.signer());
         let records = self.records().await;
         anyhow::ensure!(
             p.id.len() >= 6,
@@ -797,7 +807,7 @@ impl ComindlyServer {
         };
         let records = self.records().await;
         let symbols: Vec<Symbol> = self.symbols.values().cloned().collect();
-        let entries = crate::ledger::derive(&records, &symbols);
+        let entries = crate::ledger::derive(&records, &symbols, &crate::config::local_verifier());
         let about = crate::ledger::about(&entries, &ids);
         let md = crate::ledger::markdown(&format!("why `{name}`"), &about);
         let dto = LedgerDto {
@@ -839,7 +849,7 @@ impl ComindlyServer {
         }
         let records = self.records().await;
         let symbols: Vec<Symbol> = self.symbols.values().cloned().collect();
-        let entries = crate::ledger::derive(&records, &symbols);
+        let entries = crate::ledger::derive(&records, &symbols, &crate::config::local_verifier());
         let findings = crate::checks::run(&entries, &symbols, &self.edges, &self.packages);
         let recipes: Vec<crate::conventions::Convention> = self
             .conventions
@@ -1487,7 +1497,8 @@ pub async fn load(uri: &str, markdown: bool) -> Result<ComindlyServer> {
         .collect();
 
     // The embedder powers `search`; graph tools work without it, so a load failure is non-fatal.
-    let embedder = match tokio::task::spawn_blocking(crate::embed::Embedder::load_default)
+    let model = crate::config::index_settings(root).await.embed_model;
+    let embedder = match tokio::task::spawn_blocking(move || crate::embed::Embedder::load(&model))
         .await
         .map_err(anyhow::Error::from)
         .and_then(|r| r)

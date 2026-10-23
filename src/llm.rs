@@ -11,7 +11,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use futures::stream::{self, StreamExt};
 use rig::completion::CompletionRequest;
 use rig::providers::openai;
 
@@ -55,45 +54,6 @@ impl LlmClient {
             client,
             model: model.to_string(),
             openai_native: base_url.is_none(),
-            input_tokens: Arc::new(AtomicU64::new(0)),
-            output_tokens: Arc::new(AtomicU64::new(0)),
-        })
-    }
-
-    /// Build a client from config + environment. Model and base URL resolve via
-    /// [`crate::config`] (env → `config.toml` → default); the key stays env-only
-    /// (`OPENAI_API_KEY`).
-    pub fn from_env() -> Result<Self> {
-        // Your key for this team (credentials file), else your default key, else OPENAI_API_KEY.
-        let team = crate::team::current().and_then(|t| t.name);
-        if let (Some(k), _) = crate::credentials::llm_key(team.as_deref()) {
-            if std::env::var("OPENAI_API_KEY").ok().as_deref() != Some(k.as_str()) {
-                std::env::set_var("OPENAI_API_KEY", k);
-            }
-        }
-        let cfg = crate::config::Config::load();
-        let model = cfg.llm_model();
-        // Default: OpenAI via OPENAI_API_KEY. Point at any OpenAI-compatible endpoint
-        // (LiteLLM proxy, Ollama, vLLM, Azure) with COMINDLY_LLM_BASE_URL.
-        let openai_native = cfg.llm_base_url().is_none()
-            && std::env::var("OPENAI_BASE_URL").map_or(true, |u| u.contains("api.openai.com"));
-        let client = match cfg.llm_base_url() {
-            Some(base) => {
-                let key =
-                    std::env::var("OPENAI_API_KEY").unwrap_or_else(|_| "sk-noauth".to_string());
-                openai::OpenAIConfig::new(key).with_base_url(base).client()
-            }
-            // Rig's from_env reads OPENAI_API_KEY (and honours OPENAI_BASE_URL too).
-            None => openai::OpenAI::from_env().map_err(|e| {
-                anyhow::anyhow!(
-                    "OpenAI client (set OPENAI_API_KEY, or COMINDLY_LLM_BASE_URL for an OpenAI-compatible endpoint): {e}"
-                )
-            })?,
-        };
-        Ok(Self {
-            client,
-            model,
-            openai_native,
             input_tokens: Arc::new(AtomicU64::new(0)),
             output_tokens: Arc::new(AtomicU64::new(0)),
         })
@@ -145,19 +105,6 @@ impl LlmClient {
         let user = format!("Symbol: {name}\nSignature: {signature}\nContext: {context}");
         let raw = self.complete(system, &user, 160).await?;
         Ok(parse_enrichment(&raw))
-    }
-
-    /// Enrich many symbols concurrently. Each item is `(name, signature, context)`; failures
-    /// map to `None` so one bad call doesn't sink the batch.
-    pub async fn enrich_batch(
-        &self,
-        items: &[(String, String, String)],
-    ) -> Vec<Option<Enrichment>> {
-        stream::iter(items.iter())
-            .map(|(n, s, c)| async move { self.enrich_symbol(n, s, c).await.ok() })
-            .buffered(crate::config::Config::load().llm_concurrency())
-            .collect()
-            .await
     }
 
     /// Synthesize an evidence-based coding style guide for one repo from a measured evidence pack
@@ -284,7 +231,8 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn live_enrich_symbol() {
-        let c = LlmClient::from_env().expect("OPENAI_API_KEY");
+        let key = std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY");
+        let c = LlmClient::new(None, DEFAULT_MODEL, Some(&key)).unwrap();
         let e = c
             .enrich_symbol(
                 "AsyncTaskRunner",

@@ -86,7 +86,7 @@ pub struct Manual {
 }
 
 impl Manual {
-    pub fn new(repo: &str, dimension: &str, rule: &str) -> Manual {
+    pub fn new(repo: &str, dimension: &str, rule: &str, actor: &str) -> Manual {
         let id = uuid::Uuid::now_v7().simple().to_string();
         Manual {
             id: format!("c{}", &id[id.len() - 10..]),
@@ -95,7 +95,7 @@ impl Manual {
             rule: rule.trim().into(),
             replaces: None,
             hidden: false,
-            actor: crate::ledger::actor(),
+            actor: actor.into(),
             updated: chrono::Utc::now().format("%Y-%m-%d").to_string(),
         }
     }
@@ -134,6 +134,7 @@ pub fn change(
     manual: &[Manual],
     id: &str,
     change: Change,
+    actor: &str,
 ) -> Result<Write> {
     let own = manual.iter().find(|m| m.id == id);
     if let Change::Restore = change {
@@ -153,7 +154,7 @@ pub fn change(
         rule: c.rule.clone(),
         replaces: (c.origin != Origin::Manual).then(|| c.key.clone()),
         hidden: false,
-        actor: crate::ledger::actor(),
+        actor: actor.into(),
         updated: chrono::Utc::now().format("%Y-%m-%d").to_string(),
     };
     Ok(match change {
@@ -1250,7 +1251,7 @@ mod tests {
             counterexamples: Vec::new(),
         }];
         let id = measured[0].id();
-        let added = Manual::new("svc", "Libraries", "Use the shared HTTP client");
+        let added = Manual::new("svc", "Libraries", "Use the shared HTTP client", "t");
         let mut manual = vec![added.clone()];
 
         let edit = change(
@@ -1258,6 +1259,7 @@ mod tests {
             &manual,
             &id,
             Change::Edit("Errors derive from Base".into()),
+            "t",
         )
         .unwrap();
         let Write::Put(edit) = edit else { panic!() };
@@ -1274,7 +1276,7 @@ mod tests {
             (Origin::Manual, "libraries", added.id.clone())
         );
 
-        let Write::Put(hide) = change(&shown, &manual, &id, Change::Hide).unwrap() else {
+        let Write::Put(hide) = change(&shown, &manual, &id, Change::Hide, "t").unwrap() else {
             panic!()
         };
         assert!(hide.hidden);
@@ -1284,13 +1286,13 @@ mod tests {
 
         let all = apply(measured.clone(), &manual);
         assert_eq!(
-            change(&all, &manual, &id, Change::Restore).unwrap(),
+            change(&all, &manual, &id, Change::Restore, "t").unwrap(),
             Write::Delete(id.clone())
         );
         assert_eq!(
-            change(&all, &manual, &added.id, Change::Hide).unwrap(),
+            change(&all, &manual, &added.id, Change::Hide, "t").unwrap(),
             Write::Delete(added.id.clone())
         );
-        assert!(change(&all, &manual, &added.id, Change::Restore).is_err());
+        assert!(change(&all, &manual, &added.id, Change::Restore, "t").is_err());
     }
 }

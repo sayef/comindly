@@ -368,3 +368,96 @@ pub fn expand_tilde(s: &str) -> String {
     }
     s.to_string()
 }
+
+/// The settings an index runs with here: its shared settings, then this machine's.
+pub async fn index_settings(root: &str) -> crate::context::Settings {
+    let team = crate::team::load(root)
+        .await
+        .map(|s| s.settings)
+        .unwrap_or_default();
+    crate::context::Settings::resolve(&team, &Config::load())
+}
+
+/// An LLM client for `settings`, with the key for `team` from this machine or this server.
+pub fn llm_client(
+    settings: &crate::context::Settings,
+    team: Option<&str>,
+) -> Option<crate::llm::LlmClient> {
+    let key = crate::credentials::llm_key(team).0;
+    crate::llm::LlmClient::new(
+        settings.llm_base_url.as_deref(),
+        &settings.llm_model,
+        key.as_deref(),
+    )
+    .ok()
+}
+
+fn home_path(p: &str) -> PathBuf {
+    PathBuf::from(expand_tilde(p))
+}
+
+/// This machine's signing key: `COMINDLY_SIGNING_KEY` → `signing_key` → git `user.signingkey` when
+/// `gpg.format=ssh`.
+pub fn local_signing_key() -> Option<PathBuf> {
+    if let Some(k) = env("COMINDLY_SIGNING_KEY").or_else(|| Config::load().signing_key) {
+        return Some(home_path(&k));
+    }
+    let cfg = git2::Config::open_default().ok()?;
+    if cfg.get_string("gpg.format").ok()? != "ssh" {
+        return None;
+    }
+    let k = cfg.get_string("user.signingkey").ok()?;
+    (!k.starts_with("key::")).then(|| home_path(&k))
+}
+
+/// `COMINDLY_ALLOWED_SIGNERS` → `allowed_signers` → git `gpg.ssh.allowedSignersFile`.
+pub fn local_allowed_signers() -> Option<PathBuf> {
+    let p = env("COMINDLY_ALLOWED_SIGNERS")
+        .or_else(|| Config::load().allowed_signers)
+        .or_else(|| {
+            git2::Config::open_default()
+                .ok()?
+                .get_string("gpg.ssh.allowedSignersFile")
+                .ok()
+        })?;
+    Some(home_path(&p)).filter(|p| p.is_file())
+}
+
+/// Signature checks with this machine's `allowed_signers`.
+pub fn local_verifier() -> crate::signing::Verifier {
+    let cache = std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache/comindly/verified"));
+    crate::signing::Verifier::new(local_allowed_signers(), cache)
+}
+
+/// Who this machine records as: a pseudonymous actor id, and a name unless names are switched off
+/// (`COMINDLY_AUTHOR_NAME` → `author_name` → git `user.name`).
+pub fn local_identity() -> crate::ledger::Identity {
+    let actor = env("COMINDLY_ACTOR").unwrap_or_else(|| {
+        let who = std::env::var("USER").unwrap_or_default();
+        let host = std::env::var("HOSTNAME")
+            .or_else(|_| std::env::var("HOST"))
+            .unwrap_or_default();
+        let h = blake3::hash(format!("{who}@{host}").as_bytes()).to_hex();
+        format!("actor-{}", &h[..10])
+    });
+    let name = match env("COMINDLY_AUTHOR_NAME") {
+        Some(n) => Some(n),
+        None => {
+            let cfg = Config::load();
+            if cfg.record_names == Some(false) {
+                None
+            } else {
+                cfg.author_name.or_else(|| {
+                    git2::Config::open_default()
+                        .ok()?
+                        .get_string("user.name")
+                        .ok()
+                })
+            }
+        }
+    };
+    crate::ledger::Identity {
+        actor,
+        name: name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty()),
+    }
+}

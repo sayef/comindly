@@ -27,42 +27,6 @@ pub fn canonical(rec: &Record) -> Vec<u8> {
     serde_json::to_vec(&r).unwrap_or_default()
 }
 
-/// `COMINDLY_SIGNING_KEY` → config `signing_key` → git `user.signingkey` when `gpg.format=ssh`.
-pub fn signing_key() -> Option<PathBuf> {
-    if let Some(k) =
-        env("COMINDLY_SIGNING_KEY").or_else(|| crate::config::Config::load().signing_key)
-    {
-        return Some(expand(&k));
-    }
-    let cfg = git2::Config::open_default().ok()?;
-    if cfg.get_string("gpg.format").ok()? != "ssh" {
-        return None;
-    }
-    let k = cfg.get_string("user.signingkey").ok()?;
-    (!k.starts_with("key::")).then(|| expand(&k))
-}
-
-/// `COMINDLY_ALLOWED_SIGNERS` → config `allowed_signers` → git `gpg.ssh.allowedSignersFile`.
-pub fn allowed_signers() -> Option<PathBuf> {
-    let p = env("COMINDLY_ALLOWED_SIGNERS")
-        .or_else(|| crate::config::Config::load().allowed_signers)
-        .or_else(|| {
-            git2::Config::open_default()
-                .ok()?
-                .get_string("gpg.ssh.allowedSignersFile")
-                .ok()
-        })?;
-    Some(expand(&p)).filter(|p| p.is_file())
-}
-
-/// Sign a record in place when a signing key is configured; otherwise leave it unsigned.
-pub fn sign(rec: &mut Record) -> Result<()> {
-    match signing_key() {
-        Some(key) => sign_with(rec, &key),
-        None => Ok(()),
-    }
-}
-
 pub fn sign_with(rec: &mut Record, key: &Path) -> Result<()> {
     let public = public_key(key)?;
     let dir = scratch()?;
@@ -90,21 +54,35 @@ pub fn sign_with(rec: &mut Record, key: &Path) -> Result<()> {
     Ok(())
 }
 
-/// `Some(true)` verified, `Some(false)` forged or tampered or by an unknown key, `None` when the
-/// record is unsigned or no `allowed_signers` is configured. Results are cached by content.
-pub fn verify(rec: &Record) -> Option<bool> {
-    rec.signature.as_ref()?;
-    verify_with(rec, &allowed_signers()?)
+/// Checks record signatures against an `allowed_signers` file, when there is one.
+#[derive(Debug, Clone, Default)]
+pub struct Verifier {
+    allowed: Option<PathBuf>,
+    cache: Option<PathBuf>,
 }
 
-pub fn verify_with(rec: &Record, allowed: &Path) -> Option<bool> {
+impl Verifier {
+    /// `cache`: a folder that remembers results, so each record is checked once.
+    pub fn new(allowed: Option<PathBuf>, cache: Option<PathBuf>) -> Self {
+        Verifier { allowed, cache }
+    }
+
+    /// `Some(true)` verified, `Some(false)` forged or tampered or by an unknown key, `None` when
+    /// the record is unsigned or there is no `allowed_signers`. Results are cached by content.
+    pub fn verify(&self, rec: &Record) -> Option<bool> {
+        rec.signature.as_ref()?;
+        verify_with(rec, self.allowed.as_deref()?, self.cache.as_deref())
+    }
+}
+
+pub fn verify_with(rec: &Record, allowed: &Path, cache: Option<&Path>) -> Option<bool> {
     let s = rec.signature.as_ref()?;
     let allowed_text = std::fs::read(allowed).ok()?;
     let mut h = blake3::Hasher::new();
     h.update(&canonical(rec));
     h.update(s.sig.as_bytes());
     h.update(&allowed_text);
-    let cache = cache_dir().map(|d| d.join(h.finalize().to_hex().as_str()));
+    let cache = cache.map(|d| d.join(h.finalize().to_hex().as_str()));
     if let Some(v) = cache.as_ref().and_then(|c| std::fs::read_to_string(c).ok()) {
         return Some(v == "1");
     }
@@ -176,21 +154,6 @@ fn scratch() -> Result<PathBuf> {
     Ok(d)
 }
 
-fn cache_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache/comindly/verified"))
-}
-
-fn env(k: &str) -> Option<String> {
-    std::env::var(k).ok().filter(|v| !v.is_empty())
-}
-
-fn expand(p: &str) -> PathBuf {
-    match (p.strip_prefix("~/"), std::env::var_os("HOME")) {
-        (Some(rest), Some(h)) => PathBuf::from(h).join(rest),
-        _ => PathBuf::from(p),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -227,12 +190,16 @@ mod tests {
         );
         sign_with(&mut rec, &key).unwrap();
         assert_eq!(rec.signature.as_ref().unwrap().key, public);
-        assert_eq!(verify_with(&rec, &allowed), Some(true));
+        assert_eq!(verify_with(&rec, &allowed, None), Some(true));
         let mut forged = rec.clone();
         forged.title = "ids are global".into();
-        assert_eq!(verify_with(&forged, &allowed), Some(false));
+        assert_eq!(verify_with(&forged, &allowed, None), Some(false));
         std::fs::write(&allowed, "").unwrap();
-        assert_eq!(verify_with(&rec, &allowed), Some(false), "unknown key");
+        assert_eq!(
+            verify_with(&rec, &allowed, None),
+            Some(false),
+            "unknown key"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }

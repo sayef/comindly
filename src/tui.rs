@@ -54,7 +54,8 @@ impl Data {
         conventions.extend(crate::index::read_recipes_blocking(&dir).unwrap_or_default());
         let manual = crate::conventions::manual_blocking(root).unwrap_or_default();
         let records = crate::ledger::all_blocking(root).unwrap_or_default();
-        let mut entries = crate::ledger::derive(&records, &symbols);
+        let mut entries =
+            crate::ledger::derive(&records, &symbols, &crate::config::local_verifier());
         let packages = crate::index::read_packages_blocking(&dir).unwrap_or_default();
         let findings = crate::checks::run(&entries, &symbols, &edges, &packages);
         crate::checks::promote(&mut entries, &findings);
@@ -205,16 +206,21 @@ impl App {
         let Some(target) = self.entries().get(selected).map(|e| e.record.clone()) else {
             return;
         };
-        let prov = crate::ledger::Provenance::human("ui");
+        let prov = crate::ledger::Provenance::human("ui", &crate::config::local_identity());
         let rec = crate::ledger::Record::relation(kind, &target, "", prov);
-        self.status = match crate::ledger::put_blocking(&root, &rec) {
-            Ok(()) => {
-                let records = crate::ledger::all_blocking(&root).unwrap_or_default();
-                self.data.entries = crate::ledger::derive(&records, &self.data.symbols);
-                format!("{kind:?}: {}", target.title)
-            }
-            Err(e) => format!("not recorded: {e:#}"),
-        };
+        self.status =
+            match crate::ledger::put_blocking(&root, &rec, crate::config::local_signing_key()) {
+                Ok(()) => {
+                    let records = crate::ledger::all_blocking(&root).unwrap_or_default();
+                    self.data.entries = crate::ledger::derive(
+                        &records,
+                        &self.data.symbols,
+                        &crate::config::local_verifier(),
+                    );
+                    format!("{kind:?}: {}", target.title)
+                }
+                Err(e) => format!("not recorded: {e:#}"),
+            };
     }
 
     fn input(&mut self) -> &mut String {

@@ -94,8 +94,14 @@ pub async fn load(root: &str) -> Result<Stored> {
 
 /// Save `settings` if nobody saved since `expected` (the version they were loaded at).
 pub async fn save(root: &str, settings: &TeamSettings, expected: Option<u64>) -> Result<u64> {
-    let by = crate::ledger::author_name().unwrap_or_else(crate::ledger::actor);
-    save_as(root, settings, expected, &by).await
+    let me = crate::config::local_identity();
+    save_as(
+        root,
+        settings,
+        expected,
+        me.name.as_deref().unwrap_or(&me.actor),
+    )
+    .await
 }
 
 /// [`save`], recorded as changed by `by`.

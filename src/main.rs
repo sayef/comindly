@@ -908,7 +908,11 @@ fn cmd_search(query: &str, from: Option<&str>, repos: &[&str], markdown: bool) -
         symbols.iter().map(|s| (s.id.render(), s.clone())).collect();
     let g = comindly::graph::CodeGraph::build(&symbols, &edges);
 
-    let embedder = match comindly::embed::Embedder::load_default() {
+    let model = comindly::rt::block_on(comindly::config::index_settings(
+        uri.trim_end_matches("/_graph"),
+    ))
+    .embed_model;
+    let embedder = match comindly::embed::Embedder::load(&model) {
         Ok(e) => e,
         Err(e) => {
             comindly::ui::err(&format!("embedding model: {e:#}"));
@@ -1222,7 +1226,7 @@ fn cmd_serve(from: Option<&str>, markdown: bool) -> ExitCode {
 
 /// `comindly config <path|init>` — show or scaffold the config file.
 fn human() -> comindly::ledger::Provenance {
-    comindly::ledger::Provenance::human("cli")
+    comindly::ledger::Provenance::human("cli", &comindly::config::local_identity())
 }
 
 #[allow(clippy::too_many_arguments)] // CLI dispatch: flags map 1:1 to clap args
@@ -1277,7 +1281,11 @@ fn cmd_remember(
             );
         }
     }
-    match comindly::ledger::put_blocking(&cfg.index_dir(from), &rec) {
+    match comindly::ledger::put_blocking(
+        &cfg.index_dir(from),
+        &rec,
+        comindly::config::local_signing_key(),
+    ) {
         Ok(()) => {
             comindly::ui::ok(&format!(
                 "recorded {} `{}` ({})",
@@ -1309,7 +1317,7 @@ fn cmd_why(focus: &str, from: Option<&str>) -> ExitCode {
         return ExitCode::FAILURE;
     };
     let records = comindly::ledger::all_blocking(&cfg.index_dir(from)).unwrap_or_default();
-    let entries = comindly::ledger::derive(&records, &symbols);
+    let entries = comindly::ledger::derive(&records, &symbols, &comindly::config::local_verifier());
     let about = comindly::ledger::about(&entries, &ids);
     println!(
         "{}",
@@ -1325,8 +1333,9 @@ fn cmd_review(id: &str, action: &str, reason: &str, from: Option<&str>) -> ExitC
         comindly::ui::err(&format!("no ledger record `{id}`"));
         return ExitCode::FAILURE;
     };
-    let put = comindly::ledger::Record::review(target, action, reason, human())
-        .and_then(|rec| comindly::ledger::put_blocking(&root, &rec));
+    let put = comindly::ledger::Record::review(target, action, reason, human()).and_then(|rec| {
+        comindly::ledger::put_blocking(&root, &rec, comindly::config::local_signing_key())
+    });
     match put {
         Ok(()) => {
             comindly::ui::ok(&format!("{action}: `{}`", target.title));
@@ -1364,7 +1373,8 @@ fn cmd_ledger(from: Option<&str>, inbox: bool, check: bool, compact: bool) -> Ex
             return ExitCode::FAILURE;
         }
     };
-    let mut entries = comindly::ledger::derive(&records, &symbols);
+    let mut entries =
+        comindly::ledger::derive(&records, &symbols, &comindly::config::local_verifier());
     if check {
         let packages =
             comindly::index::read_packages_blocking(&cfg.graph_dir(from)).unwrap_or_default();
@@ -1425,7 +1435,7 @@ fn cmd_erase(ids: &[String], actor: Option<&str>, yes: bool, from: Option<&str>)
     }
     let actor = actor.map(|a| {
         if a == "me" {
-            comindly::ledger::actor()
+            comindly::config::local_identity().actor
         } else {
             a.to_string()
         }
@@ -1896,7 +1906,7 @@ fn cmd_preflight(repo: &str, base: &str, strict: bool, from: Option<&str>) -> Ex
         .collect();
     let g = comindly::graph::CodeGraph::build(&symbols, &edges);
     let records = comindly::ledger::all_blocking(&cfg.index_dir(from)).unwrap_or_default();
-    let entries = comindly::ledger::derive(&records, &symbols);
+    let entries = comindly::ledger::derive(&records, &symbols, &comindly::config::local_verifier());
     let recipes = comindly::index::read_recipes_blocking(&cfg.graph_dir(from)).unwrap_or_default();
     let packages =
         comindly::index::read_packages_blocking(&cfg.graph_dir(from)).unwrap_or_default();
@@ -2012,7 +2022,7 @@ fn cmd_hook(agent: &str, event: &str, from: Option<&str>) -> ExitCode {
     if records.is_empty() {
         return ExitCode::SUCCESS;
     }
-    let entries = comindly::ledger::derive(&records, &symbols);
+    let entries = comindly::ledger::derive(&records, &symbols, &comindly::config::local_verifier());
     let (hook_event, ids): (&str, Vec<String>) = match event {
         "session-start" => {
             // Every symbol of the repo this session works in.
@@ -2200,18 +2210,20 @@ fn cmd_conventions_change(
     use comindly::conventions::{change, Change, Manual, Write, ORG};
     let root = comindly::config::Config::load().index_dir(from);
     let restore = matches!(what, ConventionsWhat::Restore { .. });
+    let actor = comindly::config::local_identity().actor;
     let write = match what {
         ConventionsWhat::Add { rule, dimension } => Ok(Write::Put(Manual::new(
             repo.unwrap_or(ORG),
             &dimension,
             &rule,
+            &actor,
         ))),
         ConventionsWhat::Edit { id, rule } => load_conventions(from)
-            .and_then(|(all, manual)| change(&all, &manual, &id, Change::Edit(rule))),
+            .and_then(|(all, manual)| change(&all, &manual, &id, Change::Edit(rule), &actor)),
         ConventionsWhat::Rm { id } => load_conventions(from)
-            .and_then(|(all, manual)| change(&all, &manual, &id, Change::Hide)),
+            .and_then(|(all, manual)| change(&all, &manual, &id, Change::Hide, &actor)),
         ConventionsWhat::Restore { id } => load_conventions(from)
-            .and_then(|(all, manual)| change(&all, &manual, &id, Change::Restore)),
+            .and_then(|(all, manual)| change(&all, &manual, &id, Change::Restore, &actor)),
     };
     match write.and_then(|w| comindly::conventions::write_blocking(&root, &w).map(|_| w)) {
         Ok(Write::Put(m)) if m.hidden => comindly::ui::ok(&format!("hid {}", m.id)),
@@ -2542,7 +2554,7 @@ where
         settings.guide = steps.guide;
         let wants_llm = steps.enrich || steps.flows || steps.guide;
         let llm = if wants_llm {
-            comindly::llm::LlmClient::from_env().ok()
+            comindly::config::llm_client(&settings, team.name.as_deref())
         } else {
             None
         };

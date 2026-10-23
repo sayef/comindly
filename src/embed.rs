@@ -29,11 +29,6 @@ impl Embedder {
         Ok(Self { model })
     }
 
-    /// Load the configured embedding model (env → `config.toml` → [`DEFAULT_MODEL`]).
-    pub fn load_default() -> Result<Self> {
-        Self::load(&crate::config::Config::load().embed_model())
-    }
-
     /// Embed a batch of documents.
     pub fn embed(&self, texts: &[String]) -> Vec<Vec<f32>> {
         self.model.encode(texts)
@@ -73,7 +68,7 @@ mod tests {
     #[test]
     #[ignore]
     fn embeds_and_ranks_semantically() {
-        let e = Embedder::load_default().expect("load model");
+        let e = Embedder::load(DEFAULT_MODEL).expect("load model");
         let docs: Vec<String> = vec![
             "open_database_connection  def open_database_connection(host, port)".into(),
             "parse_json  def parse_json(text: str) -> dict".into(),

@@ -85,10 +85,15 @@ impl Session {
     async fn search(&self) -> Option<&Search> {
         self.search
             .get_or_init(|| async {
-                let embedder = tokio::task::spawn_blocking(crate::embed::Embedder::load_default)
-                    .await
-                    .ok()?
-                    .ok()?;
+                let model = match &self.data.root {
+                    Some(root) => crate::config::index_settings(root).await.embed_model,
+                    None => crate::embed::DEFAULT_MODEL.to_string(),
+                };
+                let embedder =
+                    tokio::task::spawn_blocking(move || crate::embed::Embedder::load(&model))
+                        .await
+                        .ok()?
+                        .ok()?;
                 let by_id = self
                     .data
                     .symbols
@@ -144,8 +149,11 @@ impl Session {
                 tokio::task::spawn_blocking(move || crate::ledger::Ledger::open(&root)).await;
             if let Ok(Ok(ledger)) = opened {
                 if let Ok(records) = ledger.all().await {
-                    *self.entries.write().await =
-                        crate::ledger::derive(&records, &self.data.symbols);
+                    *self.entries.write().await = crate::ledger::derive(
+                        &records,
+                        &self.data.symbols,
+                        &crate::config::local_verifier(),
+                    );
                 }
             }
         }
@@ -679,8 +687,12 @@ struct ConventionBody {
     rule: String,
 }
 
-async fn change_convention(Cur(s): Cur, Json(b): Json<ConventionBody>) -> impl IntoResponse {
-    match apply_convention(&s, b).await {
+async fn change_convention(
+    who: Member,
+    Cur(s): Cur,
+    Json(b): Json<ConventionBody>,
+) -> impl IntoResponse {
+    match apply_convention(&s, b, &identity(who.as_deref()).actor).await {
         Ok(msg) => (StatusCode::OK, Json(json!({"ok": true, "message": msg}))),
         Err(e) => (
             StatusCode::BAD_REQUEST,
@@ -689,7 +701,7 @@ async fn change_convention(Cur(s): Cur, Json(b): Json<ConventionBody>) -> impl I
     }
 }
 
-async fn apply_convention(s: &Session, b: ConventionBody) -> Result<String> {
+async fn apply_convention(s: &Session, b: ConventionBody, actor: &str) -> Result<String> {
     use crate::conventions::{change, Change, Manual, Write, ORG};
     let root = s.data.root.as_deref().context("read-only UI")?;
     let mut manual = s.manual.write().await;
@@ -699,6 +711,7 @@ async fn apply_convention(s: &Session, b: ConventionBody) -> Result<String> {
             b.repo.as_deref().unwrap_or(ORG),
             dimension,
             &b.rule,
+            actor,
         ))
     } else {
         let what = match b.action.as_str() {
@@ -708,7 +721,7 @@ async fn apply_convention(s: &Session, b: ConventionBody) -> Result<String> {
             other => anyhow::bail!("unknown action {other}"),
         };
         let current = crate::conventions::apply(s.data.conventions.clone(), &manual);
-        change(&current, &manual, &b.id, what)?
+        change(&current, &manual, &b.id, what, actor)?
     };
     crate::conventions::Store::open(root)?.write(&w).await?;
     Ok(match w {
@@ -978,12 +991,18 @@ struct ReviewBody {
 
 /// Provenance for a write from the UI: the signed-in member on a server, else this machine's user.
 fn provenance(who: Option<&crate::server::Who>) -> Provenance {
-    let mut p = Provenance::human("comindly-web");
-    if let Some(w) = who {
-        p.actor = format!("actor-{}", &blake3::hash(w.email.as_bytes()).to_hex()[..10]);
-        p.name = Some(w.email.clone());
+    Provenance::human("comindly-web", &identity(who))
+}
+
+/// The signed-in member on a server, else this machine's user.
+fn identity(who: Option<&crate::server::Who>) -> crate::ledger::Identity {
+    match who {
+        Some(w) => crate::ledger::Identity {
+            actor: format!("actor-{}", &blake3::hash(w.email.as_bytes()).to_hex()[..10]),
+            name: Some(w.email.clone()),
+        },
+        None => crate::config::local_identity(),
     }
-    p
 }
 
 type Member = Option<axum::Extension<crate::server::Who>>;
@@ -1016,7 +1035,7 @@ async fn apply_review(s: &Session, b: &ReviewBody, prov: Provenance) -> Result<S
     let rec = Record::review(&target, &b.action, &b.reason, prov)?;
     ledger.put(&rec).await?;
     let records = ledger.all().await?;
-    let fresh = crate::ledger::derive(&records, &s.data.symbols);
+    let fresh = crate::ledger::derive(&records, &s.data.symbols, &crate::config::local_verifier());
     let status = fresh
         .iter()
         .find(|e| e.record.id == b.id)
@@ -1070,7 +1089,8 @@ async fn remember(who: Member, Cur(s): Cur, Json(b): Json<RememberBody>) -> impl
         let ledger = crate::ledger::Ledger::open(root)?;
         ledger.put(&rec).await?;
         let records = ledger.all().await?;
-        *s.entries.write().await = crate::ledger::derive(&records, &s.data.symbols);
+        *s.entries.write().await =
+            crate::ledger::derive(&records, &s.data.symbols, &crate::config::local_verifier());
         anyhow::Ok(rec.id)
     };
     match run.await {
@@ -1095,7 +1115,8 @@ async fn erase(Cur(s): Cur, Json(b): Json<EraseBody>) -> impl IntoResponse {
         let gone = ledger.erase(|r| r.id == b.id, true).await?;
         anyhow::ensure!(!gone.is_empty(), "no such record");
         let records = ledger.all().await?;
-        *s.entries.write().await = crate::ledger::derive(&records, &s.data.symbols);
+        *s.entries.write().await =
+            crate::ledger::derive(&records, &s.data.symbols, &crate::config::local_verifier());
         anyhow::Ok(format!("deleted {} record(s)", gone.len()))
     };
     match run.await {

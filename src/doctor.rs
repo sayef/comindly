@@ -103,13 +103,13 @@ pub fn run(cfg: &crate::config::Config, root: &str) -> Vec<Check> {
         "no LLM key: summaries, flows and style guides are off (indexing works without)",
     );
     check(
-        crate::signing::signing_key().is_some(),
+        crate::config::local_signing_key().is_some(),
         true,
         "ledger records are signed",
         "records are unsigned (optional: `signing_key` or git SSH signing)",
     );
     check(
-        crate::signing::allowed_signers().is_some(),
+        crate::config::local_allowed_signers().is_some(),
         true,
         "signatures are verified against allowed_signers",
         "no allowed_signers: signatures are not checked (optional)",
