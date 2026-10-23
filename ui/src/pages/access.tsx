@@ -71,6 +71,7 @@ export function MembersPage() {
             className="min-w-56 flex-1"
           />
           <select className={select} value={role} onChange={(e) => setRole(e.target.value as Role)}>
+            <option value="viewer">Viewer</option>
             <option value="member">Member</option>
             <option value="admin">Admin</option>
           </select>
@@ -78,6 +79,9 @@ export function MembersPage() {
             Invite
           </Button>
         </form>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Viewers read everything. Members also add to the ledger and conventions. Admins also manage people, repositories, settings, secrets and indexing.
+        </p>
         <Outcome error={invite.error} />
         {invite.data?.code && (
           <Reveal
@@ -114,6 +118,7 @@ export function MembersPage() {
                     </Badge>
                   ) : (
                     <select className={select} value={m.role} onChange={(e) => change.mutate({ e: m.email, r: e.target.value as Role })}>
+                      <option value="viewer">Viewer</option>
                       <option value="member">Member</option>
                       <option value="admin">Admin</option>
                     </select>

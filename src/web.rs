@@ -651,7 +651,7 @@ async fn asset(uri: axum::http::Uri) -> impl IntoResponse {
         .into_response()
 }
 
-async fn overview(Cur(s): Cur) -> Json<Value> {
+async fn overview(who: Member, Cur(s): Cur) -> Json<Value> {
     let d = &s.data;
     let entries = s.entries().await;
     let mut status: BTreeMap<String, usize> = BTreeMap::new();
@@ -684,7 +684,9 @@ async fn overview(Cur(s): Cur) -> Json<Value> {
         "linked_contracts": linked,
         "ledger": status,
         "skew": skew,
-        "writable": d.root.is_some(),
+        // Viewers read only.
+        "writable": d.root.is_some()
+            && who.as_ref().is_none_or(|w| w.role.at_least(crate::server::Role::Member)),
         "root": d.root,
         "problem": d.problem,
     }))

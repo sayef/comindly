@@ -368,7 +368,7 @@ async function get<T>(path: string): Promise<T> {
   return r.json();
 }
 
-export type Role = "admin" | "member";
+export type Role = "admin" | "member" | "viewer";
 
 /** Who is signed in; `local` when comindly runs on this machine without members. */
 export interface Me {

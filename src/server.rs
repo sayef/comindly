@@ -160,11 +160,16 @@ pub fn normalize(email: &str) -> String {
     email.trim().to_lowercase()
 }
 
+/// What someone may do, each role including the ones below it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Role {
+    /// Members, repositories, settings, secrets and indexing.
     Admin,
+    /// Writes to the ledger and conventions.
     Member,
+    /// Reads.
+    Viewer,
 }
 
 impl Role {
@@ -172,7 +177,21 @@ impl Role {
         match self {
             Role::Admin => "admin",
             Role::Member => "member",
+            Role::Viewer => "viewer",
         }
+    }
+
+    fn rank(self) -> u8 {
+        match self {
+            Role::Admin => 2,
+            Role::Member => 1,
+            Role::Viewer => 0,
+        }
+    }
+
+    /// This role may do what `other` may.
+    pub fn at_least(self, other: Role) -> bool {
+        self.rank() >= other.rank()
     }
 }
 
@@ -897,6 +916,16 @@ impl Store {
         self.commit(changes)
     }
 
+    /// Only admins invite, change or remove people.
+    fn may_manage(&self, by: &str) -> Result<()> {
+        use crate::backends::AccountStore;
+        anyhow::ensure!(
+            self.member(by)?.is_some_and(|w| w.role == Role::Admin),
+            "only admins can do this"
+        );
+        Ok(())
+    }
+
     fn write_lock(&self) -> std::sync::MutexGuard<'_, ()> {
         self.writing.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -1005,6 +1034,7 @@ impl crate::backends::AccountStore for Store {
         let _w = self.write_lock();
         let user = self.state().users.get(&email).cloned();
         let mut user = user.with_context(|| format!("{email} is not a member"))?;
+        self.may_manage(by)?;
         user.role = role;
         self.commit(vec![put("user", &email, &user)])?;
         self.audit(by, "role", &format!("{email} {}", role.as_str()));
@@ -1017,6 +1047,7 @@ impl crate::backends::AccountStore for Store {
         if self.admins.contains(&email) {
             bail!("{email} is an admin by the deployment's settings");
         }
+        self.may_manage(by)?;
         let _w = self.write_lock();
         let mut changes = vec![del("user", &email), del("code", &email)];
         {
@@ -1058,6 +1089,7 @@ impl crate::backends::AccountStore for Store {
     /// An invitation for `email` only: a link token, or with `code` a code to hand over.
     fn invite(&self, by: &str, email: &str, role: Role, code: bool) -> Result<String> {
         let email = normalize(email);
+        self.may_manage(by)?;
         anyhow::ensure!(
             email.contains('@') && !email.contains(char::is_whitespace),
             "that is not an email address"
@@ -1120,6 +1152,7 @@ impl crate::backends::AccountStore for Store {
 
     fn revoke_invite(&self, by: &str, email: &str) -> Result<()> {
         let email = normalize(email);
+        self.may_manage(by)?;
         let _w = self.write_lock();
         let changes = self
             .state()
@@ -1303,10 +1336,13 @@ impl crate::backends::AccountStore for Store {
     fn reset_code(&self, by: &str, email: &str, keep: Option<&str>) -> Result<String> {
         let email = normalize(email);
         anyhow::ensure!(self.member(&email)?.is_some(), "{email} is not a member");
-        anyhow::ensure!(
-            by == email || !self.admins.contains(&email),
-            "{email} is an admin by the deployment's settings and resets their own code"
-        );
+        if by != email {
+            anyhow::ensure!(
+                !self.admins.contains(&email),
+                "{email} is an admin by the deployment's settings and resets their own code"
+            );
+            self.may_manage(by)?;
+        }
         let code = new_code();
         let keep = keep.map(hash).unwrap_or_default();
         let mut changes = vec![put(
@@ -1670,10 +1706,11 @@ mod tests {
 
     fn temp_store() -> ((), Store) {
         let dir = std::env::temp_dir().join(format!("comindly-server-{}", uuid::Uuid::new_v4()));
-        (
-            (),
-            Store::open_keyed(dir.to_str().unwrap(), "test key", None).unwrap(),
-        )
+        ((), {
+            let mut s = Store::open_keyed(dir.to_str().unwrap(), "test key", None).unwrap();
+            s.admins = vec!["a".into(), "a@x.org".into(), "admin@x.org".into()];
+            s
+        })
     }
 
     #[test]
@@ -1721,6 +1758,32 @@ mod tests {
         let (device, user) = s.device_start("other", "1.2.3.4").unwrap();
         s.device_approve(&who, &user, false).unwrap();
         assert_eq!(s.device_poll(&device).unwrap(), DevicePoll::Denied);
+    }
+
+    #[test]
+    fn only_admins_manage_people() {
+        let (_d, s) = temp_store();
+        let join = |email: &str, role| {
+            let inv = s.invite("a", email, role, false).unwrap();
+            s.redeem(&inv, "1.2.3.4").unwrap().1
+        };
+        let admin = join("adm@x.org", Role::Admin);
+        join("mem@x.org", Role::Member);
+        join("view@x.org", Role::Viewer);
+        assert!(s
+            .invite(&admin.email, "x@x.org", Role::Admin, false)
+            .is_ok());
+        assert!(s.set_role(&admin.email, "mem@x.org", Role::Viewer).is_ok());
+        assert!(s.set_role("mem@x.org", "view@x.org", Role::Member).is_err());
+        assert!(s
+            .invite("view@x.org", "y@x.org", Role::Viewer, false)
+            .is_err());
+        assert!(s.remove("mem@x.org", "adm@x.org").is_err());
+        assert!(
+            s.remove(&admin.email, "a").is_err(),
+            "deployment admins stay"
+        );
+        assert!(s.remove(&admin.email, "view@x.org").is_ok());
     }
 
     #[test]
@@ -1795,7 +1858,8 @@ mod tests {
     fn accounts_survive_a_restart_and_rows_without_the_key_are_ignored() {
         let dir = std::env::temp_dir().join(format!("comindly-server-{}", uuid::Uuid::new_v4()));
         let root = dir.to_str().unwrap();
-        let s = Store::open_keyed(root, "key one", None).unwrap();
+        let mut s = Store::open_keyed(root, "key one", None).unwrap();
+        s.admins = vec!["admin@x.org".into()];
         let code = s
             .invite("admin@x.org", "dev@x.org", Role::Member, true)
             .unwrap();

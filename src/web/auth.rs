@@ -119,23 +119,25 @@ fn account_only(path: &str) -> bool {
     .any(|p| path.starts_with(p))
 }
 
-/// Paths only admins may change (and, for members and secrets, read).
-fn admin_only(method: &Method, path: &str) -> bool {
+/// The least role a request needs: viewers read, members also write to the ledger and
+/// conventions, admins manage people, secrets, repositories, settings and indexing.
+fn needs(method: &Method, path: &str) -> Role {
     if path.starts_with("/api/v1/members") || path.starts_with("/api/v1/secrets") {
-        return true;
+        return Role::Admin;
     }
-    method != Method::GET
-        && [
-            "/api/v1/settings",
-            "/api/v1/repos",
-            "/api/v1/index",
-            "/api/v1/jobs",
-            "/api/v1/team",
-            "/api/v1/join",
-            "/api/v1/erase",
-        ]
+    if method == Method::GET
+        || path.starts_with("/api/v1/auth/")
+        || path.starts_with("/api/v1/tokens")
+    {
+        return Role::Viewer;
+    }
+    if ["/api/v1/remember", "/api/v1/review", "/api/v1/conventions"]
         .iter()
         .any(|p| path.starts_with(p))
+    {
+        return Role::Member;
+    }
+    Role::Admin
 }
 
 /// Who may do what in server mode: the session cookie or a bearer token decides.
@@ -186,8 +188,18 @@ pub(super) async fn guard(
             "This request did not come from comindly's own pages",
         );
     }
-    if admin_only(req.method(), &path) && who.role != Role::Admin {
-        return fail(StatusCode::FORBIDDEN, "Only admins can do this");
+    // Agents write over `/mcp`; its tools check the role themselves.
+    let need = if path.starts_with("/mcp") {
+        Role::Viewer
+    } else {
+        needs(req.method(), &path)
+    };
+    if !who.role.at_least(need) {
+        let msg = match need {
+            Role::Admin => "Only admins can do this",
+            _ => "Viewers can read, not change anything",
+        };
+        return fail(StatusCode::FORBIDDEN, msg);
     }
     next.run(req).await
 }

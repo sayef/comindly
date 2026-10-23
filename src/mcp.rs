@@ -103,6 +103,17 @@ impl ComindlyServer {
 
     /// The calling agent, from its MCP handshake unless named; over HTTP on a server, working for
     /// the member whose token it uses.
+    /// Viewers' agents read; writing to the ledger needs a member.
+    fn may_write(ctx: &rmcp::service::RequestContext<rmcp::RoleServer>) -> anyhow::Result<()> {
+        let viewer = ctx
+            .extensions
+            .get::<axum::http::request::Parts>()
+            .and_then(|parts| parts.extensions.get::<crate::server::Who>())
+            .is_some_and(|w| !w.role.at_least(crate::server::Role::Member));
+        anyhow::ensure!(!viewer, "viewers can read, not write to the ledger");
+        Ok(())
+    }
+
     fn agent(
         &self,
         ctx: &rmcp::service::RequestContext<rmcp::RoleServer>,
@@ -892,7 +903,10 @@ impl ComindlyServer {
         ctx: rmcp::service::RequestContext<rmcp::RoleServer>,
         Parameters(p): Parameters<RememberParam>,
     ) -> CallToolResult {
-        let result = self.write_record(p, self.agent(&ctx)).await;
+        let result = match Self::may_write(&ctx) {
+            Ok(()) => self.write_record(p, self.agent(&ctx)).await,
+            Err(e) => Err(e),
+        };
         let dto = LedgerDto {
             ok: result.is_ok(),
             message: result.unwrap_or_else(|e| format!("not recorded: {e:#}")),
@@ -910,7 +924,10 @@ impl ComindlyServer {
         ctx: rmcp::service::RequestContext<rmcp::RoleServer>,
         Parameters(p): Parameters<ReviewParam>,
     ) -> CallToolResult {
-        let result = self.write_review(p, self.agent(&ctx)).await;
+        let result = match Self::may_write(&ctx) {
+            Ok(()) => self.write_review(p, self.agent(&ctx)).await,
+            Err(e) => Err(e),
+        };
         let dto = LedgerDto {
             ok: result.is_ok(),
             message: result.unwrap_or_else(|e| format!("not recorded: {e:#}")),
