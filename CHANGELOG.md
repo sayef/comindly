@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0-beta.1](https://github.com/sayef/comindly/compare/v0.3.4...v0.4.0-beta.1) - 2026-10-25
+
 ### Added
 
 - Roles on a server: admins, members and viewers. Viewers read everything; members also add to the
