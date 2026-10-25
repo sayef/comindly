@@ -47,10 +47,8 @@ pub(super) async fn save(
             app.server.is_none(),
             "a server takes its settings from the deployment and the index's shared settings"
         );
-        for (key, v) in [("author_name", &c.author_name)] {
-            if v.is_some() {
-                changes.push((key, text(v)));
-            }
+        if c.author_name.is_some() {
+            changes.push(("author_name", text(&c.author_name)));
         }
         if let Some(v) = c.record_names {
             changes.push(("record_names", Setting::Flag(v)));
