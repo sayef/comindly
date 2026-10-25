@@ -57,3 +57,6 @@ assets/png/
 
 # Local stack secrets made by scripts/docker-local.sh
 /.secrets/
+
+# MkDocs Material plugin caches (the privacy plugin keeps downloaded fonts here)
+.cache/

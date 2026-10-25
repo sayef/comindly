@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   Building2,
   CheckCircle2,
+  Clock,
   FolderOpen,
   FolderSearch,
   GitBranch,
@@ -14,6 +15,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { RepoDot } from "@/components/symbol";
+import { Link } from "react-router";
 import { IndexLog } from "@/components/index-log";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -200,7 +202,11 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
   const qc = useQueryClient();
   const [llm, setLlm] = useState(false);
   const [drop, setDrop] = useState(false);
-  const job = useQuery({ queryKey: ["index-job"], queryFn: api.indexJob, refetchInterval: (q) => (q.state.data?.running ? 1000 : false) });
+  const job = useQuery({
+    queryKey: ["index-job"],
+    queryFn: api.indexJob,
+    refetchInterval: (q) => (q.state.data?.running || q.state.data?.queued?.length ? 1000 : false),
+  });
   const start = useMutation({
     mutationFn: () => api.startIndex(llm, drop),
     meta: { inline: true },
@@ -211,7 +217,13 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
     meta: { quiet: true },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["index-job"] }),
   });
+  const dequeue = useMutation({
+    mutationFn: api.cancelJob,
+    meta: { quiet: true },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["index-job"] }),
+  });
   const j = job.data;
+  const queued = j?.queued ?? [];
   const [seen, setSeen] = useState<string | null>(null);
   useEffect(() => {
     if (j && !j.running && j.ok && j.finished && j.finished !== seen) {
@@ -221,9 +233,10 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
   }, [j, seen, qc]);
   const watch = useQuery({ queryKey: ["index-watch"], queryFn: api.indexWatch, refetchInterval: 30_000 });
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.settings });
+  const team = useQuery({ queryKey: ["team"], queryFn: api.team });
   const auto = useMutation({
-    mutationFn: (on: boolean) => api.saveSettings({ auto_index: on }),
-    onSuccess: () => (qc.invalidateQueries({ queryKey: ["settings"] }), qc.invalidateQueries({ queryKey: ["index-watch"] })),
+    mutationFn: (on: boolean) => api.saveTeam({ ...team.data!.settings, auto_index: on }, team.data!.version),
+    onSuccess: () => (qc.invalidateQueries({ queryKey: ["team"] }), qc.invalidateQueries({ queryKey: ["index-watch"] })),
   });
 
   return (
@@ -245,11 +258,12 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
             )}
             <Button
               variant="brand"
-              disabled={(unlisted.length > 0 && !drop) || j?.running}
-              loading={start.isPending || j?.running}
+              disabled={(unlisted.length > 0 && !drop) || queued.length > 0}
+              loading={start.isPending}
               onClick={() => start.mutate()}
+              title={j?.running ? "Index again once the running job ends" : undefined}
             >
-              {!(start.isPending || j?.running) && <Play />} {j?.running ? "Indexing…" : "Index now"}
+              {!start.isPending && <Play />} {j?.running ? "Queue next" : "Index now"}
             </Button>
           </div>
           <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -268,8 +282,8 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
-            checked={settings.data?.auto_index ?? false}
-            disabled={!settings.data || auto.isPending}
+            checked={team.data?.settings.auto_index ?? false}
+            disabled={!team.data || auto.isPending}
             onChange={(e) => auto.mutate(e.target.checked)}
           />
           Re-index automatically when a default branch moves (checked every {settings.data?.cache_ttl_secs ?? 300} s, without LLM)
@@ -287,7 +301,30 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
             {j.finished && <span className="text-xs text-muted-foreground">{new Date(j.finished).toLocaleString()}</span>}
           </p>
         )}
-        <IndexLog events={j?.events ?? []} running={!!j?.running} />
+        {queued.map((q) => (
+          <p key={q.id} className="flex items-center gap-1.5 text-sm">
+            <Clock className="size-4 text-muted-foreground" />
+            Queued{queued.length > 1 ? ` (position ${q.position})` : ""}: indexing starts when the running job ends.
+            <Button variant="outline" size="sm" loading={dequeue.isPending} onClick={() => dequeue.mutate(q.id)}>
+              Cancel
+            </Button>
+          </p>
+        ))}
+        {!!j?.events.length && (
+          <div className="mt-2 flex flex-col gap-2">
+            <IndexLog
+              events={j.events}
+              running={j.running}
+              status={j.running ? "running" : j.cancelled ? "cancelled" : j.ok === false ? "failed" : "succeeded"}
+              started={j.started}
+              finished={j.finished}
+              summary={false}
+            />
+            <Link to={j.id ? `/activity/${j.id}` : "/activity"} className="self-start text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground">
+              All runs under Activity
+            </Link>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -312,7 +349,7 @@ function OrgDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bo
     meta: { inline: true, quiet: true },
     onSuccess: (r) => (setAsked(null), setChecked(new Set(r.repos.filter((x) => !x.archived && !x.listed).map((x) => x.clone_url)))),
     onError: (e) => {
-      const need = e instanceof ApiError ? (e.body.needs_token as NeedsToken | undefined) : undefined;
+      const need = e instanceof ApiError && e.body.code === "needs_token" ? (e.body as unknown as NeedsToken) : undefined;
       if (need) (setAsked(need), setUsername((u) => u || need.username));
     },
   });
@@ -476,7 +513,7 @@ export function RepositoriesPage() {
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Repositories</h1>
+          <h1 className="text-[28px] font-semibold tracking-[-0.035em]">Repositories</h1>
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
             What comindly indexes. Each repository is indexed at its default branch from comindly's own checkout
             {server ? "." : ", so your folders and branches are never touched."}

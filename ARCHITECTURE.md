@@ -1,6 +1,7 @@
 # comindly — Rust Architecture
 
-> Polyglot, cross-repo code-intelligence engine. CLI + MCP server, single static binary.
+> Polyglot, cross-repo code-intelligence engine: an async server, an MCP endpoint for agents, and a CLI,
+> in one static binary.
 > Read-heavy / write-rare: the index is a **versioned artifact in your storage**, not a live shared DB.
 
 ## Decisions (locked)
@@ -84,46 +85,194 @@ e.g.  scip-python  pip  acme  1.4.0  `acme/foo`/bar().
 - **Note:** GitHub's `stack-graphs` (which I initially proposed) was **archived Sept 2025**.
   It remains usable as an optional resolver but is unmaintained — SCIP is the safe backbone.
 
-## Module map (single crate)
+## Layers
+
+comindly is four crates in one cargo workspace. Each depends only on those below it, and the compiler
+enforces the boundaries.
 
 ```
-src/
-  model.rs    domain model: GlobalSymbolId (SCIP), Symbol, Edge, Language, ranges. No heavy deps.
-  parse.rs    tree-sitter walk: file → symbols, Contains edges, per-file facts (+ fingerprints).
-  lang/       per-language syntax adapters (python, typescript, go, java, kotlin, rust) behind LangSpec;
-              spring.rs holds the shared Spring MVC / Feign / RestTemplate rules for Java and Kotlin.
-  facts.rs    per-file facts: imports, reference paths, type hints (persisted for incremental).
-  packages.rs importable module names: pyproject, package.json, tsconfig paths, go.mod, Cargo.toml.
-  manifests.rs published packages + dependencies (requirement, locked version) for version skew.
-  conventions.rs measured conventions per repo + org baseline (counts, exemplars, deviations).
-  recipes.rs  change recipes from commit history (what changes together when adding code).
-  ledger.rs   reasoning ledger: typed, symbol-anchored records in the user's store; derived status/trust.
-  infra.rs    Terraform: queues, topics, buckets and topic→queue subscriptions as contract facts.
-  configvals.rs values from repo YAML config files, stored as facts for settings-path fallback.
-  signing.rs  optional SSH signatures on ledger records; verification against allowed_signers.
-  cache.rs    local mirror of a remote (S3) index for hooks, refreshed in the background.
-  checks.rs   compiled constraint checks (graph edge rules, dependency rules), T4 promotion, revivals.
-  preflight.rs before-change report: ledger, failing checks, contracts, blast radius, missing companions.
-  tui.rs      `comindly ui`: overview, contracts, ledger, explorer, conventions (ratatui).
-  web.rs      `comindly ui --web`: axum JSON API + the React app from ui/ (embedded by build.rs), 127.0.0.1 only.
-  resolve.rs  binder: resolves reference paths through imports, re-exports, classes, types.
-  resolve/contracts.rs  contract graph: HTTP routes ↔ clients, queues, topics, buckets, tables.
-  eval.rs     graph-quality eval against a gold fixture (`comindly eval graph`).
-  index.rs    Lance/object_store writers + readers; versioning; incremental change detection.
-  graph.rs    petgraph load + traversal: ripple (blast radius), thread (exec trace), zoom.
-  embed.rs    Model2Vec local embeddings + code-aware ranking (embed/rank.rs).
-  llm.rs      wiki / style-guide / query-association generation via Rig (provider-agnostic).
-  mcp.rs      rmcp server: search/suggest/repos/find/zoom/ripple/thread/flow/context_pack/guide.
-  ui.rs       styled stderr output (indicatif progress + console + comfy-table tables).
-  config.rs   config.toml + defaults (index dir, models, format, caps); precedence resolver.
-  git.rs      git2 change detection for incremental indexing.
-  main.rs     clap binary: `comindly index|link|explore|search|flow|changed|serve|config`. The single distributable.
+  comindly            the command: local mode, the web app's local server, and a client of a running
+                      server (`comindly login`, `--server`). The terminal UI and the macOS window.
+        │
+  comindly-server     axum: `/api/v1`, MCP over HTTP and stdio, the web app, sign-in and roles, jobs,
+                      the backends; and this machine's preferences, credentials and checks, since the
+                      local app runs on it too.
+        │         ╲
+  comindly-core     comindly-ui
+  the engine as an  the web app (React, in `ui/`), built and embedded
+  async library
 ```
 
-One crate, one module per stage; `main.rs` uses the library as `comindly::<module>`. (Earlier phases
-below were built as a `cargo` workspace of `comindly-*` crates and later consolidated into this single crate.)
+`comindly-core` reads no environment, no files of its own and no process-wide state, and prints
+nothing: everything a call needs is passed in. The `comindly` library re-exports the server, which
+re-exports core, so `comindly::graph` is `comindly_core::graph`.
 
-MCP verb semantics follow a design proven in the original Python implementation.
+### comindly-core
+
+| Area | Modules |
+|---|---|
+| Model and parsing | `model`, `parse`, `lang/`, `facts`, `packages`, `manifests`, `infra`, `configvals`, `scip` |
+| Binding and contracts | `resolve`, `resolve/contracts` |
+| Derived knowledge | `conventions`, `recipes`, `checks`, `preflight`, `eval` |
+| Index storage | `index` (Lance tables, versions, incremental change detection), `storage` (folder, `s3://`, `gs://`, `az://`) |
+| Queries | `graph` (ripple, thread, zoom, flows, ranking), `embed` (Model2Vec + code-aware ranking), `search`, `answers` (what the read commands answer), `view` (what the apps show of an index) |
+| LLM steps | `llm` (summaries, flow walkthroughs, style guides), `styleguide` |
+| Ledger | `ledger`, `signing` |
+| Sources | `worktree` (comindly's own checkouts, git credentials as a trait), `hosting` (listing GitHub organisations and GitLab groups), `git` |
+| Indexing | `pipeline`: checkout, link and single-repo indexing as async, cancellable steps |
+| Settings | `team` (an index's shared settings), `docstore` (a versioned settings document in LanceDB) |
+| Plumbing | `context` (what a call needs), `events` (what it reports), `rt` (the process's one runtime) |
+
+### comindly-server
+
+| Area | Modules |
+|---|---|
+| HTTP | `api` (every route's request and answer types), `web` and `web/*` (`/api/v1`, the embedded app, `/health`, `/ready`, graceful shutdown), `mcp` (the tools, over streamable HTTP and stdio) |
+| Access | `server` (`ServerConfig`, roles, the default account store), `backends` (the traits and SMTP) |
+| Work | `jobs` (runner, cancellation, records, live events) |
+| This machine | `config` (preferences, identity and signing), `credentials` (API keys and the server sign-in), `doctor`, `cache` (the hooks' local mirror), `ui` (events as terminal lines or JSON logs) |
+
+### comindly
+
+`main` (commands), `remote` (commands answered by a server), `client` (the typed `/api/v1` client and
+sign-in by browser approval), `tui`, `app` (macOS).
+
+## Contexts, not globals
+
+Core never asks "what is the current team" or reads a settings file. A call receives what it needs:
+
+```rust
+pub struct IndexContext {
+    pub root: String,                     // where the index lives: a folder or a bucket location
+    pub settings: Settings,               // models, LLM steps, limits, prices, SCIP: resolved once
+    pub llm: Option<Arc<LlmClient>>,      // absent: LLM steps are skipped and say so
+    pub git: Arc<dyn Credentials>,        // tokens for cloning and fetching over HTTPS
+    pub report: Reporter,                 // events: steps, results, warnings, progress
+    pub cancel: CancellationToken,
+    pub cache: PathBuf,                   // comindly's checkouts of each repository
+}
+```
+
+The server builds one per job from its settings and stores; the command line builds one from its
+flags, the environment and the preferences. Ledger writes take the signer and the writer's identity as
+arguments, and reads take the verifier. The web app holds the loaded index (`view::Data`) behind an
+`Arc` and swaps it when a new version is indexed.
+
+## Async model
+
+- One Tokio multi-thread runtime per process (`rt::shared`). Core's API is `async`; no function builds
+  its own runtime. Synchronous callers block through `rt::block_on`, which hands the worker's other
+  tasks over while it waits.
+- CPU-bound work (parsing, binding, graph building, embeddings) runs on the blocking pool
+  (`spawn_blocking`), so requests stay responsive while a large index builds.
+- I/O (object storage, LLM requests, git hosting APIs) is async. LLM requests share one client with a
+  concurrency limit from the settings, and stop when the job is cancelled.
+- Cloning, fetching and checkouts use the `git` program on the blocking pool: partial clones
+  (`--filter=blob:none`) and the machine's credential helpers need it. Cancellation takes effect
+  between repositories. `ssh-keygen` is used only for optional record signing.
+
+## Jobs
+
+Indexing runs inside the server as a job, not as a child process.
+
+- **One at a time, in order.** A job has an id, a kind, who started it, a status (queued, running,
+  succeeded, failed, cancelled, interrupted) and its events. Starting one while another runs queues it;
+  up to 5 wait, and a request identical to a waiting one (same kind and options) returns that job
+  instead of adding another. The running job never absorbs a request, since its input may already be
+  stale. A queued job reads the repository list and settings when it starts, not when it was asked
+  for. The automatic re-index queues the same way.
+- **Cancellation.** A `CancellationToken` checked between units of work; cancelling stops LLM requests
+  in flight and leaves everything already saved in place. Cancelling a queued job takes it out of the
+  queue without starting it.
+- **Resumable steps.** Summaries, flow walkthroughs and style guides are saved as they are written and
+  reused while their input is unchanged, so a cancelled or interrupted job continues where it stopped.
+- **Events.** Each job's events are kept with its record (the last 400; progress replaces earlier
+  progress of the same step), streamed live (`/api/v1/jobs/{id}/events`, server-sent events) and
+  written to the log. The record is saved when it is queued, when it starts, every 15 seconds and
+  when it ends. Following a queued job streams a note with its position until it starts.
+- **Restarts.** A job still marked running or queued at start-up is marked interrupted; a queued one
+  says it never ran. Queued work is not run after a restart: what it would do is code, not data, and
+  rebuilding it from a stale request could index what nobody asked for any more. On SIGTERM the
+  waiting jobs are marked the same way.
+
+The command line runs the same pipeline in the foreground and renders its events in the terminal; with
+a server, `comindly link` starts or queues the server's job and follows its events instead.
+
+## Backends
+
+What the server stores and how it signs people in are traits, with comindly's defaults behind them:
+
+| Trait | Default |
+|---|---|
+| `AccountStore` (members, roles, invitations, sessions, codes, personal access tokens) | signed LanceDB table at the index location (`_server`) |
+| `AuditLog` (who changed what, for admins) | the same table |
+| `Authenticator` (session cookie or bearer token → who) | the same table, plus the deployment's admin token |
+| `DeviceSignIn` (command-line sign-in approved in the browser) | the same table; the issued token sealed until collected |
+| `SecretStore` (git and LLM tokens) | the same table, values encrypted with `COMINDLY_SECRET_KEY` |
+| `SettingsStore` (the repositories the server indexes) | the same table |
+| `JobStore` (job records and their events) | the same table; the local app keeps them in memory |
+| `Mailer` | SMTP (`COMINDLY_SMTP_URL`) |
+
+Rows in the table are signed with a key derived from `COMINDLY_SECRET_KEY`, so rows written by anyone
+else are ignored. Other implementations, for example a relational database or single sign-on, plug in
+without changes to core or to the HTTP layer.
+
+## Roles
+
+Admin, member and viewer. Viewers read; members also write to the ledger and conventions; admins also
+manage people, repositories, settings, secrets and indexing. The HTTP layer checks the role a request
+needs, the account store checks who may change whom, and MCP tools that write check the role of the
+person whose token the agent uses.
+
+## API
+
+- `/api/v1`: JSON. The web app and the command line use it. The answers the read commands print
+  (`/api/v1/answer/*`) are the types in `comindly_core::answers`, computed by the same functions locally
+  and on a server, so `--server` prints what a local run does. `/api/v1/view` sends the terminal UI
+  `comindly_core::view::View` (symbols, edges, ledger entries, conventions, dependencies), gzip-compressed;
+  the client rebuilds the graph and contracts from it.
+- Types: every route's request and answer is a type in `comindly_server::api` (grouped by area,
+  reusing domain types such as `answers::*`, `graph::Node` and `jobs::JobRecord`); handlers return them and
+  the CLI's client reads them, so the server and the command line cannot disagree on a shape.
+- Errors: one shape, `{ "error": { "code", "message" } }`, with HTTP status codes that mean what they say.
+- `/mcp`: MCP over streamable HTTP for agents, with a personal access token.
+- `/health` (alive) and `/ready` (an index is loaded and the accounts can be read).
+
+## Configuration
+
+| Whose | Where | Read |
+|---|---|---|
+| The deployment's | `COMINDLY_*` variables, each also as `*_FILE` | once at start into `ServerConfig`, checked |
+| A server's own | the `SettingsStore` | when used |
+| An index's shared settings | `<index>/_team`, a versioned document | when an index is loaded, and after each save |
+| One person's preferences | a versioned document in the config folder; TOML files are imported and exported | the app re-reads them every few seconds |
+
+API keys and the server sign-in stay in a credentials file readable only by its owner.
+
+## Observability
+
+- Every message is an event: timestamp, level, kind, step, message and fields (counts, tokens, cost).
+  `COMINDLY_LOG_FORMAT=json` writes one JSON object per line; otherwise readable lines.
+- Logs go through `tracing`; the server renders them in the formats above, and core still only reports
+  events to a sink, reading no environment.
+- Every HTTP request gets a request id (a safe incoming `X-Request-Id`, else a new one), returned in
+  `X-Request-Id` and carried as `request_id` by every log line written while handling it. A job's
+  events carry its `job_id` and the `request_id` that started it; the job record keeps it too.
+- One access line per request (method, path without query, status, duration, member email). `/health`
+  and `/ready`, and every request to the local app, log it at debug.
+- With `OTEL_EXPORTER_OTLP_ENDPOINT` set, spans per request and per job go out over OTLP/HTTP. The
+  exporter sits behind the `otel` cargo feature (on by default) and is configured at startup.
+- Graceful shutdown: on SIGTERM or Ctrl-C, stop accepting requests, let a running job stop at its next
+  checkpoint and save its record.
+
+## What 0.4.0 changed
+
+0.4.0 rebuilt comindly as described above, in one release: indexing moved into core as an async,
+cancellable pipeline; one runtime per process; contexts instead of process-wide state; the stores,
+sign-in and mail behind traits; indexing as jobs inside the server; `/api/v1` with one error shape;
+roles; the command line as a client; settings moved to where they belong; and the crates above.
+Deployments keep the same image, environment variables and storage layout; settings an older server
+kept move over on first start, and nothing is re-indexed.
 
 ## Competitive landscape
 

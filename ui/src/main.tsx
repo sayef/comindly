@@ -11,14 +11,16 @@ import { ContractsPage } from "@/pages/contracts";
 import { ConventionsPage } from "@/pages/conventions";
 import { ExplorerPage } from "@/pages/explorer";
 import { FlowsPage } from "@/pages/flows";
+import { ActivityPage } from "@/pages/activity";
 import { LedgerPage } from "@/pages/ledger";
 import { OverviewPage } from "@/pages/overview";
 import { PackagesPage } from "@/pages/packages";
 import { RepositoriesPage } from "@/pages/repositories";
 import { SettingsPage, SettingsShell } from "@/pages/settings";
 import { SetupPage } from "@/pages/setup";
-import { AccessPage, IntegrationsPage, MembersPage } from "@/pages/access";
+import { AccessPage, AuditPage, IntegrationsPage, MembersPage } from "@/pages/access";
 import { SignInPage } from "@/pages/signin";
+import { DevicePage } from "@/pages/device";
 import { ApiError, api } from "@/lib/api";
 import "./index.css";
 
@@ -63,6 +65,7 @@ createRoot(document.getElementById("root")!).render(
           <BrowserRouter>
             <Gate>
               <Routes>
+                <Route path="device" element={<DevicePage />} />
                 <Route element={<Layout />}>
                   <Route index element={<OverviewPage />} />
                   <Route path="contracts" element={<ContractsPage />} />
@@ -71,12 +74,15 @@ createRoot(document.getElementById("root")!).render(
                   <Route path="conventions" element={<ConventionsPage />} />
                   <Route path="packages" element={<PackagesPage />} />
                   <Route path="flows" element={<FlowsPage />} />
+                  <Route path="activity" element={<ActivityPage />} />
+                  <Route path="activity/:id" element={<ActivityPage />} />
                   <Route path="setup" element={<SetupPage />} />
                   <Route path="settings" element={<SettingsShell />}>
                     <Route index element={<SettingsPage />} />
                     <Route path="repositories" element={<RepositoriesPage />} />
                     <Route path="members" element={<MembersPage />} />
                     <Route path="integrations" element={<IntegrationsPage />} />
+                    <Route path="audit" element={<AuditPage />} />
                     <Route path="access" element={<AccessPage />} />
                   </Route>
                   <Route path="repositories" element={<Navigate to="/settings/repositories" replace />} />

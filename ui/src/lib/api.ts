@@ -184,11 +184,9 @@ export interface Settings {
   author_name: string | null;
   author_effective: string | null;
   record_names: boolean;
-  llm_base_url: string | null;
   llm_model: string;
   llm_key: KeySource;
   cache_ttl_secs: number;
-  auto_index: boolean;
   defaults: Defaults;
 }
 
@@ -207,6 +205,9 @@ export interface TeamSettings {
   llm_price_in?: number;
   llm_price_out?: number;
   format?: "md" | "json";
+  scip?: "auto" | "require" | "off";
+  auto_index?: boolean;
+  repos?: string[];
 }
 
 /** Where your API key comes from: your credentials file (team entry or default) or OPENAI_API_KEY. */
@@ -234,14 +235,10 @@ export type SettingsChange = Partial<{
   index_dir: string;
   author_name: string;
   record_names: boolean;
-  llm_base_url: string;
-  llm_model: string;
   cache_ttl_secs: number;
-  auto_index: boolean;
 }>;
 
-/** POST JSON; throws the server's message when it reports failure. */
-/** A failed request, with the server's reply for errors that carry more than a message. */
+/** A failed request, with the server's error for those that carry more than a message. */
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -252,11 +249,18 @@ export class ApiError extends Error {
   }
 }
 
+/** POST JSON; throws the server's error when it fails. */
 async function post<T = { ok: boolean; message: string }>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
   const r = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal });
-  const out = await r.json();
-  if (out && out.ok === false) throw new ApiError(out.message ?? `${path}: ${r.status}`, out);
-  return out as T;
+  if (!r.ok) throw await failure(path, r);
+  return (await r.json()) as T;
+}
+
+/** The server's `{"error": {"code", "message", ...}}` as an `ApiError`. */
+async function failure(path: string, r: Response): Promise<ApiError> {
+  const body = await r.json().catch(() => null);
+  const error = (body?.error ?? {}) as Record<string, unknown>;
+  return new ApiError((error.message as string | undefined) ?? `${path}: ${r.status}`, error, r.status);
 }
 
 /** Sent back when an HTTPS clone needs an access token. */
@@ -322,13 +326,46 @@ export interface IndexEvent {
   usd?: number;
 }
 
+export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
+
+/** A job as the server keeps it; a waiting one carries its `position`, 1 for the next to run. */
+export interface JobRow {
+  id: string;
+  kind: string;
+  started_by: string | null;
+  status: JobStatus;
+  created: string;
+  started: string | null;
+  finished: string | null;
+  error: string | null;
+  request_id?: string;
+  position?: number;
+}
+
+export interface JobDetail {
+  job: JobRow;
+  events: IndexEvent[];
+  position: number | null;
+}
+
 export interface IndexJob {
+  id?: string;
   running: boolean;
   cancelled: boolean;
   ok: boolean | null;
   events: IndexEvent[];
   started: string | null;
   finished: string | null;
+  /** Jobs waiting their turn, the next to run first. */
+  queued?: QueuedJob[];
+}
+
+export interface QueuedJob {
+  id: string;
+  kind: string;
+  position: number;
+  started_by: string | null;
+  created: string;
 }
 
 declare global {
@@ -358,14 +395,11 @@ export interface Setup {
 
 async function get<T>(path: string): Promise<T> {
   const r = await fetch(path);
-  if (!r.ok) {
-    const body = await r.json().catch(() => null);
-    throw new ApiError(body?.error ?? `${path}: ${r.status}`, body ?? {}, r.status);
-  }
+  if (!r.ok) throw await failure(path, r);
   return r.json();
 }
 
-export type Role = "admin" | "member";
+export type Role = "admin" | "member" | "viewer";
 
 /** Who is signed in; `local` when comindly runs on this machine without members. */
 export interface Me {
@@ -401,6 +435,16 @@ export interface AccessToken {
   name: string;
   created: string;
   last_used: string | null;
+  /** `null` when the token never expires. */
+  expires: string | null;
+  expired: boolean;
+}
+
+export interface AuditEntry {
+  at: string;
+  actor: string;
+  action: string;
+  detail: string;
 }
 
 /** A token or key the server uses; its value never reaches the browser. */
@@ -416,75 +460,75 @@ export interface SecretState {
 type Done = { ok: boolean; message: string };
 
 export const api = {
-  me: () => get<Me>("/api/auth/me"),
-  requestLink: (email: string) => post("/api/auth/link", { email }),
-  redeem: (token: string) => post("/api/auth/redeem", { token }),
-  signInCode: (email: string, code: string) => post<Done & { code: string | null }>("/api/auth/code", { email, code }),
-  resetOwnCode: () => post<Done & { code: string }>("/api/auth/reset-code", {}),
-  signOut: (everywhere = false) => post(`/api/auth/signout${everywhere ? "?everywhere=true" : ""}`, {}),
-  members: () => get<{ members: Member[]; invites: Invite[]; sign_in: SignIn }>("/api/members"),
-  invite: (email: string, role: Role) => post<Done & { code?: string }>("/api/members/invite", { email, role }),
-  resetCode: (email: string) => post<Done & { code: string }>("/api/members/reset", { email }),
-  setRole: (email: string, role: Role) => post("/api/members/role", { email, role }),
-  removeMember: (email: string) => post("/api/members/remove", { email }),
-  revokeInvite: (email: string) => post("/api/members/revoke", { email }),
-  tokens: () => get<{ tokens: AccessToken[] }>("/api/tokens"),
-  createToken: (name: string) => post<Done & { token: string }>("/api/tokens", { name }),
-  revokeToken: (id: string) => post("/api/tokens/revoke", { id }),
-  secrets: () => get<{ secrets: SecretState[]; can_store: boolean }>("/api/secrets"),
-  setSecret: (name: string, value: string) => post("/api/secrets", { name, value }),
-  overview: () => get<Overview>("/api/overview"),
-  orgmap: (at?: number) => get<OrgMap>(at === undefined ? "/api/orgmap" : `/api/orgmap?at=${at}`),
-  versions: () => get<string[]>("/api/versions"),
-  contracts: () => get<ContractView[]>("/api/contracts"),
-  ledger: () => get<Entry[]>("/api/ledger"),
-  conventions: () => get<{ conventions: Convention[]; hidden: HiddenConvention[] }>("/api/conventions"),
-  changeConvention: async (c: ConventionChange) => {
-    const r = await fetch("/api/conventions", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(c),
-    });
-    const out = (await r.json()) as { ok: boolean; message: string };
-    if (!out.ok) throw new Error(out.message);
-    return out;
-  },
-  find: (q: string) => get<Node[]>(`/api/find?q=${encodeURIComponent(q)}`),
-  search: (q: string) => get<SearchHit[]>(`/api/search?q=${encodeURIComponent(q)}`),
-  packages: () => get<Package[]>("/api/packages"),
-  setup: () => get<Setup>("/api/setup"),
-  settings: () => get<Settings>("/api/settings"),
-  repos: () => get<{ repos: RepoRow[]; unlisted: UnlistedRepo[]; team_missing: string[]; root: string | null }>("/api/repos"),
+  me: () => get<Me>("/api/v1/auth/me"),
+  requestLink: (email: string) => post("/api/v1/auth/link", { email }),
+  redeem: (token: string) => post("/api/v1/auth/redeem", { token }),
+  deviceInfo: (code: string) => get<{ client: string; expires: string }>(`/api/v1/auth/device?code=${encodeURIComponent(code)}`),
+  deviceApprove: (code: string, approve: boolean) => post("/api/v1/auth/device/approve", { code, approve }),
+  signInCode: (email: string, code: string) => post<Done & { code: string | null }>("/api/v1/auth/code", { email, code }),
+  resetOwnCode: () => post<Done & { code: string }>("/api/v1/auth/reset-code", {}),
+  signOut: (everywhere = false) => post(`/api/v1/auth/signout${everywhere ? "?everywhere=true" : ""}`, {}),
+  members: () => get<{ members: Member[]; invites: Invite[]; sign_in: SignIn }>("/api/v1/members"),
+  invite: (email: string, role: Role) => post<Done & { code?: string }>("/api/v1/members/invite", { email, role }),
+  resetCode: (email: string) => post<Done & { code: string }>("/api/v1/members/reset", { email }),
+  setRole: (email: string, role: Role) => post("/api/v1/members/role", { email, role }),
+  removeMember: (email: string) => post("/api/v1/members/remove", { email }),
+  revokeInvite: (email: string) => post("/api/v1/members/revoke", { email }),
+  tokens: () => get<{ tokens: AccessToken[] }>("/api/v1/tokens"),
+  createToken: (name: string, expires_in_days: number | null) =>
+    post<Done & { token: string }>("/api/v1/tokens", { name, expires_in_days }),
+  revokeToken: (id: string) => post("/api/v1/tokens/revoke", { id }),
+  audit: (before?: string | null) =>
+    get<{ entries: AuditEntry[]; next: string | null }>(`/api/v1/audit${before ? `?before=${encodeURIComponent(before)}` : ""}`),
+  secrets: () => get<{ secrets: SecretState[]; can_store: boolean }>("/api/v1/secrets"),
+  setSecret: (name: string, value: string) => post("/api/v1/secrets", { name, value }),
+  overview: () => get<Overview>("/api/v1/overview"),
+  orgmap: (at?: number) => get<OrgMap>(at === undefined ? "/api/v1/orgmap" : `/api/v1/orgmap?at=${at}`),
+  versions: () => get<string[]>("/api/v1/versions"),
+  contracts: () => get<ContractView[]>("/api/v1/contracts"),
+  ledger: () => get<Entry[]>("/api/v1/ledger"),
+  conventions: () => get<{ conventions: Convention[]; hidden: HiddenConvention[] }>("/api/v1/conventions"),
+  changeConvention: (c: ConventionChange) => post("/api/v1/conventions", c),
+  find: (q: string) => get<Node[]>(`/api/v1/find?q=${encodeURIComponent(q)}`),
+  search: (q: string) => get<SearchHit[]>(`/api/v1/search?q=${encodeURIComponent(q)}`),
+  packages: () => get<Package[]>("/api/v1/packages"),
+  setup: () => get<Setup>("/api/v1/setup"),
+  settings: () => get<Settings>("/api/v1/settings"),
+  repos: () => get<{ repos: RepoRow[]; unlisted: UnlistedRepo[]; team_missing: string[]; root: string | null }>("/api/v1/repos"),
   remoteRepos: (url: string, auth?: { username: string; token: string }, signal?: AbortSignal) =>
     post<{ ok: boolean; provider: string; host: string; owner: string; repos: RemoteRepo[]; warning?: string | null }>(
-      "/api/repos/remote/list",
+      "/api/v1/repos/remote/list",
       { url, ...auth },
       signal,
     ),
-  addRemoteRepos: (urls: string[], share: boolean) => post("/api/repos/remote/add", { urls, share }),
-  changeRepos: (c: { add?: string[]; remove?: string[] }) => post("/api/repos", c),
-  scanRepos: (dir: string, signal?: AbortSignal) => post<{ ok: boolean; found: ScanHit[] }>("/api/repos/scan", { dir }, signal),
-  cloneRepo: (url: string, dir: string, auth?: { username: string; token: string }) => post("/api/repos/clone", { url, dir, ...auth }),
-  flows: () => get<FlowRow[]>("/api/flows"),
-  flow: (id: string) => get<FlowDetail>(`/api/flow?id=${encodeURIComponent(id)}`),
-  source: (repo: string, at: string) => get<SourceLines>(`/api/source?repo=${encodeURIComponent(repo)}&at=${encodeURIComponent(at)}`),
-  indexJob: () => get<IndexJob>("/api/index"),
-  startIndex: (llm: boolean, drop_unlisted = false) => post("/api/index", { llm, drop_unlisted }),
-  cancelIndex: () => post("/api/index/cancel", {}),
-  indexWatch: () => get<{ enabled: boolean; last: { checked: string | null; result: string } }>("/api/index/watch"),
-  team: () => get<Team>("/api/team"),
-  saveTeam: (settings: TeamSettings, version: number | null) => post("/api/team", { settings, version }),
-  saveKey: (key: string) => post<{ ok: boolean; message: string }>("/api/team/key", { key }),
-  join: (index: string) => post("/api/join", { index }),
-  createTeam: (name: string, index: string) => post("/api/team/create", { name, index }),
-  saveSettings: (c: SettingsChange) => post("/api/settings", c),
-  testIndex: (index_dir: string) => post("/api/settings/test", { index_dir }),
+  addRemoteRepos: (urls: string[], share: boolean) => post("/api/v1/repos/remote/add", { urls, share }),
+  changeRepos: (c: { add?: string[]; remove?: string[] }) => post("/api/v1/repos", c),
+  scanRepos: (dir: string, signal?: AbortSignal) => post<{ ok: boolean; found: ScanHit[] }>("/api/v1/repos/scan", { dir }, signal),
+  flows: () => get<FlowRow[]>("/api/v1/flows"),
+  flow: (id: string) => get<FlowDetail>(`/api/v1/flow?id=${encodeURIComponent(id)}`),
+  source: (repo: string, at: string) => get<SourceLines>(`/api/v1/source?repo=${encodeURIComponent(repo)}&at=${encodeURIComponent(at)}`),
+  indexJob: () => get<IndexJob>("/api/v1/index"),
+  startIndex: (llm: boolean, drop_unlisted = false) => post("/api/v1/index", { llm, drop_unlisted }),
+  cancelIndex: () => post("/api/v1/index/cancel", {}),
+  cancelJob: (id: string) => post(`/api/v1/jobs/${id}/cancel`, {}),
+  jobs: () => get<{ jobs: JobRow[] }>("/api/v1/jobs").then((r) => r.jobs),
+  job: (id: string) => get<JobDetail>(`/api/v1/jobs/${encodeURIComponent(id)}`),
+  indexWatch: () => get<{ enabled: boolean; last: { checked: string | null; result: string } }>("/api/v1/index/watch"),
+  team: () => get<Team>("/api/v1/team"),
+  saveTeam: (settings: TeamSettings, version: number | null) => post("/api/v1/team", { settings, version }),
+  saveKey: (key: string) => post<{ ok: boolean; message: string }>("/api/v1/team/key", { key }),
+  join: (index: string) => post("/api/v1/join", { index }),
+  createTeam: (name: string, index: string) => post("/api/v1/team/create", { name, index }),
+  saveSettings: (c: SettingsChange) => post("/api/v1/settings", c),
+  testIndex: (index_dir: string) => post("/api/v1/settings/test", { index_dir }),
   context: async (focus: string) => {
-    const r = await fetch(`/api/context?focus=${encodeURIComponent(focus)}`);
+    const path = `/api/v1/context?focus=${encodeURIComponent(focus)}`;
+    const r = await fetch(path);
+    if (!r.ok) throw await failure(path, r);
     return r.text();
   },
-  node: (focus: string) => get<NodeDetail>(`/api/node?focus=${encodeURIComponent(focus)}`),
-  remember: async (r: {
+  node: (focus: string) => get<NodeDetail>(`/api/v1/node?focus=${encodeURIComponent(focus)}`),
+  remember: (r: {
     kind: string;
     on: string[];
     title: string;
@@ -492,32 +536,9 @@ export const api = {
     trigger: string;
     evidence: string[];
     fields: Record<string, string>;
-  }) => {
-    const res = await fetch("/api/remember", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(r),
-    });
-    const out = (await res.json()) as { ok: boolean; id?: string; message?: string };
-    if (!out.ok) throw new Error(out.message ?? "not recorded");
-    return out;
-  },
-  erase: async (id: string) => {
-    const r = await fetch("/api/erase", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id }),
-    });
-    return (await r.json()) as { ok: boolean; message: string };
-  },
-  review: async (id: string, action: ReviewAction, reason = "") => {
-    const r = await fetch("/api/review", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id, action, reason }),
-    });
-    return (await r.json()) as { ok: boolean; message: string };
-  },
+  }) => post<{ ok: boolean; id?: string; message?: string }>("/api/v1/remember", r),
+  erase: (id: string) => post("/api/v1/erase", { id }),
+  review: (id: string, action: ReviewAction, reason = "") => post("/api/v1/review", { id, action, reason }),
 };
 
 /** When a record's fact happened (older harvested records carry `at`), else when it was recorded. */

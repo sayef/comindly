@@ -1,7 +1,7 @@
 //! `comindly ui`: a terminal UI over the index — overview, contracts, ledger, explorer and
 //! conventions. Data loads once; rendering is a pure function of the app state.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -9,11 +9,11 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, List, ListItem, ListState, Paragraph, Tabs, Wrap};
 use ratatui::Frame;
 
-use crate::conventions::{Convention, ORG};
-use crate::graph::{CodeGraph, ContractView, Node};
+use crate::conventions::ORG;
+use crate::graph::{ContractView, Node};
 use crate::ledger::{Entry, Status, Trust};
 use crate::manifests::InternalDep;
-use crate::model::{Edge, Symbol};
+pub use crate::view::Data;
 
 const TABS: [&str; 6] = [
     "Overview",
@@ -23,78 +23,6 @@ const TABS: [&str; 6] = [
     "Conventions",
     "Timeline",
 ];
-
-/// Everything the UI shows, loaded from an index.
-pub struct Data {
-    pub graph: CodeGraph,
-    pub symbols: Vec<Symbol>,
-    pub edges: Vec<Edge>,
-    pub contracts: Vec<ContractView>,
-    pub entries: Vec<Entry>,
-    /// Measured conventions; `manual` holds the team's changes to them.
-    pub conventions: Vec<Convention>,
-    pub manual: Vec<crate::conventions::Manual>,
-    pub deps: Vec<InternalDep>,
-    /// Index root for writing ledger reviews; `None` makes the UI read-only.
-    pub root: Option<String>,
-    /// Why the index could not be loaded (the UIs then start empty).
-    pub problem: Option<String>,
-}
-
-impl Data {
-    /// Everything the UIs show, read from the index at `root`.
-    pub fn load(root: &str) -> anyhow::Result<Data> {
-        let dir = format!("{}/_graph", root.trim_end_matches('/'));
-        let (symbols, edges) = crate::index::read_graph_blocking(&dir)
-            .map_err(|e| anyhow::anyhow!("no index at {dir}: {e:#}"))?;
-        let mut conventions = match crate::index::read_facts_blocking(&dir) {
-            Ok(Some(facts)) => crate::conventions::mine(&symbols, &edges, &facts),
-            _ => Vec::new(),
-        };
-        conventions.extend(crate::index::read_recipes_blocking(&dir).unwrap_or_default());
-        let manual = crate::conventions::manual_blocking(root).unwrap_or_default();
-        let records = crate::ledger::all_blocking(root).unwrap_or_default();
-        let mut entries = crate::ledger::derive(&records, &symbols);
-        let packages = crate::index::read_packages_blocking(&dir).unwrap_or_default();
-        let findings = crate::checks::run(&entries, &symbols, &edges, &packages);
-        crate::checks::promote(&mut entries, &findings);
-        let deps = crate::manifests::internal(&packages);
-        let graph = CodeGraph::build(&symbols, &edges);
-        Ok(Data {
-            contracts: graph.contracts(None, false),
-            graph,
-            symbols,
-            edges,
-            entries,
-            conventions,
-            manual,
-            deps,
-            root: Some(root.to_string()),
-            problem: None,
-        })
-    }
-
-    /// No index yet: an empty view of `root` that says why.
-    pub fn empty(root: &str, problem: String) -> Data {
-        Data {
-            graph: CodeGraph::build(&[], &[]),
-            symbols: Vec::new(),
-            edges: Vec::new(),
-            contracts: Vec::new(),
-            entries: Vec::new(),
-            conventions: Vec::new(),
-            manual: Vec::new(),
-            deps: Vec::new(),
-            root: Some(root.to_string()),
-            problem: Some(problem),
-        }
-    }
-
-    /// The index at `root`, or an empty view saying why it could not be read.
-    pub fn load_or_empty(root: &str) -> Data {
-        Data::load(root).unwrap_or_else(|e| Data::empty(root, format!("{e:#}")))
-    }
-}
 
 pub struct App {
     data: Data,
@@ -109,18 +37,52 @@ pub struct App {
     /// Last action's outcome, shown in the help line.
     status: String,
     quit: bool,
+    /// The server the data came from; reviews and reloads then go there.
+    server: Option<crate::client::Client>,
+    /// Signed in to that server as a viewer: reviews would be refused.
+    viewer: bool,
+}
+
+/// The terminal UI's data from a server's `/api/v1/view`, downloaded only when it changed since the
+/// copy cached for that server.
+pub fn fetch(c: &crate::client::Client) -> Result<Data> {
+    let file = view_cache(c.base());
+    let cached = std::fs::read(&file).ok().and_then(|b| {
+        let at = b.iter().position(|&x| x == b'\n')?;
+        Some((
+            String::from_utf8(b[..at].to_vec()).ok()?,
+            b[at + 1..].to_vec(),
+        ))
+    });
+    let fresh = crate::rt::block_on(
+        c.get_if_changed("/api/v1/view", cached.as_ref().map(|(t, _)| t.as_str())),
+    )?;
+    let body = match (fresh, cached) {
+        (Some((tag, body)), _) => {
+            if !tag.is_empty() {
+                let _ = save_private(&file, &[tag.as_bytes(), b"\n", &body].concat());
+            }
+            body
+        }
+        (None, Some((_, body))) => body,
+        (None, None) => anyhow::bail!("{} answered without a view", c.base()),
+    };
+    let view: crate::view::View =
+        serde_json::from_slice(&body).context("unexpected answer from the server")?;
+    if let Some(problem) = view.problem.as_ref().filter(|_| view.symbols.is_empty()) {
+        anyhow::bail!("{} has no index yet: {problem}", c.base());
+    }
+    Ok(Data::from_view(view))
 }
 
 impl App {
-    pub fn new(mut data: Data) -> App {
-        let measured = std::mem::take(&mut data.conventions);
-        data.conventions = crate::conventions::apply(measured, &data.manual);
+    pub fn new(data: Data) -> App {
         let mut lists: [ListState; 6] = Default::default();
         for l in &mut lists {
             l.select(Some(0));
         }
         App {
-            data,
+            data: prepare(data),
             tab: 0,
             lists,
             inner: ListState::default().with_selected(Some(0)),
@@ -130,7 +92,23 @@ impl App {
             found: Vec::new(),
             status: String::new(),
             quit: false,
+            server: None,
+            viewer: false,
         }
+    }
+
+    /// Show data fetched from `server`, and send reviews and reloads there.
+    pub fn on_server(mut self, server: crate::client::Client) -> App {
+        let me = crate::rt::block_on(server.get::<crate::api::Me>("/api/v1/auth/me", &()));
+        self.viewer = matches!(
+            me,
+            Ok(crate::api::Me::Server {
+                role: Some(crate::server::Role::Viewer),
+                ..
+            })
+        );
+        self.server = Some(server);
+        self
     }
 
     pub fn run(mut self) -> Result<()> {
@@ -189,14 +167,68 @@ impl App {
             KeyCode::Char('x') if self.tab == 2 => {
                 self.review(crate::ledger::RelationKind::Retracts)
             }
+            KeyCode::Char('r') => self.reload(),
             KeyCode::Char('J') => step(&mut self.inner, 1, usize::MAX),
             KeyCode::Char('K') => step(&mut self.inner, -1, usize::MAX),
             _ => {}
         }
     }
 
+    /// Read the index again, from the server or the index root.
+    fn reload(&mut self) {
+        let loaded = match (&self.server, &self.data.root) {
+            (Some(c), _) => fetch(c),
+            (None, Some(root)) => Data::load(root, &crate::config::local_verifier()),
+            (None, None) => return,
+        };
+        self.status = match loaded {
+            Ok(data) => {
+                self.data = prepare(data);
+                self.refresh();
+                "reloaded".into()
+            }
+            Err(e) => format!("not reloaded: {e:#}"),
+        };
+    }
+
     /// Confirm or retract the selected ledger record as a human reviewer.
     fn review(&mut self, kind: crate::ledger::RelationKind) {
+        if self.viewer {
+            self.status =
+                "read-only: viewers cannot review; ask an admin for the member role".into();
+            return;
+        }
+        if let Some(c) = &self.server {
+            let selected = self.lists[2].selected().unwrap_or(0);
+            let Some(id) = self.entries().get(selected).map(|e| e.record.id.clone()) else {
+                return;
+            };
+            let action = match kind {
+                crate::ledger::RelationKind::Retracts => "retract",
+                _ => "confirm",
+            };
+            let body = crate::api::ReviewRequest {
+                id,
+                action: action.into(),
+                reason: String::new(),
+            };
+            let sent: Result<crate::api::Done> =
+                crate::rt::block_on(c.post("/api/v1/review", &body));
+            self.status = match sent {
+                Err(e) => format!("not recorded: {e:#}"),
+                Ok(r) => {
+                    let msg = r.message;
+                    match fetch(c) {
+                        Ok(data) => {
+                            self.data = prepare(data);
+                            msg
+                        }
+                        Err(e) => format!("{msg}; not reloaded: {e:#}"),
+                    }
+                }
+            };
+            return;
+        }
         let Some(root) = self.data.root.clone() else {
             self.status = "read-only: no index root".into();
             return;
@@ -205,16 +237,22 @@ impl App {
         let Some(target) = self.entries().get(selected).map(|e| e.record.clone()) else {
             return;
         };
-        let prov = crate::ledger::Provenance::human("ui");
+        let prov = crate::ledger::Provenance::human("ui", &crate::config::local_identity());
         let rec = crate::ledger::Record::relation(kind, &target, "", prov);
-        self.status = match crate::ledger::put_blocking(&root, &rec) {
-            Ok(()) => {
-                let records = crate::ledger::all_blocking(&root).unwrap_or_default();
-                self.data.entries = crate::ledger::derive(&records, &self.data.symbols);
-                format!("{kind:?}: {}", target.title)
-            }
-            Err(e) => format!("not recorded: {e:#}"),
-        };
+        self.status =
+            match crate::ledger::put_blocking(&root, &rec, crate::config::local_signing_key()) {
+                Ok(()) => {
+                    crate::cache::invalidate(&root);
+                    let records = crate::ledger::all_blocking(&root).unwrap_or_default();
+                    self.data.entries = crate::ledger::derive(
+                        &records,
+                        &self.data.symbols,
+                        &crate::config::local_verifier(),
+                    );
+                    format!("{kind:?}: {}", target.title)
+                }
+                Err(e) => format!("not recorded: {e:#}"),
+            };
     }
 
     fn input(&mut self) -> &mut String {
@@ -321,7 +359,10 @@ impl App {
                 .map(|(i, t)| format!("{} {t}", i + 1)),
         )
         .select(self.tab)
-        .block(Block::bordered().title(" comindly "))
+        .block(Block::bordered().title(match &self.server {
+            Some(c) => format!(" comindly · {} ", c.base()),
+            None => " comindly ".to_string(),
+        }))
         .highlight_style(Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD));
         f.render_widget(tabs, top);
         match self.tab {
@@ -340,10 +381,12 @@ impl App {
             } else {
                 format!("  filter: {}", self.filter)
             };
-            let actions = if self.tab == 2 {
-                " · c confirm · x retract"
+            let actions = if self.viewer {
+                " · r reload · read-only (viewer)"
+            } else if self.tab == 2 {
+                " · c confirm · x retract · r reload"
             } else {
-                ""
+                " · r reload"
             };
             let status = if self.status.is_empty() {
                 String::new()
@@ -699,6 +742,13 @@ impl App {
     }
 }
 
+/// Measured conventions with the team's changes applied, as the tabs show them.
+fn prepare(mut data: Data) -> Data {
+    let measured = std::mem::take(&mut data.conventions);
+    data.conventions = crate::conventions::apply(measured, &data.manual);
+    data
+}
+
 fn step(state: &mut ListState, by: i64, len: usize) {
     let cur = state.selected().unwrap_or(0) as i64;
     let max = len.saturating_sub(1) as i64;
@@ -751,6 +801,35 @@ fn when(r: &crate::ledger::Record) -> &str {
         .unwrap_or(&r.created)
 }
 
+/// Where the last view from the server at `base` is kept: one file per server.
+fn view_cache(base: &str) -> std::path::PathBuf {
+    let name: String = base
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    crate::config::cache_dir()
+        .join("views")
+        .join(format!("{name}.json"))
+}
+
+/// Forget the view cached for the server at `base`, as signing out does.
+pub fn forget_view(base: &str) {
+    let _ = std::fs::remove_file(view_cache(base));
+}
+
+/// Write `bytes` to `path`, readable only by this user.
+fn save_private(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let mut o = std::fs::OpenOptions::new();
+    o.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
+    o.open(path)?.write_all(bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -774,7 +853,7 @@ mod tests {
         }
         let r = crate::resolve::resolve(&symbols, &edges, &facts);
         symbols.extend(r.symbols);
-        let graph = CodeGraph::build(&symbols, &r.edges);
+        let graph = crate::graph::CodeGraph::build(&symbols, &r.edges);
         let data = Data {
             contracts: graph.contracts(None, false),
             conventions: crate::conventions::mine(&symbols, &r.edges, &facts),
@@ -801,5 +880,30 @@ mod tests {
             screen.contains("http:GET /v1/courses/{}"),
             "contracts tab shows the route"
         );
+    }
+
+    #[test]
+    fn a_viewer_is_told_before_reviewing() {
+        let graph = crate::graph::CodeGraph::build(&[], &[]);
+        let mut app = App::new(Data {
+            contracts: graph.contracts(None, false),
+            conventions: Vec::new(),
+            entries: Vec::new(),
+            manual: Vec::new(),
+            deps: Vec::new(),
+            root: None,
+            problem: None,
+            graph,
+            symbols: Vec::new(),
+            edges: Vec::new(),
+        });
+        app.viewer = true;
+        app.switch(2);
+        app.review(crate::ledger::RelationKind::Confirms);
+        assert!(app.status.starts_with("read-only"));
+        let mut term = Terminal::new(TestBackend::new(160, 20)).unwrap();
+        term.draw(|f| app.draw(f)).unwrap();
+        let screen = format!("{:?}", term.backend().buffer());
+        assert!(screen.contains("read-only (viewer)"));
     }
 }

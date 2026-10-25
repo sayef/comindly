@@ -53,7 +53,7 @@ export function ContractsPage() {
   return (
     <div className="flex flex-col gap-5">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Service contracts</h1>
+        <h1 className="text-[28px] font-semibold tracking-[-0.035em]">Service contracts</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Routes, queues, topics, buckets and tables, with the code that provides them and the code that uses them.
         </p>

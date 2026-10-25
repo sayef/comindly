@@ -3,12 +3,14 @@
 //! Subcommands: `index`, `link`, `explore`, `search`, `find`, `repos`, `stats`, `guide`,
 //! `flow`, `changed`, `serve`, `config`, `eval`.
 
-use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::Path;
 use std::process::ExitCode;
+use std::sync::Arc;
 
-use comindly::model::{Edge, EdgeKind, Symbol, SymbolKind};
+use comindly::model::{Edge, Symbol};
+
+mod remote;
 
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 
@@ -19,6 +21,13 @@ use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 #[derive(Parser)]
 #[command(name = "comindly", version, about, long_about = None)]
 struct Cli {
+    /// Ask this comindly server instead of a local index (default: `COMINDLY_SERVER`, else the
+    /// server `comindly login` signed you in to)
+    #[arg(long, global = true)]
+    server: Option<String>,
+    /// Use the index on this machine even when signed in to a server
+    #[arg(long, global = true, conflicts_with = "server")]
+    local: bool,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -295,7 +304,18 @@ enum Cmd {
         /// The team's index (a folder, s3://, gs:// or az:// location)
         index: String,
     },
-    /// The web UI in its own window (macOS)
+    /// Run a comindly server for a team: the web app, `/api/v1` and `/mcp`, with sign-in
+    /// (needs `COMINDLY_PUBLIC_URL`; see the self-hosting guide)
+    Server {
+        #[arg(long = "index-dir")]
+        index_dir: Option<String>,
+        #[arg(long, default_value_t = 7878)]
+        port: u16,
+        /// The address to listen on
+        #[arg(long, default_value = "0.0.0.0")]
+        host: String,
+    },
+    /// The web UI in its own window on macOS, in the browser elsewhere; a server's app when you use one
     App {
         #[arg(long = "index-dir")]
         index_dir: Option<String>,
@@ -378,7 +398,14 @@ enum Cmd {
         #[command(subcommand)]
         what: EvalWhat,
     },
-    /// Show or scaffold the config file
+    /// Sign in to a comindly server by approving this command line in your browser
+    Login {
+        /// The server's address, e.g. https://comindly.example.com
+        url: String,
+    },
+    /// Forget the server sign-in on this machine
+    Logout,
+    /// Your preferences on this machine: show, set, import, export, history
     Config {
         #[command(subcommand)]
         action: Option<ConfigAction>,
@@ -387,7 +414,7 @@ enum Cmd {
 
 #[derive(Subcommand)]
 enum TeamWhat {
-    /// Set team settings: name, llm_model, llm_base_url, embed_model, enrich, flows, guide (empty removes)
+    /// Set team settings, KEY=VALUE: name, llm_model, llm_base_url, embed_model, embed, enrich, flows, guide, max_enrich, max_flows, llm_concurrency, llm_price_in, llm_price_out, format, scip, auto_index (empty removes)
     Set {
         #[arg(required = true, value_name = "KEY=VALUE")]
         pairs: Vec<String>,
@@ -470,33 +497,41 @@ enum EvalWhat {
 
 #[derive(Subcommand)]
 enum ConfigAction {
-    /// Print the config file location and resolved index dir
-    Path,
-    /// Write a commented config.toml with the current defaults
-    Init {
-        /// Overwrite an existing config file (discards its current contents)
-        #[arg(long)]
-        overwrite: bool,
+    /// Show your preferences (the default)
+    Show,
+    /// Set preferences: KEY=VALUE (index_dir, author_name, record_names, signing_key, allowed_signers, cache_ttl_secs); empty removes
+    Set { pairs: Vec<String> },
+    /// Apply a TOML file in the shape `export` writes; fills what is unset unless --override
+    Import {
+        file: String,
+        /// Replace your preferences with the file's
+        #[arg(long = "override")]
+        replace: bool,
     },
+    /// Write your preferences as TOML, to a file or stdout
+    Export { file: Option<String> },
+    /// Earlier versions of your preferences
+    History,
+    /// Where your preferences are kept
+    Path,
 }
 
 fn main() -> ExitCode {
+    let _telemetry = comindly::telemetry::init();
     let matches = Cli::command().get_matches();
-    // Commands that index, search, serve or show the UI run with the index's team settings.
-    if let Some((name, sub)) = matches.subcommand() {
-        let team = [
-            "index", "link", "serve", "ui", "app", "search", "doctor", "guide", "flow",
-        ];
-        if team.contains(&name) {
-            let flag = sub.try_get_one::<String>("index_dir").ok().flatten();
-            let root = comindly::config::Config::load().index_dir(flag.map(String::as_str));
-            let _ = comindly::team::apply(&root);
-        }
+    // An older config.toml is imported once; a server keeps its settings in its database.
+    if std::env::var_os("COMINDLY_PUBLIC_URL").is_none() {
+        comindly::config::adopt_file();
     }
     let cli = match Cli::from_arg_matches(&matches) {
         Ok(c) => c,
         Err(e) => e.exit(),
     };
+    if let Some(c) = remote::client(cli.server.as_deref(), cli.local) {
+        if let Some(code) = remote::dispatch(&c, &cli.cmd) {
+            return code;
+        }
+    }
     match cli.cmd {
         Cmd::Index {
             repo,
@@ -514,17 +549,17 @@ fn main() -> ExitCode {
             since,
             scip,
         } => {
-            let cfg = comindly::config::Config::load();
-            let Some(scip) = scip_mode(scip.as_deref(), &cfg) else {
+            let s = settings_for(index_dir.as_deref());
+            let Some(scip) = scip_mode(scip.as_deref(), s.scip) else {
                 return ExitCode::FAILURE;
             };
             cmd_index(
                 &repo,
                 index_dir.as_deref(),
-                tri(embed, no_embed).unwrap_or(cfg.embed()),
-                !no_llm && tri(enrich, no_enrich).unwrap_or(cfg.enrich()),
-                !no_llm && tri(flows, no_flows).unwrap_or(cfg.flows()),
-                !no_llm && tri(guide, no_guide).unwrap_or(cfg.guide()),
+                tri(embed, no_embed).unwrap_or(s.embed),
+                !no_llm && tri(enrich, no_enrich).unwrap_or(s.enrich),
+                !no_llm && tri(flows, no_flows).unwrap_or(s.flows),
+                !no_llm && tri(guide, no_guide).unwrap_or(s.guide),
                 incremental,
                 since.as_deref(),
                 scip,
@@ -545,29 +580,17 @@ fn main() -> ExitCode {
             incremental,
             scip,
         } => {
-            let cfg = comindly::config::Config::load();
-            let Some(scip) = scip_mode(scip.as_deref(), &cfg) else {
+            let s = settings_for(index_dir.as_deref());
+            let Some(scip) = scip_mode(scip.as_deref(), s.scip) else {
                 return ExitCode::FAILURE;
             };
-            let repos = if repos.is_empty() {
-                match configured_checkouts(&cfg) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        comindly::ui::err(&comindly::storage::explain(&format!("{e:#}")));
-                        return ExitCode::FAILURE;
-                    }
-                }
-            } else {
-                repos
-            };
-            let repos: Vec<&str> = repos.iter().map(String::as_str).collect();
             cmd_link(
                 &repos,
                 index_dir.as_deref(),
-                tri(embed, no_embed).unwrap_or(cfg.embed()),
-                !no_llm && tri(enrich, no_enrich).unwrap_or(cfg.enrich()),
-                !no_llm && tri(flows, no_flows).unwrap_or(cfg.flows()),
-                !no_llm && tri(guide, no_guide).unwrap_or(cfg.guide()),
+                tri(embed, no_embed).unwrap_or(s.embed),
+                !no_llm && tri(enrich, no_enrich).unwrap_or(s.enrich),
+                !no_llm && tri(flows, no_flows).unwrap_or(s.flows),
+                !no_llm && tri(guide, no_guide).unwrap_or(s.guide),
                 incremental,
                 scip,
             )
@@ -589,24 +612,17 @@ fn main() -> ExitCode {
         } => {
             // CLI flag → config → default. `md`/`markdown` = markdown; anything else = table.
             let fmt = if md { Some("md".to_string()) } else { format };
-            let fmt = fmt.unwrap_or_else(|| comindly::config::Config::load().format());
+            let fmt = fmt.unwrap_or_else(|| settings_for(index_dir.as_deref()).format);
             let markdown = matches!(fmt.as_str(), "md" | "markdown");
-            let repos: Vec<&str> = repo.iter().map(String::as_str).collect();
-            cmd_search(&query.join(" "), index_dir.as_deref(), &repos, markdown)
+            cmd_search(&query.join(" "), index_dir.as_deref(), &repo, markdown)
         }
         Cmd::Find {
             query,
             index_dir,
             repo,
-        } => {
-            let repos: Vec<&str> = repo.iter().map(String::as_str).collect();
-            cmd_find(&query, index_dir.as_deref(), &repos)
-        }
+        } => cmd_find(&query, index_dir.as_deref(), &repo),
         Cmd::Repos { what, index_dir } => cmd_repo_list(what, index_dir.as_deref()),
-        Cmd::Stats { index_dir, repo } => {
-            let repos: Vec<&str> = repo.iter().map(String::as_str).collect();
-            cmd_stats(&repos, index_dir.as_deref())
-        }
+        Cmd::Stats { index_dir, repo } => cmd_stats(&repo, index_dir.as_deref()),
         Cmd::Guide {
             index_dir,
             repo,
@@ -628,7 +644,7 @@ fn main() -> ExitCode {
             } else {
                 format
             };
-            let fmt = fmt.unwrap_or_else(|| comindly::config::Config::load().format());
+            let fmt = fmt.unwrap_or_else(|| settings_for(index_dir.as_deref()).format);
             let markdown = !matches!(fmt.as_str(), "json");
             cmd_serve(index_dir.as_deref(), markdown)
         }
@@ -686,7 +702,10 @@ fn main() -> ExitCode {
             index_dir,
         } => cmd_hook(&agent, &event, index_dir.as_deref()),
         Cmd::InitHooks { agent } => cmd_init_hooks(&agent),
-        Cmd::Doctor { index_dir } => cmd_doctor(index_dir.as_deref()),
+        Cmd::Doctor { index_dir } => cmd_doctor(
+            index_dir.as_deref(),
+            remote::client(cli.server.as_deref(), cli.local),
+        ),
         Cmd::Cache {
             what: CacheWhat::Refresh { index_dir },
         } => {
@@ -723,6 +742,17 @@ fn main() -> ExitCode {
             host,
             open,
         } => cmd_ui(index_dir.as_deref(), web.then_some((host, port)), open),
+        Cmd::Server {
+            index_dir,
+            port,
+            host,
+        } => {
+            if comindly::config::env("COMINDLY_PUBLIC_URL").is_none_or(|u| u.is_empty()) {
+                comindly::ui::err("set COMINDLY_PUBLIC_URL to the address members open (e.g. https://comindly.example.com); for the web UI on this machine run `comindly ui --web`");
+                return ExitCode::FAILURE;
+            }
+            cmd_ui(index_dir.as_deref(), Some((host, port)), false)
+        }
         Cmd::App { index_dir } => cmd_app(index_dir.as_deref()),
         Cmd::Team { what, index_dir } => cmd_team(what, index_dir.as_deref()),
         Cmd::Join { index } => cmd_join(&index),
@@ -743,50 +773,19 @@ fn main() -> ExitCode {
                 },
         } => cmd_eval_graph(&fixture, verbose, scip.as_deref(), &repo),
         Cmd::Config { action } => cmd_config(action),
-    }
-}
-
-/// If any LLM step is requested but no LLM client is configured, warn once and disable them all —
-/// so a keyless `index`/`link` still builds the graph + embeddings and exits 0.
-fn gate_llm_steps(enrich: bool, flows: bool, guide: bool) -> (bool, bool, bool) {
-    if (enrich || flows || guide) && comindly::llm::LlmClient::from_env().is_err() {
-        comindly::ui::warn(
-            "enrich/flows/guide skipped — set OPENAI_API_KEY (or COMINDLY_LLM_BASE_URL) to enable",
-        );
-        (false, false, false)
-    } else {
-        (enrich, flows, guide)
+        Cmd::Login { url } => cmd_login(&url),
+        Cmd::Logout => cmd_logout(),
     }
 }
 
 /// `--scip` flag → config → `auto`; `None` (after an error message) for an unknown value.
-fn scip_mode(flag: Option<&str>, cfg: &comindly::config::Config) -> Option<comindly::scip::Mode> {
+fn scip_mode(flag: Option<&str>, default: comindly::scip::Mode) -> Option<comindly::scip::Mode> {
     match flag {
-        None => Some(cfg.scip()),
+        None => Some(default),
         Some(f) => comindly::scip::Mode::parse(f).or_else(|| {
             comindly::ui::err(&format!("--scip must be auto, require or off (got {f:?})"));
             None
         }),
-    }
-}
-
-/// Attach SCIP to one parsed repo, reporting what was found.
-fn attach_scip(
-    mode: comindly::scip::Mode,
-    root: &Path,
-    name: &str,
-    out: &mut comindly::parse::ParseOutput,
-) -> Result<(), String> {
-    match comindly::scip::ingest(mode, root, name, &out.symbols, &mut out.facts) {
-        Ok(a) if a.documents > 0 => {
-            comindly::ui::note(&format!(
-                "{name}: SCIP {} index(es), {} files, {} defs, {} refs",
-                a.indexes, a.documents, a.definitions, a.references
-            ));
-            Ok(())
-        }
-        Ok(_) => Ok(()),
-        Err(e) => Err(format!("{e:#}")),
     }
 }
 
@@ -844,25 +843,26 @@ fn cmd_explore(focus: &str, index_dir: Option<&str>, repos: &[&str]) -> ExitCode
         }
     };
     let g = comindly::graph::CodeGraph::build(&symbols, &edges);
-    let dangling = if g.dangling_edges > 0 {
-        format!(", {} dangling", g.dangling_edges)
+    render_explore(focus, &comindly::answers::explore(&g, focus))
+}
+
+fn render_explore(focus: &str, e: &comindly::answers::Explore) -> ExitCode {
+    let dangling = if e.dangling > 0 {
+        format!(", {} dangling", e.dangling)
     } else {
         String::new()
     };
     comindly::ui::note(&format!(
         "graph: {} symbols, {} edges{dangling}",
-        g.node_count(),
-        g.edge_count(),
+        e.symbols, e.edges,
     ));
-
-    let Some(idx) = g.lookup(focus) else {
+    let Some(v) = &e.view else {
         comindly::ui::err(&format!("no symbol matching `{focus}`"));
         return ExitCode::FAILURE;
     };
 
     // zoom
-    let z = g.zoom(idx);
-    if let Some(f) = &z.focus {
+    if let Some(f) = &v.focus {
         comindly::ui::header(&format!(
             "● {} [{}]  {}  {}",
             f.name, f.kind, f.repo, f.location
@@ -871,7 +871,7 @@ fn cmd_explore(focus: &str, index_dir: Option<&str>, repos: &[&str]) -> ExitCode
             comindly::ui::note(sig);
         }
     }
-    if let Some(c) = &z.container {
+    if let Some(c) = &v.container {
         // Drop the redundant location when the container is the file itself.
         if c.kind.eq_ignore_ascii_case("file") {
             comindly::ui::field("in", &c.name);
@@ -879,24 +879,20 @@ fn cmd_explore(focus: &str, index_dir: Option<&str>, repos: &[&str]) -> ExitCode
             comindly::ui::field("in", &format!("{}  ({})", c.name, c.location));
         }
     }
-    print_group("calls", &z.callees, 8);
-    print_group("called by", &z.callers, 8);
-    print_group("imported by", &z.importers, 8);
-    print_group("members", &z.members, 8);
+    print_group("calls", &v.callees, 8);
+    print_group("called by", &v.callers, 8);
+    print_group("imported by", &v.importers, 8);
+    print_group("members", &v.members, 8);
 
     // ripple — blast radius grouped by repo
-    let hits = g.ripple(idx, 4);
-    let mut by_repo: BTreeMap<String, usize> = BTreeMap::new();
-    for h in &hits {
-        *by_repo.entry(h.node.repo.clone()).or_default() += 1;
-    }
     comindly::ui::header(&format!(
-        "ripple (blast radius, ≤4 hops): {} dependents",
-        hits.len()
+        "ripple (blast radius, ≤{} hops): {} dependents",
+        comindly::answers::RIPPLE_DEPTH,
+        v.dependents
     ));
-    if !by_repo.is_empty() {
+    if !v.by_repo.is_empty() {
         let mut t = comindly::ui::table(&["repo", "dependents"]);
-        for (repo, n) in &by_repo {
+        for (repo, n) in &v.by_repo {
             t.add_row(vec![repo.clone(), n.to_string()]);
         }
         comindly::ui::right_align(&mut t, &[1]); // dependents
@@ -904,17 +900,16 @@ fn cmd_explore(focus: &str, index_dir: Option<&str>, repos: &[&str]) -> ExitCode
     }
 
     // context pack — the minimal correct read-set within a token budget
-    const BUDGET: usize = 1500;
-    let pack = g.context_pack(idx, BUDGET);
-    let total: usize = pack.iter().map(|(_, t)| t).sum();
+    let total: usize = v.pack.iter().map(|(_, t)| t).sum();
     comindly::ui::header(&format!(
-        "context pack for changing `{}` (~{total} tokens, budget {BUDGET}): {}",
-        z.focus.as_ref().map_or("?", |f| f.name.as_str()),
-        plural(pack.len(), "symbol")
+        "context pack for changing `{}` (~{total} tokens, budget {}): {}",
+        v.focus.as_ref().map_or("?", |f| f.name.as_str()),
+        v.budget,
+        plural(v.pack.len(), "symbol")
     ));
-    if !pack.is_empty() {
+    if !v.pack.is_empty() {
         let mut t = comindly::ui::table(&["symbol", "location"]);
-        for (node, _) in pack.iter().take(15) {
+        for (node, _) in v.pack.iter().take(15) {
             t.add_row(vec![node.name.clone(), node.location.clone()]);
         }
         println!("{t}");
@@ -936,9 +931,7 @@ fn print_group(label: &str, nodes: &[comindly::graph::Node], limit: usize) {
     comindly::ui::field(label, &format!("{}{suffix}", names.join(", ")));
 }
 
-/// `comindly search <query...> --from <uri>` — semantic search reranked by graph centrality,
-/// definition-boost, and test-file penalty (semble's fusion ideas + our unique graph signal).
-fn cmd_search(query: &str, from: Option<&str>, repos: &[&str], markdown: bool) -> ExitCode {
+fn cmd_search(query: &str, from: Option<&str>, repos: &[String], markdown: bool) -> ExitCode {
     let uri = comindly::config::Config::load().graph_dir(from);
     let uri = uri.as_str();
 
@@ -953,7 +946,11 @@ fn cmd_search(query: &str, from: Option<&str>, repos: &[&str], markdown: bool) -
         symbols.iter().map(|s| (s.id.render(), s.clone())).collect();
     let g = comindly::graph::CodeGraph::build(&symbols, &edges);
 
-    let embedder = match comindly::embed::Embedder::load_default() {
+    let model = comindly::rt::block_on(comindly::config::index_settings(
+        uri.trim_end_matches("/_graph"),
+    ))
+    .embed_model;
+    let embedder = match comindly::embed::Embedder::load(&model) {
         Ok(e) => e,
         Err(e) => {
             comindly::ui::err(&format!("embedding model: {e:#}"));
@@ -972,10 +969,9 @@ fn cmd_search(query: &str, from: Option<&str>, repos: &[&str], markdown: bool) -
             .collect();
 
     // Native LanceDB hybrid retrieval (BM25 + vector, RRF-fused) + comindly's code-aware boosts
-    // and dependency-graph centrality — shared with the `search` MCP tool. When scoping to a
-    // repo, over-fetch then filter so we still return a full page.
-    let limit = if repos.is_empty() { 12 } else { 60 };
-    let mut hits = match comindly::search::hybrid_blocking(
+    // and dependency-graph centrality — shared with the `search` MCP tool.
+    let limit = comindly::answers::search_limit(repos);
+    let hits = match comindly::search::hybrid_blocking(
         uri, &by_id, &g, &enrich, &embedder, query, limit,
     ) {
         Ok(h) => h,
@@ -986,36 +982,38 @@ fn cmd_search(query: &str, from: Option<&str>, repos: &[&str], markdown: bool) -
             return ExitCode::FAILURE;
         }
     };
-    if !repos.is_empty() {
-        hits.retain(|h| repos.iter().any(|r| h.repo.eq_ignore_ascii_case(r)));
-        hits.truncate(12);
-    }
+    render_search(
+        query,
+        &comindly::answers::search(query, hits, repos),
+        markdown,
+    )
+}
 
+fn render_search(query: &str, s: &comindly::answers::Search, markdown: bool) -> ExitCode {
     if markdown {
-        print!("{}", comindly::search::markdown(query, &hits));
-    } else {
-        comindly::ui::header(&format!("search: \"{query}\""));
-        if hits.is_empty() {
-            comindly::ui::note(
-                "no matches — try a broader query (or the index was built with --no-embed)",
-            );
-            return ExitCode::SUCCESS;
-        }
-        let mut t =
-            comindly::ui::table(&["score", "symbol", "kind", "deps", "location", "summary"]);
-        for h in &hits {
-            t.add_row(vec![
-                format!("{:.3}", h.score),
-                h.name.clone(),
-                h.kind.to_string(),
-                h.deps.to_string(),
-                h.location.clone(),
-                h.summary.clone().unwrap_or_default(),
-            ]);
-        }
-        comindly::ui::right_align(&mut t, &[0, 3]); // score, deps
-        println!("{t}");
+        print!("{}", s.markdown);
+        return ExitCode::SUCCESS;
     }
+    comindly::ui::header(&format!("search: \"{query}\""));
+    if s.hits.is_empty() {
+        comindly::ui::note(
+            "no matches — try a broader query (or the index was built with --no-embed)",
+        );
+        return ExitCode::SUCCESS;
+    }
+    let mut t = comindly::ui::table(&["score", "symbol", "kind", "deps", "location", "summary"]);
+    for h in &s.hits {
+        t.add_row(vec![
+            format!("{:.3}", h.score),
+            h.name.clone(),
+            h.kind.to_string(),
+            h.deps.to_string(),
+            h.location.clone(),
+            h.summary.clone().unwrap_or_default(),
+        ]);
+    }
+    comindly::ui::right_align(&mut t, &[0, 3]); // score, deps
+    println!("{t}");
     ExitCode::SUCCESS
 }
 
@@ -1027,17 +1025,15 @@ fn read_graph_or_err(from: Option<&str>) -> Result<(Vec<Symbol>, Vec<Edge>), ()>
 }
 
 /// `comindly find <query>` — locate symbols by name/descriptor/path substring.
-fn cmd_find(query: &str, from: Option<&str>, repos: &[&str]) -> ExitCode {
+fn cmd_find(query: &str, from: Option<&str>, repos: &[String]) -> ExitCode {
     let Ok((symbols, edges)) = read_graph_or_err(from) else {
         return ExitCode::FAILURE;
     };
     let g = comindly::graph::CodeGraph::build(&symbols, &edges);
-    // Over-fetch when filtering by repo so a full page survives the filter.
-    let mut hits = g.find(query, if repos.is_empty() { 30 } else { 200 });
-    if !repos.is_empty() {
-        hits.retain(|n| repos.iter().any(|r| n.repo.eq_ignore_ascii_case(r)));
-        hits.truncate(30);
-    }
+    render_find(query, &comindly::answers::find(&g, query, repos))
+}
+
+fn render_find(query: &str, hits: &[comindly::graph::Node]) -> ExitCode {
     comindly::ui::header(&format!(
         "find: \"{query}\" ({})",
         plural(hits.len(), "match")
@@ -1047,7 +1043,7 @@ fn cmd_find(query: &str, from: Option<&str>, repos: &[&str]) -> ExitCode {
         return ExitCode::SUCCESS;
     }
     let mut t = comindly::ui::table(&["symbol", "kind", "repo", "location", "id"]);
-    for n in &hits {
+    for n in hits {
         t.add_row(vec![
             n.name.clone(),
             n.kind.clone(),
@@ -1083,7 +1079,7 @@ fn cmd_repos(from: Option<&str>) -> ExitCode {
 
 /// `comindly stats [--repo x --repo y]` — per-repo symbols, edges, kinds, enrichment coverage.
 /// With no `--repo`, reports every indexed repo separately.
-fn cmd_stats(want: &[&str], from: Option<&str>) -> ExitCode {
+fn cmd_stats(want: &[String], from: Option<&str>) -> ExitCode {
     let Ok((symbols, edges)) = read_graph_or_err(from) else {
         return ExitCode::FAILURE;
     };
@@ -1097,51 +1093,32 @@ fn cmd_stats(want: &[&str], from: Option<&str>) -> ExitCode {
         .map(|(id, _, _)| id.render())
         .collect();
 
-    // All repos present, sorted.
-    let all: BTreeSet<String> = symbols.iter().map(|s| s.id.package.clone()).collect();
-    // Which repos to report: the requested ones (warn on unknown) or all.
-    let repos: Vec<String> = if want.is_empty() {
-        all.iter().cloned().collect()
-    } else {
-        for r in want {
-            if !all.contains(*r) {
-                comindly::ui::warn(&format!("no such repo in the index: {r}"));
-            }
-        }
-        want.iter()
-            .filter(|r| all.contains(**r))
-            .map(|r| r.to_string())
-            .collect()
-    };
-    if repos.is_empty() {
+    render_stats(&comindly::answers::stats(&symbols, &edges, &enriched, want))
+}
+
+fn render_stats(st: &comindly::answers::Stats) -> ExitCode {
+    for r in &st.unknown {
+        comindly::ui::warn(&format!("no such repo in the index: {r}"));
+    }
+    if st.repos.is_empty() {
         comindly::ui::err("no matching repos");
         return ExitCode::FAILURE;
     }
 
     comindly::ui::header(&format!(
         "Index stats — {} across {}",
-        plural(symbols.len(), "symbol"),
-        plural(all.len(), "repo")
+        plural(st.symbols, "symbol"),
+        plural(st.indexed, "repo")
     ));
 
-    for repo in &repos {
-        let rsyms: Vec<&Symbol> = symbols.iter().filter(|s| &s.id.package == repo).collect();
-        let redges = edges.iter().filter(|e| &e.src.package == repo).count();
-        let renr = rsyms
-            .iter()
-            .filter(|s| enriched.contains(&s.id.render()))
-            .count();
-        comindly::ui::header(&format!("● {repo}"));
-        comindly::ui::field("symbols", &rsyms.len().to_string());
-        comindly::ui::field("edges", &redges.to_string());
-        comindly::ui::field("enriched", &format!("{renr} / {}", rsyms.len()));
+    for r in &st.repos {
+        comindly::ui::header(&format!("● {}", r.repo));
+        comindly::ui::field("symbols", &r.symbols.to_string());
+        comindly::ui::field("edges", &r.edges.to_string());
+        comindly::ui::field("enriched", &format!("{} / {}", r.enriched, r.symbols));
 
-        let mut by_kind: BTreeMap<String, usize> = BTreeMap::new();
-        for s in &rsyms {
-            *by_kind.entry(format!("{:?}", s.kind)).or_default() += 1;
-        }
         let mut kt = comindly::ui::table(&["kind", "count"]);
-        for (k, n) in &by_kind {
+        for (k, n) in &r.kinds {
             kt.add_row(vec![k.clone(), n.to_string()]);
         }
         comindly::ui::right_align(&mut kt, &[1]);
@@ -1204,16 +1181,6 @@ fn cmd_guide(want: &[&str], from: Option<&str>, output: Option<&str>) -> ExitCod
     ExitCode::SUCCESS
 }
 
-fn truncate(s: &str, n: usize) -> String {
-    // Count by characters, not bytes, so multibyte UTF-8 never splits mid-codepoint.
-    if s.chars().count() > n {
-        let cut = n.saturating_sub(1);
-        format!("{}…", s.chars().take(cut).collect::<String>())
-    } else {
-        s.to_string()
-    }
-}
-
 /// `comindly changed <repo> [--since <sha>]` — show files changed since a commit (incremental
 /// indexing targeting). With no `--since`, just prints the current HEAD commit.
 fn cmd_changed(repo: &str, since: Option<&str>) -> ExitCode {
@@ -1265,16 +1232,7 @@ fn cmd_serve(from: Option<&str>, markdown: bool) -> ExitCode {
     let uri = comindly::config::Config::load().graph_dir(from);
     let uri = uri.as_str();
     comindly::ui::step(&format!("loading graph from {uri}"));
-    let rt = match tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-    {
-        Ok(rt) => rt,
-        Err(e) => {
-            comindly::ui::err(&format!("runtime: {e}"));
-            return ExitCode::FAILURE;
-        }
-    };
+    let rt = comindly::rt::shared();
     match rt.block_on(comindly::mcp::serve_stdio(uri, markdown)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
@@ -1286,7 +1244,7 @@ fn cmd_serve(from: Option<&str>, markdown: bool) -> ExitCode {
 
 /// `comindly config <path|init>` — show or scaffold the config file.
 fn human() -> comindly::ledger::Provenance {
-    comindly::ledger::Provenance::human("cli")
+    comindly::ledger::Provenance::human("cli", &comindly::config::local_identity())
 }
 
 #[allow(clippy::too_many_arguments)] // CLI dispatch: flags map 1:1 to clap args
@@ -1341,8 +1299,13 @@ fn cmd_remember(
             );
         }
     }
-    match comindly::ledger::put_blocking(&cfg.index_dir(from), &rec) {
+    match comindly::ledger::put_blocking(
+        &cfg.index_dir(from),
+        &rec,
+        comindly::config::local_signing_key(),
+    ) {
         Ok(()) => {
+            comindly::cache::invalidate(&cfg.index_dir(from));
             comindly::ui::ok(&format!(
                 "recorded {} `{}` ({})",
                 kind.as_str(),
@@ -1368,17 +1331,19 @@ fn cmd_why(focus: &str, from: Option<&str>) -> ExitCode {
         }
     };
     let g = comindly::graph::CodeGraph::build(&symbols, &edges);
-    let Some((name, ids)) = g.scope_of(focus) else {
-        comindly::ui::err(&format!("no symbol matches `{focus}`"));
-        return ExitCode::FAILURE;
-    };
     let records = comindly::ledger::all_blocking(&cfg.index_dir(from)).unwrap_or_default();
-    let entries = comindly::ledger::derive(&records, &symbols);
-    let about = comindly::ledger::about(&entries, &ids);
-    println!(
-        "{}",
-        comindly::ledger::markdown(&format!("why `{name}`"), &about)
-    );
+    let entries = comindly::ledger::derive(&records, &symbols, &comindly::config::local_verifier());
+    match comindly::answers::why(&g, &entries, focus) {
+        Some(w) => render_why(&w),
+        None => {
+            comindly::ui::err(&format!("no symbol matches `{focus}`"));
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn render_why(w: &comindly::answers::Why) -> ExitCode {
+    println!("{}", w.markdown);
     ExitCode::SUCCESS
 }
 
@@ -1389,10 +1354,12 @@ fn cmd_review(id: &str, action: &str, reason: &str, from: Option<&str>) -> ExitC
         comindly::ui::err(&format!("no ledger record `{id}`"));
         return ExitCode::FAILURE;
     };
-    let put = comindly::ledger::Record::review(target, action, reason, human())
-        .and_then(|rec| comindly::ledger::put_blocking(&root, &rec));
+    let put = comindly::ledger::Record::review(target, action, reason, human()).and_then(|rec| {
+        comindly::ledger::put_blocking(&root, &rec, comindly::config::local_signing_key())
+    });
     match put {
         Ok(()) => {
+            comindly::cache::invalidate(&root);
             comindly::ui::ok(&format!("{action}: `{}`", target.title));
             ExitCode::SUCCESS
         }
@@ -1428,43 +1395,25 @@ fn cmd_ledger(from: Option<&str>, inbox: bool, check: bool, compact: bool) -> Ex
             return ExitCode::FAILURE;
         }
     };
-    let mut entries = comindly::ledger::derive(&records, &symbols);
-    if check {
-        let packages =
-            comindly::index::read_packages_blocking(&cfg.graph_dir(from)).unwrap_or_default();
-        let findings = comindly::checks::run(&entries, &symbols, &edges, &packages);
-        if findings.is_empty() {
-            comindly::ui::ok("no constraint carries a check (add one with --field check=...)");
-            return ExitCode::SUCCESS;
-        }
-        println!(
-            "## Constraint checks\n\n{}",
-            comindly::checks::markdown(&findings, None)
-        );
-        let failed = findings
-            .iter()
-            .any(|f| f.severity == "must" && !f.violations.is_empty());
-        return if failed {
-            ExitCode::FAILURE
-        } else {
-            ExitCode::SUCCESS
-        };
-    }
+    let entries = comindly::ledger::derive(&records, &symbols, &comindly::config::local_verifier());
     let packages =
         comindly::index::read_packages_blocking(&cfg.graph_dir(from)).unwrap_or_default();
-    let findings = comindly::checks::run(&entries, &symbols, &edges, &packages);
-    comindly::checks::promote(&mut entries, &findings);
-    let shown = comindly::ledger::inbox(&entries, inbox);
-    let title = if inbox { "Ledger inbox" } else { "Ledger" };
-    println!("{}", comindly::ledger::markdown(title, &shown));
-    let revived = comindly::checks::revivals(&entries, &packages);
-    if !revived.is_empty() {
-        println!("## Retry conditions met\n");
-        for (e, why) in revived {
-            println!("- {} — {why}", comindly::ledger::line(e));
-        }
+    render_ledger(&comindly::answers::ledger(
+        entries, &symbols, &edges, &packages, inbox, check,
+    ))
+}
+
+fn render_ledger(l: &comindly::answers::Ledger) -> ExitCode {
+    if let Some(note) = &l.note {
+        comindly::ui::ok(note);
+    } else {
+        print!("{}", l.markdown);
     }
-    ExitCode::SUCCESS
+    if l.failed {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
 }
 
 fn cmd_erase(ids: &[String], actor: Option<&str>, yes: bool, from: Option<&str>) -> ExitCode {
@@ -1489,7 +1438,7 @@ fn cmd_erase(ids: &[String], actor: Option<&str>, yes: bool, from: Option<&str>)
     }
     let actor = actor.map(|a| {
         if a == "me" {
-            comindly::ledger::actor()
+            comindly::config::local_identity().actor
         } else {
             a.to_string()
         }
@@ -1524,44 +1473,32 @@ fn cmd_ui(from: Option<&str>, web: Option<(String, u16)>, open: bool) -> ExitCod
     use anyhow::Context as _;
     let root = comindly::config::Config::load().index_dir(from);
     let load = match web {
-        Some(_) => Ok(comindly::tui::Data::load_or_empty(&root)),
-        None => comindly::tui::Data::load(&root),
+        Some(_) => Ok(comindly::view::Data::load_or_empty(
+            &root,
+            &comindly::config::local_verifier(),
+        )),
+        None => comindly::view::Data::load(&root, &comindly::config::local_verifier()),
     };
     let run = load.and_then(|data| match web {
         Some((host, port)) => {
             let addr = format!("{host}:{port}");
             let listener =
                 std::net::TcpListener::bind(&addr).with_context(|| format!("bind {addr}"))?;
-            if let Some(url) = comindly::server::public_url() {
-                anyhow::ensure!(
-                    !comindly::server::admin_emails().is_empty(),
-                    "server mode needs COMINDLY_ADMIN_EMAILS: who administers this server"
-                );
-                let sign_in = comindly::server::sign_in()?;
-                if let Some(t) = comindly::server::env_secret("COMINDLY_ADMIN_TOKEN") {
-                    anyhow::ensure!(
-                        t.len() >= 32,
-                        "COMINDLY_ADMIN_TOKEN is too short: use at least 32 random characters (e.g. `openssl rand -base64 32`)"
-                    );
-                }
-                let store = comindly::server::init(&root).context("open the server table")?;
-                let config = comindly::config::config_path();
-                // The kept copy is the server's settings; the file is what commands read.
-                match store.kept_config() {
-                    Some(kept) => {
-                        std::fs::create_dir_all(config.parent().context("config dir")?)?;
-                        std::fs::write(&config, kept)?;
-                        comindly::ui::note("settings and repository list loaded from the index location");
-                    }
-                    None if config.exists() => store.keep_config(&std::fs::read_to_string(&config)?)?,
-                    None => {}
-                }
+            if let Some(cfg) = comindly::server::ServerConfig::from_env()? {
+                let (url, sign_in) = (cfg.public_url.clone(), cfg.sign_in);
+                let server =
+                    comindly::server::Server::open(&root, cfg).context("open the server table")?;
+                migrate_server(&server, &root)?;
                 comindly::ui::ok(&format!("comindly server for {url}, listening on {addr}"));
                 comindly::ui::note(match sign_in {
                     comindly::server::SignIn::Email => "members sign in by email",
                     comindly::server::SignIn::Code => "members sign in with codes admins hand out",
                 });
-                return comindly::web::serve(data, listener, comindly::web::Access::Server);
+                return comindly::web::serve(
+                    data,
+                    listener,
+                    comindly::web::Access::Server(Arc::new(server)),
+                );
             }
             let token = comindly::config::ui_token()?;
             let url = format!("http://localhost:{port}/?token={token}");
@@ -1625,7 +1562,10 @@ fn cmd_repo_list(what: Option<ReposWhat>, from: Option<&str>) -> ExitCode {
         Some(ReposWhat::Add { paths }) => {
             for p in paths {
                 let entry = if p.contains("://") || p.starts_with("git@") {
-                    match comindly::hosting::managed_path(&p) {
+                    match comindly::hosting::managed_path(
+                        Path::new(&comindly::config::data_dir()),
+                        &p,
+                    ) {
                         Ok(dest) => RepoEntry {
                             path: dest.to_string_lossy().into_owned(),
                             remote: Some(p.clone()),
@@ -1660,7 +1600,10 @@ fn cmd_repo_list(what: Option<ReposWhat>, from: Option<&str>) -> ExitCode {
                     .iter()
                     .any(|x| *x == name || absolute(x) == absolute(&r.path));
                 if gone {
-                    let _ = comindly::worktree::remove(Path::new(&r.path));
+                    let _ = comindly::worktree::remove(
+                        &comindly::config::cache_dir(),
+                        Path::new(&r.path),
+                    );
                 }
                 !gone
             });
@@ -1713,8 +1656,7 @@ fn cmd_team(what: Option<TeamWhat>, from: Option<&str>) -> ExitCode {
 fn team_run(what: Option<TeamWhat>, root: &str) -> anyhow::Result<()> {
     use anyhow::Context as _;
     use comindly::team;
-    let rt = comindly::ledger::runtime()?;
-    let stored = rt.block_on(team::load(root))?;
+    let stored = comindly::rt::block_on(team::load(root))?;
     let mut s = stored.settings.clone();
     match what {
         None => {
@@ -1769,7 +1711,7 @@ fn team_run(what: Option<TeamWhat>, root: &str) -> anyhow::Result<()> {
                 "not set",
             );
             show("format", s.format.clone(), "md");
-            let source = match comindly::credentials::llm_key(s.name.as_deref()).1 {
+            let source = match comindly::credentials::llm_key(s.name.as_deref(), None).1 {
                 comindly::credentials::Source::Team => "your key for this team (credentials file)",
                 comindly::credentials::Source::Default => "your default key (credentials file)",
                 comindly::credentials::Source::Environment => "OPENAI_API_KEY",
@@ -1860,12 +1802,20 @@ fn team_run(what: Option<TeamWhat>, root: &str) -> anyhow::Result<()> {
                         anyhow::ensure!(matches!(v, "" | "md" | "json"), "format is md or json");
                         s.format = text
                     }
+                    "scip" => {
+                        anyhow::ensure!(
+                            v.is_empty() || comindly::scip::Mode::parse(v).is_some(),
+                            "scip is auto, require or off"
+                        );
+                        s.scip = text
+                    }
+                    "auto_index" => s.auto_index = flag()?,
                     other => anyhow::bail!("unknown team setting `{other}`"),
                 }
             }
         }
     }
-    rt.block_on(team::save(root, &s, stored.version))?;
+    comindly::rt::block_on(comindly::config::save_team(root, &s, stored.version))?;
     comindly::ui::ok("team settings saved; everyone using this index gets them");
     Ok(())
 }
@@ -1873,15 +1823,17 @@ fn team_run(what: Option<TeamWhat>, root: &str) -> anyhow::Result<()> {
 fn cmd_join(index: &str) -> ExitCode {
     let root = comindly::config::expand_tilde(index.trim());
     let run = || -> anyhow::Result<()> {
-        let rt = comindly::ledger::runtime()?;
         let graph = format!("{}/_graph", root.trim_end_matches('/'));
-        let versions = rt.block_on(comindly::index::graph_versions(&graph))?;
+        let versions = comindly::rt::block_on(comindly::index::graph_versions(&graph))?;
         anyhow::ensure!(!versions.is_empty(), "no index at {root}");
-        let stored = rt.block_on(comindly::team::load(&root))?;
+        let stored = comindly::rt::block_on(comindly::team::load(&root))?;
         comindly::config::update(&[("index_dir", comindly::config::Setting::Text(root.clone()))])?;
         let name = stored.settings.name.clone();
         comindly::ui::ok(&format!("joined {}", name.as_deref().unwrap_or(&root)));
-        if comindly::credentials::llm_key(name.as_deref()).0.is_none() {
+        if comindly::credentials::llm_key(name.as_deref(), None)
+            .0
+            .is_none()
+        {
             comindly::ui::note(
                 "for LLM steps, add your API key: `comindly team key` (or set OPENAI_API_KEY)",
             );
@@ -1902,7 +1854,7 @@ fn cmd_app(from: Option<&str>) -> ExitCode {
     #[cfg(target_os = "macos")]
     {
         let root = comindly::config::Config::load().index_dir(from);
-        match comindly::app::run(root) {
+        match comindly::app::run(comindly::app::Open::Local(root)) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 comindly::ui::err(&comindly::storage::explain(&format!("{e:#}")));
@@ -1912,22 +1864,28 @@ fn cmd_app(from: Option<&str>) -> ExitCode {
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = from;
-        comindly::ui::err("the desktop app is macOS only for now; use `comindly ui --web --open`");
-        ExitCode::FAILURE
+        comindly::ui::note(
+            "the desktop window is macOS only; opening the app in your browser instead",
+        );
+        cmd_ui(from, Some(("127.0.0.1".into(), 7878)), true)
     }
 }
 
 fn open_in_browser(url: &str) {
-    let opener = if cfg!(target_os = "macos") {
-        "open"
+    let mut cmd = if cfg!(target_os = "macos") {
+        std::process::Command::new("open")
+    } else if cfg!(windows) {
+        let mut c = std::process::Command::new("cmd");
+        c.args(["/C", "start", ""]);
+        c
     } else {
-        "xdg-open"
+        std::process::Command::new("xdg-open")
     };
-    let _ = std::process::Command::new(opener).arg(url).spawn();
+    let _ = cmd.arg(url).spawn();
 }
 
-fn cmd_preflight(repo: &str, base: &str, strict: bool, from: Option<&str>) -> ExitCode {
+/// The working tree's changes in `repo` against `base`, or the exit code when there is nothing to check.
+fn preflight_changes(repo: &str, base: &str) -> Result<Vec<comindly::preflight::Change>, ExitCode> {
     let root = Path::new(repo);
     let name = std::fs::canonicalize(root)
         .ok()
@@ -1937,13 +1895,28 @@ fn cmd_preflight(repo: &str, base: &str, strict: bool, from: Option<&str>) -> Ex
         Ok(c) => c,
         Err(e) => {
             comindly::ui::err(&comindly::storage::explain(&format!("{e:#}")));
-            return ExitCode::FAILURE;
+            return Err(ExitCode::FAILURE);
         }
     };
     if raw.is_empty() {
         comindly::ui::ok("no changes against the base");
-        return ExitCode::SUCCESS;
+        return Err(ExitCode::SUCCESS);
     }
+    Ok(raw
+        .into_iter()
+        .map(|(path, lines)| comindly::preflight::Change {
+            repo: name.clone(),
+            path,
+            lines,
+        })
+        .collect())
+}
+
+fn cmd_preflight(repo: &str, base: &str, strict: bool, from: Option<&str>) -> ExitCode {
+    let changes = match preflight_changes(repo, base) {
+        Ok(c) => c,
+        Err(code) => return code,
+    };
     let cfg = comindly::config::Config::load();
     let (symbols, edges) = match comindly::index::read_graph_blocking(&cfg.graph_dir(from)) {
         Ok(x) => x,
@@ -1952,36 +1925,21 @@ fn cmd_preflight(repo: &str, base: &str, strict: bool, from: Option<&str>) -> Ex
             return ExitCode::FAILURE;
         }
     };
-    let changes: Vec<comindly::preflight::Change> = raw
-        .into_iter()
-        .map(|(path, lines)| comindly::preflight::Change {
-            repo: name.clone(),
-            path,
-            lines,
-        })
-        .collect();
     let g = comindly::graph::CodeGraph::build(&symbols, &edges);
     let records = comindly::ledger::all_blocking(&cfg.index_dir(from)).unwrap_or_default();
-    let entries = comindly::ledger::derive(&records, &symbols);
+    let entries = comindly::ledger::derive(&records, &symbols, &comindly::config::local_verifier());
     let recipes = comindly::index::read_recipes_blocking(&cfg.graph_dir(from)).unwrap_or_default();
     let packages =
         comindly::index::read_packages_blocking(&cfg.graph_dir(from)).unwrap_or_default();
-    let findings = comindly::checks::run(&entries, &symbols, &edges, &packages);
-    println!(
-        "{}",
-        comindly::preflight::report(&g, &symbols, &edges, &entries, &recipes, &findings, &changes)
-    );
-    let changed: Vec<String> = changes
-        .iter()
-        .map(|c| format!("{}/{}", c.repo, c.path))
-        .collect();
-    let blocking = findings.iter().any(|f| {
-        f.severity == "must"
-            && f.violations
-                .iter()
-                .any(|v| changed.contains(&format!("{}/{}", v.repo, v.path)))
-    });
-    if strict && blocking {
+    render_preflight(
+        &comindly::answers::preflight(&g, &symbols, &edges, entries, &recipes, &packages, &changes),
+        strict,
+    )
+}
+
+fn render_preflight(p: &comindly::answers::Preflight, strict: bool) -> ExitCode {
+    println!("{}", p.markdown);
+    if strict && p.blocking {
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS
@@ -2026,12 +1984,45 @@ fn find_str<'v>(v: &'v serde_json::Value, key: &str) -> Option<&'v str> {
     }
 }
 
-fn cmd_doctor(from: Option<&str>) -> ExitCode {
+/// An older server kept `config.toml` in its table: its repositories move to the server's
+/// settings and its index settings to the index, once.
+fn migrate_server(server: &comindly::server::Server, root: &str) -> anyhow::Result<()> {
+    let Some(text) = server.settings.legacy_config() else {
+        return Ok(());
+    };
+    if server.settings.repos().is_empty() {
+        let old: comindly::config::Config = toml::from_str(&text).unwrap_or_default();
+        server.settings.set_repos("upgrade", &old.repos)?;
+    }
+    comindly::rt::block_on(async {
+        let stored = comindly::team::load(root).await?;
+        let mut settings = stored.settings;
+        if comindly::config::adopt_legacy(&text, &mut settings) {
+            comindly::team::save_as(root, &settings, stored.version, "upgrade").await?;
+        }
+        anyhow::Ok(())
+    })?;
+    server.settings.drop_legacy_config()?;
+    comindly::ui::note("moved the server's kept config.toml into its settings and the index's");
+    Ok(())
+}
+
+/// The settings the index at `from` runs with on this machine.
+fn settings_for(from: Option<&str>) -> comindly::context::Settings {
+    let root = comindly::config::Config::load().index_dir(from);
+    comindly::rt::block_on(comindly::config::index_settings(&root))
+}
+
+fn cmd_doctor(from: Option<&str>, server: Option<comindly::client::Client>) -> ExitCode {
     let cfg = comindly::config::Config::load();
     let root = cfg.index_dir(from);
     comindly::ui::header("comindly doctor");
     comindly::ui::field("index", &root);
-    let checks = comindly::doctor::run(&cfg, &root);
+    let team = comindly::rt::block_on(comindly::team::load(&root))
+        .map(|t| t.settings)
+        .unwrap_or_default();
+    let mut checks = comindly::doctor::run(&team, None, &root);
+    checks.extend(server.map(|c| remote::sign_in_check(&c)));
     for c in &checks {
         if c.ok {
             comindly::ui::ok(&c.message);
@@ -2078,7 +2069,7 @@ fn cmd_hook(agent: &str, event: &str, from: Option<&str>) -> ExitCode {
     if records.is_empty() {
         return ExitCode::SUCCESS;
     }
-    let entries = comindly::ledger::derive(&records, &symbols);
+    let entries = comindly::ledger::derive(&records, &symbols, &comindly::config::local_verifier());
     let (hook_event, ids): (&str, Vec<String>) = match event {
         "session-start" => {
             // Every symbol of the repo this session works in.
@@ -2214,7 +2205,6 @@ fn load_conventions(
 }
 
 fn cmd_conventions(from: Option<&str>, repo: Option<&str>) -> ExitCode {
-    use comindly::conventions::{Origin, ORG};
     let (all, manual) = match load_conventions(from) {
         Ok(x) => x,
         Err(e) => {
@@ -2222,11 +2212,14 @@ fn cmd_conventions(from: Option<&str>, repo: Option<&str>) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    render_conventions(&comindly::answers::conventions(all, &manual, repo))
+}
+
+fn render_conventions(c: &comindly::answers::Conventions) -> ExitCode {
+    use comindly::conventions::{Origin, ORG};
     let mut by_repo: BTreeMap<&str, Vec<&comindly::conventions::Convention>> = BTreeMap::new();
-    for c in &all {
-        if repo.is_none_or(|r| c.repo == r || c.repo == ORG) {
-            by_repo.entry(c.repo.as_str()).or_default().push(c);
-        }
+    for c in &c.conventions {
+        by_repo.entry(c.repo.as_str()).or_default().push(c);
     }
     for (r, cs) in by_repo {
         comindly::ui::header(if r == ORG { "Org baseline" } else { r });
@@ -2245,13 +2238,9 @@ fn cmd_conventions(from: Option<&str>, repo: Option<&str>) -> ExitCode {
             }
         }
     }
-    let hidden: Vec<_> = manual
-        .iter()
-        .filter(|m| m.hidden && repo.is_none_or(|r| m.repo == r || m.repo == ORG))
-        .collect();
-    if !hidden.is_empty() {
+    if !c.hidden.is_empty() {
         comindly::ui::header("Hidden (comindly conventions restore <id>)");
-        for m in hidden {
+        for m in &c.hidden {
             comindly::ui::field(&m.dimension, &format!("{}  [{}, {}]", m.rule, m.id, m.repo));
         }
     }
@@ -2266,18 +2255,20 @@ fn cmd_conventions_change(
     use comindly::conventions::{change, Change, Manual, Write, ORG};
     let root = comindly::config::Config::load().index_dir(from);
     let restore = matches!(what, ConventionsWhat::Restore { .. });
+    let actor = comindly::config::local_identity().actor;
     let write = match what {
         ConventionsWhat::Add { rule, dimension } => Ok(Write::Put(Manual::new(
             repo.unwrap_or(ORG),
             &dimension,
             &rule,
+            &actor,
         ))),
         ConventionsWhat::Edit { id, rule } => load_conventions(from)
-            .and_then(|(all, manual)| change(&all, &manual, &id, Change::Edit(rule))),
+            .and_then(|(all, manual)| change(&all, &manual, &id, Change::Edit(rule), &actor)),
         ConventionsWhat::Rm { id } => load_conventions(from)
-            .and_then(|(all, manual)| change(&all, &manual, &id, Change::Hide)),
+            .and_then(|(all, manual)| change(&all, &manual, &id, Change::Hide, &actor)),
         ConventionsWhat::Restore { id } => load_conventions(from)
-            .and_then(|(all, manual)| change(&all, &manual, &id, Change::Restore)),
+            .and_then(|(all, manual)| change(&all, &manual, &id, Change::Restore, &actor)),
     };
     match write.and_then(|w| comindly::conventions::write_blocking(&root, &w).map(|_| w)) {
         Ok(Write::Put(m)) if m.hidden => comindly::ui::ok(&format!("hid {}", m.id)),
@@ -2301,13 +2292,16 @@ fn cmd_packages(from: Option<&str>, skew: bool) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let deps: Vec<_> = comindly::manifests::internal(&rows)
-        .into_iter()
-        .filter(|d| !skew || d.skewed())
-        .collect();
+    render_packages(&comindly::answers::packages(
+        comindly::manifests::internal(&rows),
+        skew,
+    ))
+}
+
+fn render_packages(deps: &[comindly::manifests::InternalDep]) -> ExitCode {
     let mut table = comfy_table::Table::new();
     table
-        .load_preset(comfy_table::presets::UTF8_FULL)
+        .load_style(comfy_table::presets::UTF8_FULL)
         .set_header(vec![
             "package",
             "published by",
@@ -2316,7 +2310,7 @@ fn cmd_packages(from: Option<&str>, skew: bool) -> ExitCode {
             "locked",
         ]);
     let opt = |v: &Option<String>| v.clone().unwrap_or_else(|| "—".into());
-    for d in &deps {
+    for d in deps {
         let locked = match (&d.locked, d.skewed()) {
             (Some(l), true) => format!("{l}  ≠"),
             _ => opt(&d.locked),
@@ -2334,40 +2328,6 @@ fn cmd_packages(from: Option<&str>, skew: bool) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// Change recipes from each repo's recent first-parent history.
-fn mine_recipes(repos: &[(String, std::path::PathBuf)]) -> Vec<comindly::conventions::Convention> {
-    let out: Vec<_> = repos
-        .iter()
-        .filter_map(|(name, root)| {
-            comindly::git::history(root, 500)
-                .ok()
-                .map(|h| comindly::recipes::mine(name, &h))
-        })
-        .flatten()
-        .collect();
-    if !out.is_empty() {
-        comindly::ui::ok(&format!("recipes: {} from commit history", out.len()));
-    }
-    out
-}
-
-/// Manifests and lockfiles of each repo, and a one-line internal-dependency summary.
-fn scan_packages(repos: &[(String, std::path::PathBuf)]) -> Vec<comindly::manifests::PackageRow> {
-    let rows: Vec<_> = repos
-        .iter()
-        .flat_map(|(name, root)| comindly::manifests::scan(root, name))
-        .collect();
-    let deps = comindly::manifests::internal(&rows);
-    if !deps.is_empty() {
-        let skewed = deps.iter().filter(|d| d.skewed()).count();
-        comindly::ui::ok(&format!(
-            "internal packages: {} dependency link(s), {skewed} pinned to a different version than their publisher",
-            deps.len()
-        ));
-    }
-    rows
-}
-
 fn cmd_contracts(from: Option<&str>, kind: Option<&str>, dangling: bool) -> ExitCode {
     let dir = comindly::config::Config::load().graph_dir(from);
     let (symbols, edges) = match comindly::index::read_graph_blocking(&dir) {
@@ -2378,8 +2338,10 @@ fn cmd_contracts(from: Option<&str>, kind: Option<&str>, dangling: bool) -> Exit
         }
     };
     let g = comindly::graph::CodeGraph::build(&symbols, &edges);
-    let total = g.contracts(None, false).len();
-    let views = g.contracts(kind, dangling);
+    render_contracts(&comindly::answers::contracts(&g, kind, dangling))
+}
+
+fn render_contracts(c: &comindly::answers::Contracts) -> ExitCode {
     let list = |ns: &[comindly::graph::Node]| {
         let set: BTreeSet<String> = ns
             .iter()
@@ -2399,16 +2361,20 @@ fn cmd_contracts(from: Option<&str>, kind: Option<&str>, dangling: bool) -> Exit
     };
     let mut table = comfy_table::Table::new();
     table
-        .load_preset(comfy_table::presets::UTF8_FULL)
+        .load_style(comfy_table::presets::UTF8_FULL)
         .set_header(vec!["contract", "provided by", "used by"]);
-    for v in &views {
+    for v in &c.views {
         table.add_row(vec![
             v.contract.name.clone(),
             list(&v.providers),
             list(&v.consumers),
         ]);
     }
-    comindly::ui::header(&format!("Contracts — {} shown of {total}", views.len()));
+    comindly::ui::header(&format!(
+        "Contracts — {} shown of {}",
+        c.views.len(),
+        c.total
+    ));
     println!("{table}");
     ExitCode::SUCCESS
 }
@@ -2429,7 +2395,7 @@ fn cmd_eval_graph(fixture: &str, verbose: bool, scip: Option<&str>, repos: &[Str
     let pct = |x: f64| format!("{:.0}%", x * 100.0);
     let mut kinds = comfy_table::Table::new();
     kinds
-        .load_preset(comfy_table::presets::UTF8_FULL)
+        .load_style(comfy_table::presets::UTF8_FULL)
         .set_header(vec![
             "kind",
             "found",
@@ -2452,7 +2418,7 @@ fn cmd_eval_graph(fixture: &str, verbose: bool, scip: Option<&str>, repos: &[Str
     println!("{kinds}");
     let mut cases = comfy_table::Table::new();
     cases
-        .load_preset(comfy_table::presets::UTF8_FULL)
+        .load_style(comfy_table::presets::UTF8_FULL)
         .set_header(vec!["case", "found / expected"]);
     for (case, (found, expected)) in &r.by_case {
         cases.add_row(vec![case.clone(), format!("{found} / {expected}")]);
@@ -2474,58 +2440,178 @@ fn cmd_eval_graph(fixture: &str, verbose: bool, scip: Option<&str>, repos: &[Str
     ExitCode::SUCCESS
 }
 
-fn cmd_config(action: Option<ConfigAction>) -> ExitCode {
-    match action {
-        None | Some(ConfigAction::Path) => {
-            // Path stays plain on stdout so `$(comindly config path)` is scriptable.
-            println!("{}", comindly::config::config_path().display());
-            comindly::ui::field("index dir", &comindly::config::default_index_dir());
+fn cmd_login(url: &str) -> ExitCode {
+    let url = url.trim().trim_end_matches('/').to_string();
+    let host = std::process::Command::new("hostname")
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|h| !h.is_empty())
+        .unwrap_or_else(|| "this machine".into());
+    let client = format!("comindly CLI on {host}");
+    let approved = comindly::rt::block_on(comindly::client::login(&url, &client, |link, code| {
+        comindly::ui::step(&format!("approve this sign-in in your browser: {link}"));
+        comindly::ui::field("code", code);
+        comindly::ui::note(
+            "check that the page shows the same code; waiting for approval (Ctrl-C to stop)",
+        );
+        if std::io::IsTerminal::is_terminal(&std::io::stderr()) {
+            open_in_browser(link);
+        }
+    }));
+    let saved = approved.and_then(|a| {
+        comindly::credentials::set_login(Some(comindly::credentials::Login {
+            url: url.clone(),
+            token: a.token,
+            email: a.email.clone(),
+        }))?;
+        Ok((a.email, a.expires))
+    });
+    match saved {
+        Ok((email, expires)) => {
+            comindly::ui::ok(&format!("signed in to {url} as {email}"));
+            if let Some(day) = expires.as_deref().and_then(|e| e.get(..10)) {
+                comindly::ui::note(&format!(
+                    "this sign-in lasts until {day}; then run `comindly login {url}` again"
+                ));
+            }
+            comindly::ui::note("find, search, explore, why, ledger, flow, stats, contracts, packages, conventions, preflight, remember, review, link, ui and app now ask the server; --local uses the index here");
             ExitCode::SUCCESS
         }
-        Some(ConfigAction::Init { overwrite }) => {
-            use std::io::IsTerminal;
-            let path = comindly::config::config_path();
-            if path.exists() && !overwrite {
-                // Can't prompt when piped/CI → refuse and point at --overwrite.
-                if !std::io::stdin().is_terminal() {
-                    comindly::ui::err("config exists — re-run with --overwrite to replace it");
-                    return ExitCode::FAILURE;
-                }
-                // Deliberate interactive decline is a valid choice, not an error.
-                if !prompt_yes(&path) {
-                    comindly::ui::note("kept existing config");
-                    return ExitCode::SUCCESS;
-                }
-            }
-            match comindly::config::init(true) {
-                Ok(path) => {
-                    comindly::ui::ok(&format!("wrote {}", path.display()));
-                    comindly::ui::note("edit it to set index_dir / llm_model / format, or run: comindly index . --embed");
-                    ExitCode::SUCCESS
-                }
-                Err(e) => {
-                    comindly::ui::err(&comindly::storage::explain(&format!("{e:#}")));
-                    ExitCode::FAILURE
-                }
-            }
+        Err(e) => {
+            comindly::ui::err(&format!("{e:#}"));
+            ExitCode::FAILURE
         }
     }
 }
 
-/// Interactive y/N prompt (caller guarantees a TTY). `y`/`yes` = overwrite; anything else = keep.
-fn prompt_yes(path: &Path) -> bool {
-    use std::io::Write;
-    comindly::ui::warn(&format!(
-        "{} already exists; overwriting resets every value to its default.",
-        path.display()
-    ));
-    eprint!("Overwrite it? [y/N] ");
-    let _ = std::io::stderr().flush();
-    let mut line = String::new();
-    if std::io::stdin().read_line(&mut line).is_err() {
-        return false;
+fn cmd_logout() -> ExitCode {
+    match comindly::credentials::login() {
+        None => {
+            comindly::ui::note("not signed in to a server");
+            ExitCode::SUCCESS
+        }
+        Some(l) => match comindly::credentials::set_login(None) {
+            Ok(()) => {
+                let c = comindly::client::Client::new(&l.url, Some(l.token.clone()));
+                comindly::tui::forget_view(c.base());
+                comindly::ui::ok(&format!("signed out of {} on this machine", l.url));
+                match comindly::rt::block_on(c.revoke_own_token()) {
+                    Ok(true) => comindly::ui::ok("revoked its access token on the server"),
+                    Ok(false) => {
+                        comindly::ui::note("the server no longer accepted its access token")
+                    }
+                    Err(e) => {
+                        comindly::ui::warn(&format!(
+                            "could not revoke the access token on the server: {e:#}"
+                        ));
+                        comindly::ui::note("it stays valid until you revoke it in the app (Settings → Your access)");
+                    }
+                }
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                comindly::ui::err(&format!("{e:#}"));
+                ExitCode::FAILURE
+            }
+        },
     }
-    matches!(line.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+}
+
+fn cmd_config(action: Option<ConfigAction>) -> ExitCode {
+    use anyhow::Context as _;
+    let run = || -> anyhow::Result<()> {
+        match action.unwrap_or(ConfigAction::Show) {
+            ConfigAction::Show => {
+                let s = comindly::config::stored()?;
+                print!("{}", comindly::config::export(&s.doc)?);
+                if let (Some(v), Some(at)) = (s.version, s.changed_at) {
+                    comindly::ui::note(&format!("version {v}, saved {at}"));
+                }
+            }
+            ConfigAction::Set { pairs } => {
+                let mut changes = Vec::new();
+                for p in &pairs {
+                    let (k, v) = p
+                        .split_once('=')
+                        .with_context(|| format!("`{p}` is not KEY=VALUE"))?;
+                    let v = v.trim();
+                    use comindly::config::Setting;
+                    let value = match (k.trim(), v) {
+                        (_, "") => Setting::Remove,
+                        ("record_names", v) => {
+                            Setting::Flag(v.parse().context("record_names is true or false")?)
+                        }
+                        ("cache_ttl_secs", v) => Setting::Number(
+                            v.parse::<i64>()
+                                .context("cache_ttl_secs is a number of seconds")?
+                                .max(30),
+                        ),
+                        ("index_dir", v) => Setting::Text(comindly::config::expand_tilde(v)),
+                        (_, v) => Setting::Text(v.to_string()),
+                    };
+                    changes.push((k.trim(), value));
+                }
+                comindly::config::update(&changes)?;
+                comindly::ui::ok("saved");
+            }
+            ConfigAction::Import { file, replace } => {
+                let text =
+                    std::fs::read_to_string(&file).with_context(|| format!("read {file}"))?;
+                let r = comindly::config::import(&text, replace)?;
+                comindly::ui::ok(if r.changed {
+                    "imported"
+                } else {
+                    "nothing to change"
+                });
+                if !r.kept.is_empty() {
+                    comindly::ui::note(&format!(
+                        "kept your current {}; --override replaces them with the file's",
+                        r.kept.join(", ")
+                    ));
+                }
+                if r.moved {
+                    comindly::ui::note(
+                        "its models, LLM steps and limits went to the index's shared settings (`comindly team`)",
+                    );
+                }
+            }
+            ConfigAction::Export { file } => {
+                let text = comindly::config::export(&comindly::config::stored()?.doc)?;
+                match file {
+                    Some(f) => {
+                        std::fs::write(&f, text).with_context(|| format!("write {f}"))?;
+                        comindly::ui::ok(&format!("wrote {f}"));
+                    }
+                    None => print!("{text}"),
+                }
+            }
+            ConfigAction::History => {
+                for v in comindly::config::history()? {
+                    comindly::ui::field(
+                        &format!("v{}", v.version),
+                        &format!("{} by {}", v.changed_at, v.changed_by),
+                    );
+                }
+            }
+            ConfigAction::Path => {
+                // Plain on stdout so `$(comindly config path)` is scriptable.
+                println!("{}", comindly::config::store_path().display());
+                comindly::ui::field(
+                    "index dir",
+                    &comindly::config::Config::load().index_dir(None),
+                );
+            }
+        }
+        Ok(())
+    };
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            comindly::ui::err(&format!("{e:#}"));
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn repo_name(path: &str) -> String {
@@ -2540,471 +2626,6 @@ fn repo_name(path: &str) -> String {
     }
 }
 
-/// The configured repositories, each fetched and checked out at its default branch in comindly's
-/// worktree (never in your folder).
-fn configured_checkouts(cfg: &comindly::config::Config) -> anyhow::Result<Vec<String>> {
-    if cfg.repos.is_empty() {
-        anyhow::bail!(
-            "no repositories: pass folders, or add them with `comindly repos add <folder>`"
-        );
-    }
-    comindly::ui::header(&format!("Checking out {} repo(s)", cfg.repos.len()));
-    let mut out = Vec::new();
-    for r in &cfg.repos {
-        let path = comindly::config::expand_tilde(&r.path);
-        if let Some(url) = &r.remote {
-            if !Path::new(&path).exists() {
-                comindly::ui::note(&format!("cloning {url}"));
-            }
-            comindly::worktree::ensure_clone(url, Path::new(&path))
-                .map_err(|e| anyhow::anyhow!("{url}: {e:#}"))?;
-        }
-        let c = comindly::worktree::prepare(Path::new(&path))
-            .map_err(|e| anyhow::anyhow!("{path}: {e:#}"))?;
-        comindly::ui::ok(&format!(
-            "{} @ {} {}",
-            comindly::worktree::name(Path::new(&path)),
-            c.target,
-            c.commit
-        ));
-        if let Some(why) = &c.stale {
-            comindly::ui::warn(&format!(
-                "could not fetch, indexing the last fetched state: {why}"
-            ));
-        }
-        out.push(c.dir.to_string_lossy().into_owned());
-    }
-    Ok(out)
-}
-
-/// Parse several repos, resolve references across them, and report the cross-repo graph
-/// (the org-wide blast-radius signal that per-repo tools cannot produce).
-#[allow(clippy::too_many_arguments)] // CLI dispatch: flags map 1:1 to clap args
-fn cmd_link(
-    repos: &[&str],
-    to: Option<&str>,
-    embed: bool,
-    enrich: bool,
-    flows: bool,
-    guide: bool,
-    incremental: bool,
-    scip: comindly::scip::Mode,
-) -> ExitCode {
-    let mut symbols: Vec<Symbol> = Vec::new();
-    let mut edges: Vec<Edge> = Vec::new();
-    let mut facts = Vec::new();
-    if let Some(bad) = repos.iter().find(|p| !Path::new(p).is_dir()) {
-        comindly::ui::err(&format!("no such repo directory: {bad}"));
-        return ExitCode::FAILURE;
-    }
-    comindly::ui::header(&format!("Parsing {} repo(s)", repos.len()));
-    for path in repos {
-        let name = repo_name(path);
-        match comindly::parse::parse_repo(Path::new(path), &name) {
-            Ok(mut o) => {
-                comindly::ui::field(
-                    &name,
-                    &format!("{} symbols, {} files", o.symbols.len(), o.facts.len()),
-                );
-                if let Err(e) = attach_scip(scip, Path::new(path), &name, &mut o) {
-                    comindly::ui::err(&e);
-                    return ExitCode::FAILURE;
-                }
-                symbols.extend(o.symbols);
-                edges.extend(o.edges);
-                facts.extend(o.facts);
-            }
-            Err(e) => {
-                comindly::ui::err(&format!("{name}: parse failed: {e:#}"));
-                return ExitCode::FAILURE;
-            }
-        }
-    }
-
-    let resolved = comindly::resolve::resolve(&symbols, &edges, &facts);
-    symbols.extend(resolved.symbols.iter().cloned());
-    if !resolved.symbols.is_empty() {
-        let mut by_type: BTreeMap<&str, usize> = BTreeMap::new();
-        for c in &resolved.symbols {
-            *by_type
-                .entry(c.name.split(':').next().unwrap_or_default())
-                .or_default() += 1;
-        }
-        let parts: Vec<String> = by_type.iter().map(|(t, n)| format!("{t} {n}")).collect();
-        comindly::ui::ok(&format!(
-            "contracts: {} ({}), {} participant edges",
-            resolved.symbols.len(),
-            parts.join(", "),
-            resolved.stats.contract_edges
-        ));
-    }
-    let s = &resolved.stats;
-    comindly::ui::ok(&format!(
-        "resolved: {} imports, {} calls, {} inherits/implements; {} cross-repo edges{}",
-        s.resolved_imports,
-        s.resolved_calls,
-        s.type_edges,
-        s.cross_repo_edges,
-        if s.scip_answers > 0 {
-            format!(" ({} answered by SCIP)", s.scip_answers)
-        } else {
-            String::new()
-        }
-    ));
-    comindly::ui::note(&format!(
-        "unresolved: {} imports, {} calls (mostly third-party or dynamic)",
-        s.unresolved_imports, s.unresolved_calls
-    ));
-    let mut top: Vec<_> = resolved.unresolved_modules.iter().collect();
-    top.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
-    let top: Vec<String> = top
-        .iter()
-        .take(12)
-        .map(|(m, n)| format!("{m} {n}"))
-        .collect();
-    if !top.is_empty() {
-        comindly::ui::note(&format!("top unresolved: {}", top.join(", ")));
-    }
-    if comindly::config::env("COMINDLY_DEBUG").is_some() {
-        for (m, ex) in &resolved.unresolved_examples {
-            for e in ex {
-                comindly::ui::note(&format!("  unresolved {m}: {e}"));
-            }
-        }
-    }
-
-    // Rank cross-repo import targets by how many distinct repos depend on them.
-    // (dst descriptor) -> (defining repo, set of importer repos, total refs)
-    let mut targets: BTreeMap<String, (String, BTreeSet<String>, usize)> = BTreeMap::new();
-    for e in &resolved.edges {
-        if e.kind == EdgeKind::Imports && e.cross_repo {
-            let entry = targets
-                .entry(e.dst.descriptor.clone())
-                .or_insert_with(|| (e.dst.package.clone(), BTreeSet::new(), 0));
-            entry.1.insert(e.src.package.clone());
-            entry.2 += 1;
-        }
-    }
-
-    let mut ranked: Vec<_> = targets.into_iter().collect();
-    ranked.sort_by(|a, b| b.1 .1.len().cmp(&a.1 .1.len()).then(b.1 .2.cmp(&a.1 .2)));
-
-    if !ranked.is_empty() {
-        comindly::ui::header("Top cross-repo dependencies (org-wide blast radius)");
-        let mut table = comfy_table::Table::new();
-        table
-            .load_preset(comfy_table::presets::UTF8_FULL)
-            .set_header(vec!["symbol", "defined-in", "repos", "refs"]);
-        for (descriptor, (def_repo, importers, refs)) in ranked.iter().take(15) {
-            let short = if descriptor.chars().count() > 46 {
-                let tail: String = descriptor
-                    .chars()
-                    .rev()
-                    .take(45)
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .rev()
-                    .collect();
-                format!("…{tail}")
-            } else {
-                descriptor.clone()
-            };
-            table.add_row(vec![
-                short,
-                def_repo.clone(),
-                importers.len().to_string(),
-                refs.to_string(),
-            ]);
-        }
-        println!("{table}");
-    }
-
-    // ripple demo on the single most-depended-on symbol.
-    if let Some((descriptor, (def_repo, importers, refs))) = ranked.first() {
-        comindly::ui::header(&format!("ripple({descriptor})  [defined in {def_repo}]"));
-        comindly::ui::note(&format!(
-            "changing this would impact {} repos ({refs} references):",
-            importers.len()
-        ));
-        for repo in importers {
-            comindly::ui::note(&format!("- {repo}"));
-        }
-    }
-
-    {
-        // Persist the resolved org-wide graph. Overwrite creates a new Lance version whose
-        // manifest is the atomic "latest" pointer every consumer reads (push-to-master model).
-        let to_uri = comindly::config::Config::load().index_dir(to);
-        let uri = to_uri.as_str();
-        let dst = format!("{}/_graph", uri.trim_end_matches('/'));
-        comindly::ui::header("Persisting");
-        comindly::ui::step(&format!("writing org graph to {dst}"));
-        let roots: Vec<(String, std::path::PathBuf)> = repos
-            .iter()
-            .map(|p| (repo_name(p), std::path::PathBuf::from(p)))
-            .collect();
-        let packages = scan_packages(&roots);
-        let recipes = mine_recipes(&roots);
-        match comindly::index::write_graph_blocking(&dst, &symbols, &resolved.edges)
-            .and_then(|v| comindly::index::write_facts_blocking(&dst, &facts).map(|_| v))
-            .and_then(|v| comindly::index::write_packages_blocking(&dst, &packages).map(|_| v))
-            .and_then(|v| comindly::index::write_recipes_blocking(&dst, &recipes).map(|_| v))
-        {
-            Ok((sv, ev)) => comindly::ui::ok(&format!(
-                "org graph: symbols v{sv}, edges v{ev} (latest pointer)"
-            )),
-            Err(e) => {
-                comindly::ui::err(&format!(
-                    "write failed: {}",
-                    comindly::storage::explain(&format!("{e:#}"))
-                ));
-                return ExitCode::FAILURE;
-            }
-        }
-        match comindly::index::count_rows_blocking(&dst) {
-            Ok((s, e)) => comindly::ui::note(&format!("read back: {s} symbols, {e} edges")),
-            Err(e) => {
-                comindly::ui::err(&format!("read-back failed: {e:#}"));
-                return ExitCode::FAILURE;
-            }
-        }
-
-        // Incremental: figure out which symbols are stale (their repo's changed files, per git),
-        // so we recompute embeddings/enrichment only for those and reuse the rest.
-        let current_heads: Vec<comindly::index::IndexedRepo> = repos
-            .iter()
-            .filter_map(|p| {
-                comindly::git::head_commit(Path::new(p)).ok().map(|commit| {
-                    comindly::index::IndexedRepo {
-                        name: repo_name(p),
-                        commit,
-                        remote: comindly::worktree::remote_url(Path::new(p)),
-                    }
-                })
-            })
-            .collect();
-        let stale_ids: HashSet<String> = if incremental {
-            compute_stale_ids(repos, &dst, &symbols)
-        } else {
-            symbols.iter().map(|s| s.id.render()).collect() // full recompute
-        };
-        if incremental {
-            comindly::ui::note(&format!(
-                "incremental: {} of {} symbols stale",
-                stale_ids.len(),
-                symbols.len()
-            ));
-        }
-
-        if embed {
-            if let ExitCode::FAILURE = run_embed(&dst, &symbols, &stale_ids, incremental) {
-                return ExitCode::FAILURE;
-            }
-        }
-
-        let cfg = comindly::config::Config::load();
-        let repo_roots: Vec<(String, std::path::PathBuf)> = repos
-            .iter()
-            .map(|p| (repo_name(p), std::path::PathBuf::from(p)))
-            .collect();
-        let (enrich, flows, guide) = gate_llm_steps(enrich, flows, guide);
-        if enrich {
-            if let ExitCode::FAILURE = run_enrich(
-                &dst,
-                &symbols,
-                &resolved.edges,
-                cfg.max_enrich(),
-                &stale_ids,
-                incremental,
-            ) {
-                return ExitCode::FAILURE;
-            }
-        }
-        if guide {
-            if let ExitCode::FAILURE =
-                run_style_guides(&dst, &symbols, &resolved.edges, &repo_roots)
-            {
-                return ExitCode::FAILURE;
-            }
-        }
-
-        if flows {
-            if let ExitCode::FAILURE = run_flows(&dst, &symbols, &resolved.edges, cfg.max_flows()) {
-                return ExitCode::FAILURE;
-            }
-        }
-
-        // Record current per-repo commits so the next --incremental run can diff.
-        let _ = comindly::index::write_repo_commits_blocking(&dst, &current_heads);
-    }
-
-    ExitCode::SUCCESS
-}
-
-/// Pre-generate flow walkthroughs (opt-in `--flows`): pick the top entry points by how
-/// much they orchestrate (forward call-trace size), trace each with `thread`, narrate via the
-/// LLM, and persist to the `flows` table. Sends call traces to the OpenAI API.
-fn run_flows(dst: &str, symbols: &[Symbol], edges: &[Edge], top: usize) -> ExitCode {
-    let client = match comindly::llm::LlmClient::from_env() {
-        Ok(c) => c,
-        Err(e) => {
-            // No/invalid LLM key: skip this step rather than failing the whole index.
-            comindly::ui::warn(&format!("skipping (no LLM client): {e:#}"));
-            return ExitCode::SUCCESS;
-        }
-    };
-    let rt = match tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-    {
-        Ok(rt) => rt,
-        Err(e) => {
-            comindly::ui::err(&format!("runtime: {e}"));
-            return ExitCode::FAILURE;
-        }
-    };
-    let g = comindly::graph::CodeGraph::build(symbols, edges);
-
-    comindly::ui::header("Narrating flows (LLM)");
-    // Entry points whose flow reaches furthest, across repositories first.
-    let candidates: Vec<(&Symbol, usize)> = g
-        .entry_points(top)
-        .into_iter()
-        .filter_map(|(idx, n)| {
-            let id = g.node(idx).id;
-            symbols.iter().find(|s| s.id.render() == id).map(|s| (s, n))
-        })
-        .collect();
-
-    if candidates.is_empty() {
-        comindly::ui::note("flows: no multi-step flows found to narrate");
-        return ExitCode::SUCCESS;
-    }
-    comindly::ui::warn("Walkthroughs send call traces to the LLM.");
-
-    // Precompute call traces (graph ops) up front, then narrate concurrently.
-    let prep: Vec<(comindly::model::GlobalSymbolId, String, String, String)> = candidates
-        .iter()
-        .filter_map(|(s, _)| {
-            let idx = g.lookup(&s.id.render())?;
-            let trace = g
-                .flow(idx, 6)
-                .iter()
-                .map(|h| {
-                    format!(
-                        "d{} {} {}:{} {}",
-                        h.depth, h.via, h.node.repo, h.node.name, h.node.location
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            Some((
-                s.id.clone(),
-                s.name.clone(),
-                s.signature.clone().unwrap_or_default(),
-                trace,
-            ))
-        })
-        .collect();
-
-    // Reuse a walkthrough when its input (name, signature, trace) is unchanged; save every
-    // CHECKPOINT so an interrupted run keeps what it narrated.
-    const CHECKPOINT: usize = 25;
-    let key = |name: &str, sig: &str, trace: &str| {
-        blake3::hash(format!("{name}\0{sig}\0{trace}").as_bytes())
-            .to_hex()
-            .to_string()
-    };
-    let stored_keys = comindly::index::read_keys_blocking(dst, "flow_keys");
-    let stored: HashMap<String, (String, Vec<String>)> = comindly::index::read_flows_blocking(dst)
-        .ok()
-        .flatten()
-        .unwrap_or_default()
-        .into_iter()
-        .map(|(id, n, q)| (id.render(), (n, q)))
-        .collect();
-    let mut rows: Vec<(comindly::model::GlobalSymbolId, String, Vec<String>)> = Vec::new();
-    let mut keys: Vec<(String, String)> = Vec::new();
-    let mut todo = Vec::new();
-    for p @ (id, name, sig, trace) in &prep {
-        let (rid, k) = (id.render(), key(name, sig, trace));
-        match stored
-            .get(&rid)
-            .filter(|_| stored_keys.get(&rid) == Some(&k))
-        {
-            Some((n, q)) => {
-                rows.push((id.clone(), n.clone(), q.clone()));
-                keys.push((rid, k));
-            }
-            None => todo.push(p),
-        }
-    }
-    let reused = rows.len();
-    comindly::ui::note(&format!(
-        "{} flows to walk through ({reused} reused)",
-        todo.len()
-    ));
-    let pb = comindly::ui::progress(todo.len() as u64, "narrating flows");
-    let concurrency = comindly::config::Config::load().llm_concurrency();
-    for chunk in todo.chunks(CHECKPOINT) {
-        let done: Vec<_> = rt.block_on(async {
-            use futures::StreamExt;
-            futures::stream::iter(chunk.iter())
-                .map(|(id, name, sig, trace)| {
-                    let (pb, client) = (&pb, &client);
-                    async move {
-                        let r = client
-                            .narrate_flow(name, sig, trace)
-                            .await
-                            .ok()
-                            .map(|(narr, q)| (id.clone(), narr, q, key(name, sig, trace)));
-                        let (i, o) = client.token_usage();
-                        pb.set_message(spend(i, o));
-                        pb.inc(1);
-                        r
-                    }
-                })
-                .buffered(concurrency)
-                .collect::<Vec<_>>()
-                .await
-        });
-        for (id, narr, q, k) in done.into_iter().flatten() {
-            keys.push((id.render(), k));
-            rows.push((id, narr, q));
-        }
-        if chunk.len() == CHECKPOINT {
-            let saved = comindly::index::write_flows_blocking(dst, &rows)
-                .and_then(|_| comindly::index::write_keys_blocking(dst, "flow_keys", &keys));
-            if let Err(e) = saved {
-                comindly::ui::warn(&format!("saving walkthroughs so far failed: {e:#}"));
-            }
-        }
-    }
-    pb.finish_and_clear();
-    let (i, o) = client.token_usage();
-    comindly::ui::note(&format!("spent: {}", spend(i, o)));
-
-    match comindly::index::write_flows_blocking(dst, &rows)
-        .and_then(|v| comindly::index::write_keys_blocking(dst, "flow_keys", &keys).map(|_| v))
-    {
-        Ok(v) => comindly::ui::ok(&format!(
-            "flows v{v}: {} narrated ({reused} reused, {} written)",
-            rows.len(),
-            rows.len() - reused
-        )),
-        Err(e) => {
-            comindly::ui::err(&format!("write flows failed: {e:#}"));
-            return ExitCode::FAILURE;
-        }
-    }
-    if let Some((_, narr, _)) = rows.first() {
-        comindly::ui::note(&format!("e.g. {}", truncate(narr, 120)));
-    }
-    ExitCode::SUCCESS
-}
-
-/// `comindly flow <focus> --from <uri>` — the pre-generated flow walkthrough for an entry point (if
-/// the index was built with `--flows`), followed by its live forward call trace.
 fn cmd_flow(focus: &str, from: Option<&str>) -> ExitCode {
     let uri = comindly::config::Config::load().graph_dir(from);
     let uri = uri.as_str();
@@ -3016,479 +2637,58 @@ fn cmd_flow(focus: &str, from: Option<&str>) -> ExitCode {
         }
     };
     let g = comindly::graph::CodeGraph::build(&symbols, &edges);
-    let Some(idx) = g.lookup(focus) else {
-        comindly::ui::err(&format!("no symbol matching `{focus}`"));
-        return ExitCode::FAILURE;
-    };
-    let fid = g.zoom(idx).focus.map(|n| n.id);
-
-    // Pre-generated narration, if present.
-    if let Some(fid) = &fid {
-        let stored = comindly::index::read_flows_blocking(uri)
+    let stored = |fid: &str| {
+        comindly::index::read_flows_blocking(uri)
             .ok()
             .flatten()
             .unwrap_or_default()
             .into_iter()
-            .find(|(id, _, _)| &id.render() == fid);
-        match stored {
-            Some((_, narr, queries)) => {
-                comindly::ui::header(&format!("flow: {focus}"));
-                println!("{narr}\n");
-                if !queries.is_empty() {
-                    comindly::ui::field("Ask", &queries.join(" · "));
-                }
-            }
-            None => comindly::ui::note(&format!(
-                "no pre-generated narration for `{focus}` — showing the raw trace; run `index/link --flows` to narrate"
-            )),
+            .find(|(id, _, _)| id.render() == fid)
+            .map(|(_, narr, queries)| (narr, queries))
+    };
+    match comindly::answers::flow(&g, focus, stored) {
+        Some(f) => render_flow(&f),
+        None => {
+            comindly::ui::err(&format!("no symbol matching `{focus}`"));
+            ExitCode::FAILURE
         }
     }
+}
 
-    // Live forward call trace.
-    let hops = g.thread(idx, 4);
-    comindly::ui::header(&format!("flow trace from `{focus}` ({} steps)", hops.len()));
-    if hops.is_empty() {
+fn render_flow(f: &comindly::answers::Flow) -> ExitCode {
+    let focus = &f.focus;
+    match &f.narration {
+        Some((narr, queries)) => {
+            comindly::ui::header(&format!("flow: {focus}"));
+            println!("{narr}\n");
+            if !queries.is_empty() {
+                comindly::ui::field("Ask", &queries.join(" · "));
+            }
+        }
+        None => comindly::ui::note(&format!(
+            "no pre-generated narration for `{focus}` — showing the raw trace; run `index/link --flows` to narrate"
+        )),
+    }
+    comindly::ui::header(&format!(
+        "flow trace from `{focus}` ({} steps)",
+        f.steps.len()
+    ));
+    if f.steps.is_empty() {
         comindly::ui::note("no outgoing calls from here");
     } else {
         let mut t = comindly::ui::table(&["depth", "via", "symbol", "location"]);
-        for h in &hops {
+        for h in &f.steps {
             t.add_row(vec![
                 format!("d{}", h.depth),
-                h.via.to_string(),
-                h.node.name.clone(),
-                h.node.location.clone(),
+                h.via.clone(),
+                h.name.clone(),
+                h.location.clone(),
             ]);
         }
         comindly::ui::right_align(&mut t, &[0]);
         println!("{t}");
     }
     ExitCode::SUCCESS
-}
-
-/// Rendered ids of symbols whose content may have changed since the last index: any symbol in a
-/// repo that is new (no recorded commit / not a git repo) or whose file changed since that commit.
-fn compute_stale_ids(repos: &[&str], dst: &str, symbols: &[Symbol]) -> HashSet<String> {
-    let prior = comindly::index::read_repo_commits_blocking(dst).unwrap_or_default();
-    // repo -> Some(changed files) or None (treat whole repo as stale)
-    let mut changed: HashMap<String, Option<HashSet<String>>> = HashMap::new();
-    for p in repos {
-        let name = repo_name(p);
-        let set = match (prior.get(&name), comindly::git::head_commit(Path::new(p))) {
-            (Some(base), Ok(_)) => {
-                comindly::git::changed_files(Path::new(p), base)
-                    .ok()
-                    .map(|cs| {
-                        cs.added
-                            .into_iter()
-                            .chain(cs.modified)
-                            .collect::<HashSet<_>>()
-                    })
-            }
-            _ => None, // no prior commit, or not a git repo → everything stale
-        };
-        changed.insert(name, set);
-    }
-    symbols
-        .iter()
-        .filter(|s| match changed.get(&s.id.package) {
-            Some(Some(files)) => files.contains(&s.file_path),
-            _ => true, // unknown repo or whole-repo-stale
-        })
-        .map(|s| s.id.render())
-        .collect()
-}
-
-/// Embed symbols, reusing prior vectors for non-stale symbols (incremental) and computing only
-/// stale/new ones. Persists the merged embeddings.
-fn run_embed(
-    dst: &str,
-    symbols: &[Symbol],
-    stale_ids: &HashSet<String>,
-    incremental: bool,
-) -> ExitCode {
-    let embedder = match comindly::embed::Embedder::load_default() {
-        Ok(e) => e,
-        Err(e) => {
-            comindly::ui::err(&format!("embedding model: {e:#}"));
-            return ExitCode::FAILURE;
-        }
-    };
-    let prior: HashMap<String, Vec<f32>> = if incremental {
-        comindly::index::read_search_vectors_blocking(dst)
-            .ok()
-            .flatten()
-            .unwrap_or_default()
-            .into_iter()
-            .map(|(id, v)| (id.render(), v))
-            .collect()
-    } else {
-        HashMap::new()
-    };
-
-    let non_file: Vec<&Symbol> = symbols
-        .iter()
-        .filter(|s| !matches!(s.kind, SymbolKind::File))
-        .collect();
-    // (symbol, search text, vector) — text feeds the BM25 index, vector the semantic side.
-    let mut rows: Vec<(comindly::model::GlobalSymbolId, String, Vec<f32>)> =
-        Vec::with_capacity(non_file.len());
-    let mut reused = 0usize;
-    let mut to_embed: Vec<&Symbol> = Vec::new();
-    for s in &non_file {
-        let rid = s.id.render();
-        if !stale_ids.contains(&rid) {
-            if let Some(v) = prior.get(&rid) {
-                rows.push((s.id.clone(), comindly::embed::symbol_text(s), v.clone()));
-                reused += 1;
-                continue;
-            }
-        }
-        to_embed.push(s);
-    }
-    comindly::ui::header("Building search index");
-    let pb = comindly::ui::spinner(&format!(
-        "embedding {} symbols + building BM25 index",
-        to_embed.len()
-    ));
-    let texts: Vec<String> = to_embed
-        .iter()
-        .map(|s| comindly::embed::symbol_text(s))
-        .collect();
-    for (s, v) in to_embed.iter().zip(embedder.embed(&texts)) {
-        rows.push((s.id.clone(), comindly::embed::symbol_text(s), v));
-    }
-    let write = comindly::index::write_search_table_blocking(dst, &rows);
-    pb.finish_and_clear();
-    match write {
-        Ok(v) => comindly::ui::ok(&format!(
-            "search index v{v}: {} symbols ({reused} reused, {} embedded) + BM25 FTS index",
-            rows.len(),
-            to_embed.len()
-        )),
-        Err(e) => {
-            comindly::ui::err(&format!("write search table failed: {e:#}"));
-            return ExitCode::FAILURE;
-        }
-    }
-    ExitCode::SUCCESS
-}
-
-/// LLM enrichment (opt-in): summarize + generate NL queries for the most-central definitions,
-/// infer a style guide, and persist to Lance. Sends code signatures to the OpenAI API.
-/// Incremental: reuse prior summaries for non-stale symbols; only call the API for stale/new ones.
-fn run_enrich(
-    dst: &str,
-    symbols: &[Symbol],
-    edges: &[Edge],
-    top: usize,
-    stale_ids: &HashSet<String>,
-    incremental: bool,
-) -> ExitCode {
-    let client = match comindly::llm::LlmClient::from_env() {
-        Ok(c) => c,
-        Err(e) => {
-            // No/invalid LLM key: skip this step rather than failing the whole index.
-            comindly::ui::warn(&format!("skipping (no LLM client): {e:#}"));
-            return ExitCode::SUCCESS;
-        }
-    };
-    let rt = match tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-    {
-        Ok(rt) => rt,
-        Err(e) => {
-            comindly::ui::err(&format!("runtime: {e}"));
-            return ExitCode::FAILURE;
-        }
-    };
-    let g = comindly::graph::CodeGraph::build(symbols, edges);
-
-    comindly::ui::header("Enriching symbols (LLM)");
-    // Most-central definitions first — enrich where it matters most (bounded cost).
-    let mut defs: Vec<&Symbol> = symbols
-        .iter()
-        .filter(|s| {
-            matches!(
-                s.kind,
-                SymbolKind::Function
-                    | SymbolKind::Method
-                    | SymbolKind::Class
-                    | SymbolKind::Interface
-                    | SymbolKind::Struct
-                    | SymbolKind::Enum
-            )
-        })
-        .collect();
-    // Ties by id, so a limit always picks the same symbols.
-    defs.sort_by_cached_key(|s| {
-        let id = s.id.render();
-        (Reverse(g.dependents_count(&id)), id)
-    });
-    defs.truncate(top);
-
-    // Reuse prior enrichment for non-stale symbols; only hit the API for the rest.
-    let prior: HashMap<String, (String, Vec<String>)> = if incremental {
-        comindly::index::read_enrichment_blocking(dst)
-            .ok()
-            .flatten()
-            .unwrap_or_default()
-            .into_iter()
-            .map(|(id, s, q)| (id.render(), (s, q)))
-            .collect()
-    } else {
-        HashMap::new()
-    };
-
-    let mut rows: Vec<(comindly::model::GlobalSymbolId, String, Vec<String>)> = Vec::new();
-    let mut to_call: Vec<&Symbol> = Vec::new();
-    for s in &defs {
-        let rid = s.id.render();
-        if !stale_ids.contains(&rid) {
-            if let Some((sum, q)) = prior.get(&rid) {
-                rows.push((s.id.clone(), sum.clone(), q.clone()));
-                continue;
-            }
-        }
-        to_call.push(s);
-    }
-
-    let items: Vec<(String, String, String)> = to_call
-        .iter()
-        .map(|s| {
-            (
-                s.name.clone(),
-                s.signature.clone().unwrap_or_default(),
-                s.file_path.clone(),
-            )
-        })
-        .collect();
-    // Saved every CHECKPOINT summaries, so an interrupted run keeps them and the next reuses them.
-    const CHECKPOINT: usize = 500;
-    let mut generated = 0usize;
-    if !items.is_empty() {
-        comindly::ui::warn("Summaries send symbol names, signatures and file paths to the LLM.");
-        comindly::ui::note(&format!(
-            "{} symbols to summarise ({} reused)",
-            items.len(),
-            rows.len()
-        ));
-        let pb = comindly::ui::progress(items.len() as u64, "enriching symbols");
-        let concurrency = comindly::config::Config::load().llm_concurrency();
-        for (chunk, syms) in items.chunks(CHECKPOINT).zip(to_call.chunks(CHECKPOINT)) {
-            let out = rt.block_on(async {
-                use futures::StreamExt;
-                futures::stream::iter(chunk.iter())
-                    .map(|(n, s, c)| {
-                        let (pb, client) = (&pb, &client);
-                        async move {
-                            let r = client.enrich_symbol(n, s, c).await.ok();
-                            let (i, o) = client.token_usage();
-                            pb.set_message(spend(i, o));
-                            pb.inc(1);
-                            r
-                        }
-                    })
-                    .buffered(concurrency)
-                    .collect::<Vec<_>>()
-                    .await
-            });
-            for (s, r) in syms.iter().zip(out) {
-                if let Some(e) = r {
-                    rows.push((s.id.clone(), e.summary, e.queries));
-                    generated += 1;
-                }
-            }
-            if chunk.len() == CHECKPOINT {
-                if let Err(e) = comindly::index::write_enrichment_blocking(dst, &rows) {
-                    comindly::ui::warn(&format!("saving summaries so far failed: {e:#}"));
-                }
-            }
-        }
-        pb.finish_and_clear();
-        let (i, o) = client.token_usage();
-        comindly::ui::note(&format!("spent: {}", spend(i, o)));
-    }
-    // rows = reused (prior) + generated (this run); failed API calls are dropped, so derive
-    // `reused` from the total to avoid underflow when some calls fail.
-    let reused = rows.len().saturating_sub(generated);
-    let failed = items.len().saturating_sub(generated);
-
-    match comindly::index::write_enrichment_blocking(dst, &rows) {
-        Ok(v) => comindly::ui::ok(&format!(
-            "enrichment v{v}: {} symbols ({reused} reused, {generated} generated{})",
-            rows.len(),
-            if failed > 0 {
-                format!(", {failed} failed")
-            } else {
-                String::new()
-            }
-        )),
-        Err(e) => {
-            comindly::ui::err(&format!("write enrichment failed: {e:#}"));
-            return ExitCode::FAILURE;
-        }
-    }
-
-    // Preview a few. Regenerate the style guide only when something changed.
-    for (_, summary, queries) in rows.iter().take(3) {
-        comindly::ui::note(&format!("• {summary}"));
-        if let Some(q) = queries.first() {
-            comindly::ui::note(&format!("  e.g. \"{q}\""));
-        }
-    }
-    ExitCode::SUCCESS
-}
-
-/// Evidence-based style guide per repo (opt-in `--guide`): measured stats + enforced-config facts
-/// → citation-required LLM synthesis. Independent of `--enrich`. Sends code/config to the LLM.
-fn run_style_guides(
-    dst: &str,
-    symbols: &[Symbol],
-    edges: &[Edge],
-    repo_roots: &[(String, std::path::PathBuf)],
-) -> ExitCode {
-    let client = match comindly::llm::LlmClient::from_env() {
-        Ok(c) => c,
-        Err(e) => {
-            // No/invalid LLM key: skip this step rather than failing the whole index.
-            comindly::ui::warn(&format!("skipping (no LLM client): {e:#}"));
-            return ExitCode::SUCCESS;
-        }
-    };
-    let rt = match tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-    {
-        Ok(rt) => rt,
-        Err(e) => {
-            comindly::ui::err(&format!("runtime: {e}"));
-            return ExitCode::FAILURE;
-        }
-    };
-    comindly::ui::header("Style guides (per repo)");
-    comindly::ui::warn("Style guides send code samples and configuration to the LLM.");
-    let conventions = match comindly::index::read_facts_blocking(dst) {
-        Ok(Some(facts)) => comindly::conventions::mine(symbols, edges, &facts),
-        _ => Vec::new(),
-    };
-    // Reuse a repo's guide while its input is unchanged; save after each repo.
-    let stored_keys = comindly::index::read_keys_blocking(dst, "guide_keys");
-    let mut guide_rows: Vec<(String, String)> =
-        comindly::index::read_style_guide_blocking(dst).unwrap_or_default();
-    let mut keys: Vec<(String, String)> = stored_keys.clone().into_iter().collect();
-    let mut reused = 0usize;
-    for (repo, root) in repo_roots {
-        let rsyms: Vec<&Symbol> = symbols.iter().filter(|s| &s.id.package == repo).collect();
-        if rsyms.is_empty() {
-            continue;
-        }
-        let redges: Vec<Edge> = edges
-            .iter()
-            .filter(|e| &e.src.package == repo)
-            .cloned()
-            .collect();
-        let rconv: Vec<_> = conventions
-            .iter()
-            .filter(|c| &c.repo == repo)
-            .cloned()
-            .collect();
-        let sections = comindly::styleguide::build_sections(root, &rsyms, &redges, &rconv);
-        if sections.is_empty() {
-            continue;
-        }
-        let key = blake3::hash(
-            sections
-                .iter()
-                .map(|s| format!("{}\0{}\0{}", s.title, s.guidance, s.evidence))
-                .collect::<Vec<_>>()
-                .join("\0\0")
-                .as_bytes(),
-        )
-        .to_hex()
-        .to_string();
-        if stored_keys.get(repo) == Some(&key) && guide_rows.iter().any(|(r, _)| r == repo) {
-            reused += 1;
-            continue;
-        }
-        let pb = comindly::ui::progress(sections.len() as u64, &format!("{repo}: guide sections"));
-        // One focused LLM call per section, concurrently; preserves order for stitching.
-        let bodies: Vec<Option<String>> = rt.block_on(async {
-            use futures::StreamExt;
-            futures::stream::iter(sections.iter())
-                .map(|sec| {
-                    let (pb, client) = (&pb, &client);
-                    async move {
-                        let r = client
-                            .guide_section(repo, &sec.title, &sec.guidance, &sec.evidence)
-                            .await
-                            .ok();
-                        pb.inc(1);
-                        r
-                    }
-                })
-                .buffered(comindly::config::Config::load().llm_concurrency())
-                .collect()
-                .await
-        });
-        pb.finish_and_clear();
-        // Stitch sections, dropping empties / "no convention" replies.
-        let mut doc = String::new();
-        for (sec, body) in sections.iter().zip(bodies) {
-            let body = body.unwrap_or_default();
-            let t = body.trim();
-            if t.is_empty() || t.eq_ignore_ascii_case("No consistent convention observed.") {
-                continue;
-            }
-            doc.push_str(&format!("## {}\n\n{}\n\n", sec.title, t));
-        }
-        if doc.is_empty() {
-            comindly::ui::warn(&format!("{repo}: no sections generated"));
-            continue;
-        }
-        doc.push_str("\n_AI-generated from the codebase; review before enforcing._\n");
-        comindly::ui::ok(&format!(
-            "{repo}: style guide ({} sections)",
-            doc.matches("\n## ").count() + 1
-        ));
-        guide_rows.retain(|(r, _)| r != repo);
-        guide_rows.push((repo.clone(), doc));
-        keys.retain(|(r, _)| r != repo);
-        keys.push((repo.clone(), key));
-        let saved = comindly::index::write_style_guide_blocking(dst, &guide_rows)
-            .and_then(|_| comindly::index::write_keys_blocking(dst, "guide_keys", &keys));
-        if let Err(e) = saved {
-            comindly::ui::warn(&format!("saving the style guide failed: {e:#}"));
-        }
-    }
-    if reused > 0 {
-        comindly::ui::note(&format!("{reused} unchanged style guide(s) reused"));
-    }
-    let (i, o) = client.token_usage();
-    comindly::ui::note(&format!("spent: {}", spend(i, o)));
-    ExitCode::SUCCESS
-}
-
-/// Compact `1.2k`-style formatting for token counts.
-/// Tokens so far, and their cost when the team set the LLM's prices.
-fn spend(input: u64, output: u64) -> String {
-    let tokens = format!("{} in / {} out tokens", kfmt(input), kfmt(output));
-    let usd = comindly::config::Config::load()
-        .llm_prices()
-        .map(|(pi, po)| (input as f64 * pi + output as f64 * po) / 1_000_000.0);
-    comindly::ui::usage(input, output, usd);
-    match usd {
-        Some(usd) => format!("{tokens} ≈ ${usd:.2}"),
-        None => tokens,
-    }
-}
-
-fn kfmt(n: u64) -> String {
-    if n >= 1000 {
-        format!("{:.1}k", n as f64 / 1000.0)
-    } else {
-        n.to_string()
-    }
 }
 
 /// `n word` / `n words` — naive English pluralization for count phrases.
@@ -3502,13 +2702,136 @@ fn plural(n: usize, word: &str) -> String {
 
 /// Turn a LanceDB "dataset/table not found" error into an actionable one-liner, hiding the raw
 /// internal backtrace. `uri` is the internal `<root>/_graph` path; we show the root the user gave.
-fn friendly_load_err(uri: &str, e: &anyhow::Error) -> String {
-    let root = uri.trim_end_matches("/_graph");
-    if e.to_string().contains("not found") {
-        format!("no index at {root} — build one first: comindly index <repo>")
-    } else {
-        format!("load from {root} failed: {e:#}")
+/// Which optional steps a command runs, after its flags.
+struct Steps {
+    embed: bool,
+    enrich: bool,
+    flows: bool,
+    guide: bool,
+}
+
+/// Run an indexing command: one runtime, the resolved settings, the terminal renderer, Ctrl-C to
+/// cancel. `None` (after a message) when it failed or was cancelled.
+fn run_indexing<T, F, Fut>(root: &str, steps: Steps, job: F) -> Option<T>
+where
+    F: FnOnce(comindly::context::IndexContext) -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<T>>,
+{
+    let rt = comindly::rt::shared();
+    rt.block_on(async {
+        let team = comindly::team::load(root)
+            .await
+            .map(|s| s.settings)
+            .unwrap_or_default();
+        let mut settings = comindly::context::Settings::resolve(&team, comindly::config::env);
+        settings.embed = steps.embed;
+        settings.enrich = steps.enrich;
+        settings.flows = steps.flows;
+        settings.guide = steps.guide;
+        let wants_llm = steps.enrich || steps.flows || steps.guide;
+        let llm = if wants_llm {
+            comindly::config::llm_client(&settings, team.name.as_deref(), None)
+        } else {
+            None
+        };
+        let ctx = comindly::context::IndexContext::new(
+            root,
+            settings,
+            Arc::new(comindly::ui::Terminal::new()),
+            comindly::config::cache_dir(),
+        )
+        .with_llm(llm)
+        .with_git(comindly::config::git_credentials(None));
+        let cancel = ctx.cancel.clone();
+        tokio::spawn(async move {
+            if tokio::signal::ctrl_c().await.is_ok() {
+                cancel.cancel();
+            }
+        });
+        match job(ctx).await {
+            Ok(v) => Some(v),
+            Err(e) if e.is::<comindly::context::Cancelled>() => {
+                comindly::ui::warn("cancelled; what was already saved stays");
+                None
+            }
+            Err(e) => {
+                comindly::ui::err(&comindly::storage::explain(&format!("{e:#}")));
+                None
+            }
+        }
+    })
+}
+
+/// Parse several repos (or the configured ones), bind references across them, persist the
+/// graph, and report the most depended-on symbols.
+#[allow(clippy::too_many_arguments)] // CLI dispatch: flags map 1:1 to clap args
+fn cmd_link(
+    repos: &[String],
+    to: Option<&str>,
+    embed: bool,
+    enrich: bool,
+    flows: bool,
+    guide: bool,
+    incremental: bool,
+    scip: comindly::scip::Mode,
+) -> ExitCode {
+    let cfg = comindly::config::Config::load();
+    let root = cfg.index_dir(to);
+    let steps = Steps {
+        embed,
+        enrich,
+        flows,
+        guide,
+    };
+    let report = run_indexing(&root, steps, |ctx| async move {
+        let sources = if repos.is_empty() {
+            comindly::pipeline::checkout(&ctx, &comindly::config::expanded(&cfg.repos)).await?
+        } else {
+            repos.iter().map(comindly::pipeline::Source::at).collect()
+        };
+        comindly::pipeline::link(&ctx, sources, incremental, scip).await
+    });
+    let Some(report) = report else {
+        return ExitCode::FAILURE;
+    };
+    if !report.dependencies.is_empty() {
+        comindly::ui::header("Top cross-repo dependencies (org-wide blast radius)");
+        let mut table = comindly::ui::table(&["symbol", "defined-in", "repos", "refs"]);
+        for d in report.dependencies.iter().take(15) {
+            table.add_row(vec![
+                truncate_start(&d.descriptor, 46),
+                d.defined_in.clone(),
+                d.repos.len().to_string(),
+                d.refs.to_string(),
+            ]);
+        }
+        println!("{table}");
     }
+    if let Some(d) = report.dependencies.first() {
+        comindly::ui::header(&format!(
+            "ripple({})  [defined in {}]",
+            d.descriptor, d.defined_in
+        ));
+        comindly::ui::note(&format!(
+            "changing this would impact {} repos ({} references):",
+            d.repos.len(),
+            d.refs
+        ));
+        for repo in &d.repos {
+            comindly::ui::note(&format!("- {repo}"));
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+/// The last `n` characters, with a leading ellipsis when cut.
+fn truncate_start(s: &str, n: usize) -> String {
+    let len = s.chars().count();
+    if len <= n {
+        return s.to_string();
+    }
+    let tail: String = s.chars().skip(len - (n - 1)).collect();
+    format!("…{tail}")
 }
 
 #[allow(clippy::too_many_arguments)] // CLI dispatch: flags map 1:1 to clap args
@@ -3523,142 +2846,23 @@ fn cmd_index(
     since: Option<&str>,
     scip: comindly::scip::Mode,
 ) -> ExitCode {
-    // `--since` implies incremental.
-    let incremental = incremental || since.is_some();
-    let root = Path::new(repo);
-    if !root.is_dir() {
-        comindly::ui::err(&format!("no such repo directory: {repo}"));
-        return ExitCode::FAILURE;
-    }
-    let repo_name = repo_name(repo);
-    // Same default location `link` writes to, so `search`/`serve` find it with zero config.
-    let dst = format!(
-        "{}/_graph",
-        comindly::config::Config::load()
-            .index_dir(to)
-            .trim_end_matches('/')
+    let root = comindly::config::Config::load().index_dir(to);
+    let source = comindly::pipeline::Source::at(repo);
+    let since = since.map(str::to_string);
+    let ok = run_indexing(
+        &root,
+        Steps {
+            embed,
+            enrich,
+            flows,
+            guide,
+        },
+        |ctx| async move {
+            comindly::pipeline::index_repo(&ctx, source, incremental, since, scip).await
+        },
     );
-
-    // Incremental path: diff against a base commit and reparse only what changed.
-    if incremental {
-        let base = since.map(str::to_string).or_else(|| {
-            comindly::index::read_repo_meta_blocking(&dst)
-                .ok()
-                .flatten()
-        });
-        match base {
-            Some(base) => return incremental_index(root, &repo_name, &dst, &base),
-            None => comindly::ui::note("no recorded base commit — doing a full index"),
-        }
-    }
-
-    comindly::ui::header(&format!("Indexing {repo_name}"));
-    let mut out = match comindly::parse::parse_repo(root, &repo_name) {
-        Ok(o) => o,
-        Err(e) => {
-            comindly::ui::err(&comindly::storage::explain(&format!("{e:#}")));
-            return ExitCode::FAILURE;
-        }
-    };
-    if let Err(e) = attach_scip(scip, root, &repo_name, &mut out) {
-        comindly::ui::err(&e);
+    if ok.is_none() {
         return ExitCode::FAILURE;
-    }
-    // Bind provisional call/import edges to real definitions so ripple/thread/context_pack work.
-    let resolved = comindly::resolve::resolve(&out.symbols, &out.edges, &out.facts);
-    out.edges = resolved.edges;
-    out.symbols.extend(resolved.symbols);
-
-    let mut by_kind: BTreeMap<String, usize> = BTreeMap::new();
-    for s in &out.symbols {
-        *by_kind.entry(format!("{:?}", s.kind)).or_default() += 1;
-    }
-    let calls = out
-        .edges
-        .iter()
-        .filter(|e| e.kind == EdgeKind::Calls)
-        .count();
-    let contains = out
-        .edges
-        .iter()
-        .filter(|e| e.kind == EdgeKind::Contains)
-        .count();
-    comindly::ui::field("symbols", &out.symbols.len().to_string());
-    for (k, n) in &by_kind {
-        comindly::ui::note(&format!("{k:<10} {n}"));
-    }
-    comindly::ui::field(
-        "edges",
-        &format!("{} (contains={contains}, calls={calls})", out.edges.len()),
-    );
-
-    comindly::ui::header("Persisting");
-    comindly::ui::step(&format!("writing graph to {dst}"));
-    match comindly::index::write_graph_blocking(&dst, &out.symbols, &out.edges)
-        .and_then(|v| comindly::index::write_facts_blocking(&dst, &out.facts).map(|_| v))
-        .and_then(|v| {
-            // Keep other repos' package rows already in a shared index dir.
-            let mut rows: Vec<_> = comindly::index::read_packages_blocking(&dst)
-                .unwrap_or_default()
-                .into_iter()
-                .filter(|r| r.repo != repo_name)
-                .collect();
-            rows.extend(scan_packages(&[(repo_name.clone(), root.to_path_buf())]));
-            comindly::index::write_packages_blocking(&dst, &rows)?;
-            let mut recipes: Vec<_> = comindly::index::read_recipes_blocking(&dst)
-                .unwrap_or_default()
-                .into_iter()
-                .filter(|r| r.repo != repo_name)
-                .collect();
-            recipes.extend(mine_recipes(&[(repo_name.clone(), root.to_path_buf())]));
-            comindly::index::write_recipes_blocking(&dst, &recipes).map(|_| v)
-        }) {
-        Ok((sv, ev)) => comindly::ui::ok(&format!("graph: symbols v{sv}, edges v{ev}")),
-        Err(e) => {
-            comindly::ui::err(&format!(
-                "write failed: {}",
-                comindly::storage::explain(&format!("{e:#}"))
-            ));
-            return ExitCode::FAILURE;
-        }
-    }
-    // Record the HEAD commit so later runs can index incrementally.
-    if let Ok(head) = comindly::git::head_commit(root) {
-        let _ = comindly::index::write_repo_meta_blocking(&dst, &repo_name, &head);
-        comindly::ui::note(&format!("recorded commit {}", short(&head)));
-    }
-
-    // Optional enrichment steps — recompute everything (full index).
-    let all: HashSet<String> = out.symbols.iter().map(|s| s.id.render()).collect();
-    let cfg = comindly::config::Config::load();
-    if embed {
-        if let ExitCode::FAILURE = run_embed(&dst, &out.symbols, &all, false) {
-            return ExitCode::FAILURE;
-        }
-    }
-    let repo_roots = vec![(repo_name.clone(), root.to_path_buf())];
-    let (enrich, flows, guide) = gate_llm_steps(enrich, flows, guide);
-    if enrich {
-        if let ExitCode::FAILURE = run_enrich(
-            &dst,
-            &out.symbols,
-            &out.edges,
-            cfg.max_enrich(),
-            &all,
-            false,
-        ) {
-            return ExitCode::FAILURE;
-        }
-    }
-    if guide {
-        if let ExitCode::FAILURE = run_style_guides(&dst, &out.symbols, &out.edges, &repo_roots) {
-            return ExitCode::FAILURE;
-        }
-    }
-    if flows {
-        if let ExitCode::FAILURE = run_flows(&dst, &out.symbols, &out.edges, cfg.max_flows()) {
-            return ExitCode::FAILURE;
-        }
     }
     if embed {
         comindly::ui::note("next: comindly search \"<question>\"  ·  comindly serve");
@@ -3670,140 +2874,11 @@ fn cmd_index(
     ExitCode::SUCCESS
 }
 
-fn short(sha: &str) -> String {
-    // Char-safe: a `--since` ref can be non-ASCII, so never byte-slice it.
-    sha.chars().take(8).collect()
-}
-
-/// Incremental index: reparse only files changed since `base`, drop symbols/edges of
-/// modified+deleted files, merge, and rewrite. Keeps the index fresh at near-diff cost.
-fn incremental_index(root: &Path, repo_name: &str, dst: &str, base: &str) -> ExitCode {
-    let head = match comindly::git::head_commit(root) {
-        Ok(h) => h,
-        Err(e) => {
-            comindly::ui::err(&comindly::storage::explain(&format!("{e:#}")));
-            return ExitCode::FAILURE;
-        }
-    };
-    let cs = match comindly::git::changed_files(root, base) {
-        Ok(c) => c,
-        Err(e) => {
-            comindly::ui::err(&comindly::storage::explain(&format!("{e:#}")));
-            return ExitCode::FAILURE;
-        }
-    };
-    comindly::ui::header(&format!(
-        "Incremental {} → {}: {} changed ({}+ {}~ {}-)",
-        short(base),
-        short(&head),
-        cs.total(),
-        cs.added.len(),
-        cs.modified.len(),
-        cs.deleted.len()
-    ));
-    if cs.total() == 0 {
-        let _ = comindly::index::write_repo_meta_blocking(dst, repo_name, &head);
-        comindly::ui::ok("index already up to date");
-        return ExitCode::SUCCESS;
-    }
-
-    let (prior_syms, prior_edges) = match comindly::index::read_graph_blocking(dst) {
-        Ok(x) => x,
-        Err(e) => {
-            comindly::ui::err(&format!(
-                "no prior index at {dst} ({e:#}); run a full index first"
-            ));
-            return ExitCode::FAILURE;
-        }
-    };
-
-    let dropped: HashSet<String> = cs.to_drop().cloned().collect();
-    let to_parse: Vec<String> = cs.to_parse().cloned().collect();
-    let newout = comindly::parse::parse_files(root, repo_name, &to_parse);
-
-    // Map this repo's symbol ids to their files so we can drop edges owned by changed files.
-    let file_of: HashMap<String, String> = prior_syms
-        .iter()
-        .filter(|s| s.repo.0 == repo_name)
-        .map(|s| (s.id.render(), s.file_path.clone()))
-        .collect();
-    let before = prior_syms.len();
-
-    let mut symbols: Vec<Symbol> = prior_syms
-        .into_iter()
-        .filter(|s| !(s.repo.0 == repo_name && dropped.contains(&s.file_path)))
-        .collect();
-    let mut edges: Vec<Edge> = prior_edges
-        .into_iter()
-        .filter(|e| {
-            file_of
-                .get(&e.src.render())
-                .is_none_or(|f| !dropped.contains(f))
-        })
-        .collect();
-    symbols.extend(newout.symbols);
-    edges.extend(newout.edges);
-    // With stored facts, keep only structure and re-resolve everything (no stale edges).
-    let facts = match comindly::index::read_facts_blocking(dst) {
-        Ok(Some(prior)) => {
-            edges.retain(|e| e.kind == EdgeKind::Contains);
-            let mut all: Vec<_> = prior
-                .into_iter()
-                .filter(|f| {
-                    f.repo != repo_name
-                        || !(dropped.contains(&f.path) || to_parse.contains(&f.path))
-                })
-                .collect();
-            all.extend(newout.facts);
-            all
-        }
-        _ => {
-            comindly::ui::warn("index has no stored facts; run a full index for exact edges");
-            newout.facts
-        }
-    };
-    // Contract nodes are derived; drop the old ones and re-derive from all facts.
-    symbols.retain(|s| s.kind != SymbolKind::Contract);
-    let resolved = comindly::resolve::resolve(&symbols, &edges, &facts);
-    symbols.extend(resolved.symbols);
-    let edges = resolved.edges;
-
-    if let Err(e) = comindly::index::write_graph_blocking(dst, &symbols, &edges)
-        .and_then(|_| comindly::index::write_facts_blocking(dst, &facts))
-    {
-        comindly::ui::err(&format!(
-            "write failed: {}",
-            comindly::storage::explain(&format!("{e:#}"))
-        ));
-        return ExitCode::FAILURE;
-    }
-    let _ = comindly::index::write_repo_meta_blocking(dst, repo_name, &head);
-    comindly::ui::ok(&format!(
-        "reparsed {} files → symbols {before}→{}, edges {}",
-        to_parse.len(),
-        symbols.len(),
-        edges.len()
-    ));
-    ExitCode::SUCCESS
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{short, truncate};
-
-    #[test]
-    fn truncate_is_char_safe() {
-        // Multibyte chars near the boundary must not panic (byte-slicing would).
-        assert_eq!(truncate("abc", 5), "abc");
-        assert_eq!(truncate("日本語テキスト", 3), "日本…");
-        assert_eq!(truncate("—↳“smart”", 3), "—↳…");
-        assert_eq!(truncate("x", 0), "…"); // n == 0 must not underflow
-    }
-
-    #[test]
-    fn short_is_char_safe() {
-        assert_eq!(short("abcdef1234"), "abcdef12");
-        assert_eq!(short("日本語branch"), "日本語branc"); // 8 chars, no byte-boundary panic
-        assert_eq!(short("abc"), "abc");
+fn friendly_load_err(uri: &str, e: &anyhow::Error) -> String {
+    let root = uri.trim_end_matches("/_graph");
+    if e.to_string().contains("not found") {
+        format!("no index at {root} — build one first: comindly index <repo>")
+    } else {
+        format!("load from {root} failed: {e:#}")
     }
 }

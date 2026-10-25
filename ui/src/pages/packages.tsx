@@ -53,7 +53,7 @@ export function PackagesPage() {
   return (
     <div className="flex flex-col gap-5">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Internal packages</h1>
+        <h1 className="text-[28px] font-semibold tracking-[-0.035em]">Internal packages</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Libraries one repository publishes and others depend on, with the version each consumer pins. A pin that differs from the
           published version is skew: the consumer runs code the publisher has moved on from.

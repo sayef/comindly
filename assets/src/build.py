@@ -1,6 +1,6 @@
 """Brand assets with text as outlines: python assets/src/build.py <font dir> [out dir]
 
-The font dir holds the variable fonts SpaceGrotesk.ttf and SourceSans3.ttf (SIL Open Font License)."""
+The font dir holds the variable fonts SpaceGrotesk.ttf and Geist.ttf (SIL Open Font License)."""
 
 import math
 import shutil
@@ -23,14 +23,14 @@ def instance(name, weight):
 
 
 BOLD = instance("SpaceGrotesk.ttf", 700)
-MEDIUM = instance("SourceSans3.ttf", 500)
+MEDIUM = instance("Geist.ttf", 500)
 
 INK, PAPER = "#0E1512", "#F3F6F2"
 THEMES = {
     "light": {"text": INK, "tagline": "#55605A", "petals": ("#0D9488", "#4D9A12"), "back": PAPER},
     "dark": {"text": PAPER, "tagline": "#A3ADA6", "petals": ("#2DD4BF", "#A3E635"), "back": INK},
 }
-TAGLINE = "Cross-repo code intelligence for coding agents"
+TAGLINE = "Your team’s engineering memory for coding agents"
 
 
 def text_path(font, text, x, baseline, size, tracking=0.0):
@@ -114,7 +114,7 @@ if __name__ == "__main__":
         # A background of its own keeps the banner legible where the page's theme differs from it.
         panel = f'<rect width="{width}" height="184" rx="16" fill="{THEMES[theme]["back"]}"/>'
         (OUT / f"banner-{theme}.svg").write_text(
-            svg(width, 184, f'{panel}\n{body}\n<path d="{tag}" fill="{THEMES[theme]["tagline"]}"/>', f"comindly: {TAGLINE.lower()}")
+            svg(width, 184, f'{panel}\n{body}\n<path d="{tag}" fill="{THEMES[theme]["tagline"]}"/>', f"comindly: {TAGLINE[0].lower()}{TAGLINE[1:]}")
         )
 
     body, w = lockup(0, 0, 150, "dark")
@@ -126,14 +126,16 @@ if __name__ == "__main__":
 <g transform="translate({(1280 - points_w) / 2:.1f} 478)"><path d="{points}" fill="#4ADE80"/></g>"""
     (OUT / "social-preview.svg").write_text(svg(1280, 640, social, "comindly"))
 
-    # PNGs for places that take no SVG (GitHub social preview, app bundles), if ImageMagick is installed.
-    magick = shutil.which("magick")
-    if magick:
+    # PNGs for places that take no SVG (GitHub social preview, app bundles); ImageMagick's own renderer drops the mark, so resvg first.
+    resvg, magick = shutil.which("resvg"), shutil.which("magick")
+    if resvg or magick:
         png = OUT / "png"
         png.mkdir(exist_ok=True)
         for size in (16, 32, 48, 64, 128, 256, 512):
-            subprocess.run([magick, "-background", "none", "-density", "300", str(OUT / "icon.svg"), "-resize", f"{size}x{size}", str(png / f"icon-{size}.png")], check=True)
-        subprocess.run([magick, "-density", "96", str(OUT / "social-preview.svg"), str(OUT / "social-preview.png")], check=True)
+            src, dst = str(OUT / "icon.svg"), str(png / f"icon-{size}.png")
+            subprocess.run([resvg, "-w", str(size), "-h", str(size), src, dst] if resvg else [magick, "-background", "none", "-density", "300", src, "-resize", f"{size}x{size}", dst], check=True)
+        src, dst = str(OUT / "social-preview.svg"), str(OUT / "social-preview.png")
+        subprocess.run([resvg, src, dst] if resvg else [magick, "-density", "96", src, dst], check=True)
 
     # The docs site and the web UI serve their own copies.
     for target, names in (

@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { Outcome } from "@/components/notice";
@@ -71,6 +71,7 @@ export function MembersPage() {
             className="min-w-56 flex-1"
           />
           <select className={select} value={role} onChange={(e) => setRole(e.target.value as Role)}>
+            <option value="viewer">Viewer</option>
             <option value="member">Member</option>
             <option value="admin">Admin</option>
           </select>
@@ -78,6 +79,9 @@ export function MembersPage() {
             Invite
           </Button>
         </form>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Viewers read everything. Members also add to the ledger and conventions. Admins also manage people, repositories, settings, secrets and indexing.
+        </p>
         <Outcome error={invite.error} />
         {invite.data?.code && (
           <Reveal
@@ -90,7 +94,7 @@ export function MembersPage() {
 
       <Section
         title="Members"
-        description="Admins manage repositories, indexing, members and the server's tokens. Members use everything else."
+        description="Admins named by the deployment are always admins; change anyone else's role here."
       >
         <Table>
           <thead>
@@ -114,6 +118,7 @@ export function MembersPage() {
                     </Badge>
                   ) : (
                     <select className={select} value={m.role} onChange={(e) => change.mutate({ e: m.email, r: e.target.value as Role })}>
+                      <option value="viewer">Viewer</option>
                       <option value="member">Member</option>
                       <option value="admin">Admin</option>
                     </select>
@@ -315,8 +320,9 @@ export function AccessPage() {
   const newCode = useMutation({ mutationFn: api.resetOwnCode, meta: { inline: true } });
   const list = useQuery({ queryKey: ["tokens"], queryFn: api.tokens });
   const [name, setName] = useState("");
+  const [days, setDays] = useState("90");
   const create = useMutation({
-    mutationFn: () => api.createToken(name),
+    mutationFn: () => api.createToken(name, days === "never" ? null : Number(days)),
     meta: { inline: true },
     onSuccess: () => (setName(""), qc.invalidateQueries({ queryKey: ["tokens"] })),
   });
@@ -366,6 +372,12 @@ export function AccessPage() {
             placeholder="Name, e.g. Claude Code on my laptop"
             className="flex-1"
           />
+          <select className={select} value={days} onChange={(e) => setDays(e.target.value)} aria-label="Expires">
+            <option value="30">30 days</option>
+            <option value="90">90 days</option>
+            <option value="365">1 year</option>
+            <option value="never">No expiry</option>
+          </select>
           <Button type="submit" variant="brand" disabled={!name.trim()} loading={create.isPending}>
             Create token
           </Button>
@@ -380,6 +392,7 @@ export function AccessPage() {
                 <Th>Name</Th>
                 <Th>Created</Th>
                 <Th>Last used</Th>
+                <Th>Expires</Th>
                 <Th />
               </Tr>
             </thead>
@@ -389,6 +402,9 @@ export function AccessPage() {
                   <Td className="align-middle font-medium">{t.name}</Td>
                   <Td className="align-middle text-muted-foreground">{day(t.created)}</Td>
                   <Td className="align-middle text-muted-foreground">{day(t.last_used)}</Td>
+                  <Td className="align-middle text-muted-foreground">
+                    {t.expired ? <Badge variant="outline">Expired</Badge> : t.expires ? day(t.expires) : "Never"}
+                  </Td>
                   <Td className="align-middle text-right">
                     <Button variant="ghost" size="sm" onClick={() => revoke.mutate(t.id)}>
                       Revoke
@@ -399,6 +415,58 @@ export function AccessPage() {
             </tbody>
           </Table>
         )}
+      </Section>
+    </div>
+  );
+}
+
+/** Who changed what in members, tokens, secrets and repositories, newest first. */
+export function AuditPage() {
+  const log = useInfiniteQuery({
+    queryKey: ["audit"],
+    queryFn: ({ pageParam }) => api.audit(pageParam),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.next,
+  });
+  if (!log.data) return <Skeleton className="h-96 rounded-xl" />;
+  const entries = log.data.pages.flatMap((p) => p.entries);
+  const when = (t: string) => (t ? new Date(t).toLocaleString() : "—");
+
+  return (
+    <div className="flex max-w-4xl flex-col gap-5">
+      <Section title="Audit log" description="Sign-ins, invitations, role changes, tokens, secrets and repositories. Token values and codes are never recorded.">
+        {entries.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Nothing recorded yet.</p>
+        ) : (
+          <Table>
+            <thead>
+              <Tr>
+                <Th>When</Th>
+                <Th>Who</Th>
+                <Th>What</Th>
+                <Th>Detail</Th>
+              </Tr>
+            </thead>
+            <tbody>
+              {entries.map((e, i) => (
+                <Tr key={`${e.at}-${i}`}>
+                  <Td className="align-middle whitespace-nowrap text-muted-foreground">{when(e.at)}</Td>
+                  <Td className="align-middle font-medium">{e.actor}</Td>
+                  <Td className="align-middle">{e.action}</Td>
+                  <Td className="align-middle text-muted-foreground">{e.detail}</Td>
+                </Tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+        {log.hasNextPage && (
+          <div>
+            <Button variant="outline" size="sm" loading={log.isFetchingNextPage} onClick={() => log.fetchNextPage()}>
+              Load more
+            </Button>
+          </div>
+        )}
+        <Outcome error={log.error} />
       </Section>
     </div>
   );

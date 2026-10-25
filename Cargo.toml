@@ -1,41 +1,31 @@
-[package]
-name = "comindly"
-version = "0.3.4"
+[workspace]
+members = ["crates/comindly-core", "crates/comindly-server", "ui"]
+resolver = "2"
+
+[workspace.package]
+version = "0.4.0-beta.1"
 edition = "2021"
 rust-version = "1.95"
 license = "MIT"
 repository = "https://github.com/sayef/comindly"
-authors = ["Saiful Islam"]
-description = "Deterministic, always-fresh, cross-repo code intelligence for coding agents — self-hosted, single binary."
-readme = "README.md"
 homepage = "https://github.com/sayef/comindly"
-documentation = "https://docs.rs/comindly"
-keywords = ["code-intelligence", "mcp", "agents", "tree-sitter", "code-search"]
-categories = ["development-tools", "command-line-utilities"]
-# An allowlist, so the git-ignored `ui/dist` (built before publishing) ships in the crate.
-include = ["/src/**", "/build.rs", "/ui/dist/**", "/benches/**", "/Cargo.toml", "/Cargo.lock", "/README.md", "/LICENSE", "/CHANGELOG.md"]
+authors = ["Saiful Islam"]
 
-# Library (the engine, one module per stage) + the `comindly` binary. main.rs uses the lib as `comindly::`.
-[lib]
-name = "comindly"
-path = "src/lib.rs"
-
-[[bin]]
-name = "comindly"
-path = "src/main.rs"
-
-[dependencies]
+[workspace.dependencies]
+comindly-core = { path = "crates/comindly-core", version = "0.4.0-beta.1" }
+comindly-server = { path = "crates/comindly-server", version = "0.4.0-beta.1", default-features = false }
+comindly-ui = { path = "ui", version = "0.4.0-beta.1" }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-toml = "0.8"
+toml = "1"
 indicatif = "0.18" # stderr progress bars / spinners (auto-degrade off-TTY)
 console = "0.16" # styled status lines + TTY detection
-comfy-table = "7" # unicode result tables
+comfy-table = "8" # unicode result tables
 anyhow = "1"
-tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "io-std", "net", "process", "io-util"] }
+tokio-util = "0.7"
+tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "io-std", "net", "process", "io-util", "signal"] }
 futures = "0.3"
-toml_edit = "0.25"
 rpassword = "7"
 rayon = "1"
 ignore = "0.4"
@@ -63,17 +53,95 @@ sqlparser = "0.63"
 object_store = { version = "0.13.2", default-features = false, features = ["fs"] }
 uuid = { version = "1.24", features = ["v4", "v7", "serde", "v5"] }
 # Server mode: members, sessions and encrypted tokens in SQLite; sign-in links by email.
-chacha20poly1305 = "0.10"
-getrandom = "0.3"
+chacha20poly1305 = "0.11"
+getrandom = "0.4"
 lettre = { version = "0.11.23", default-features = false, features = ["smtp-transport", "builder", "hostname", "tokio1", "tokio1-rustls", "aws-lc-rs", "webpki-roots"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 ratatui = { version = "0.30.2", default-features = false, features = ["crossterm_0_29", "layout-cache", "underline-color"] }
 crossterm = "0.29"
 globset = "0.4"
-axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio", "matched-path"] }
+tower-http = { version = "0.6", default-features = false, features = ["compression-gzip"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "registry"] }
+# OTLP trace export, behind the server's `otel` feature.
+opentelemetry = { version = "0.33", default-features = false, features = ["trace"] }
+opentelemetry_sdk = { version = "0.33", default-features = false, features = ["trace"] }
+opentelemetry-otlp = { version = "0.33", default-features = false, features = ["http-proto", "reqwest-blocking-client", "trace"] }
+tracing-opentelemetry = { version = "0.34", default-features = false }
+tower = { version = "0.5", default-features = false, features = ["util"] }
 yaml-rust2 = "0.13"
 hcl-rs = "0.19"
-reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "query", "gzip"] }
+wry = "0.57"
+tao = "0.37"
+muda = "0.21"
+rfd = { version = "0.17", default-features = false }
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSImage", "NSResponder"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData"] }
+
+[package]
+name = "comindly"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Your team's engineering memory for coding agents: a cross-repo code graph and reasoning ledger, self-hosted, single binary."
+readme = "README.md"
+documentation = "https://docs.rs/comindly"
+keywords = ["code-intelligence", "mcp", "agents", "tree-sitter", "code-search"]
+categories = ["development-tools", "command-line-utilities"]
+include = ["/src/**", "/benches/**", "/Cargo.toml", "/Cargo.lock", "/README.md", "/LICENSE", "/CHANGELOG.md"]
+
+# The `comindly` command; its library re-exports the server and the engine (`comindly::index`, …).
+[lib]
+name = "comindly"
+path = "src/lib.rs"
+
+[[bin]]
+name = "comindly"
+path = "src/main.rs"
+
+[features]
+default = []
+# OTLP trace export when OTEL_EXPORTER_OTLP_ENDPOINT is set; on in the container image and Linux release builds.
+otel = ["comindly-server/otel"]
+
+[dependencies]
+comindly-server = { workspace = true, default-features = false }
+anyhow.workspace = true
+clap.workspace = true
+comfy-table.workspace = true
+crossterm.workspace = true
+ratatui.workspace = true
+reqwest.workspace = true
+rpassword.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+toml.workspace = true
+
+# `comindly app`: a native window around the web UI (macOS, like Ollama's desktop app).
+[target.'cfg(target_os = "macos")'.dependencies]
+wry.workspace = true
+tao.workspace = true
+muda.workspace = true
+rfd.workspace = true
+objc2.workspace = true
+objc2-app-kit.workspace = true
+objc2-foundation.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "graph"
+harness = false
 
 [profile.release]
 lto = "thin"
@@ -87,23 +155,3 @@ debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = false
-
-# `comindly app`: a native window around the web UI (macOS, like Ollama's desktop app).
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
-
-[target.'cfg(target_os = "macos")'.dependencies]
-wry = "0.57"
-tao = "0.37"
-muda = "0.21"
-rfd = { version = "0.17", default-features = false }
-objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSImage", "NSResponder"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData"] }
-
-[dev-dependencies]
-criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
-
-[[bench]]
-name = "graph"
-harness = false

@@ -6,6 +6,103 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Roles on a server: admins, members and viewers. Viewers read everything; members also add to the
+  ledger and conventions; admins also manage people, repositories, settings, secrets and indexing. An
+  agent works with the role of the person whose token it uses.
+- `comindly login <url>`: sign the command line in to a server by approving it in the browser (a
+  `/device` page shows the machine and a code to compare); `comindly logout` revokes its token on the
+  server and forgets it. `find`, `search`, `explore`, `why`, `ledger`, `flow`, `stats`, `contracts`,
+  `packages`, `conventions`, `preflight`, `remember`, `review` and `link` then ask the server and print
+  what a local run prints (`preflight` reads the changes from git here); `link` starts indexing there and follows it, and Ctrl-C
+  cancels it there. `--server <url>`, `COMINDLY_SERVER` and `COMINDLY_TOKEN` (for CI) pick a server for
+  one command; `--local` uses the index on this machine.
+- `comindly ui` against a server: the terminal UI shows the server's index (`GET /api/v1/view`,
+  gzip-compressed), sends reviews to the server with your role, and fetches it again with `r`, which
+  also re-reads a local index.
+- `comindly app` against a server: the window opens the server's web app, with the server in its
+  title; you sign in in the window, and **View → Open Link from Clipboard** signs it in with an
+  emailed link.
+- Indexing jobs on a server keep a record: who started them, their status and their events, also after a
+  restart. `/api/v1/jobs` lists them and `/api/v1/jobs/{id}/events` streams a running job's events.
+  A job cut off by a crash shows as interrupted.
+- Indexing jobs queue: starting one while another runs (from the app, `comindly link` or the automatic
+  re-index) waits its turn instead of being refused. Up to 5 wait; asking again for the same indexing
+  returns the waiting job. The app and `comindly link` show "Queued" with the position and can cancel
+  it; queued jobs left by a restart are marked interrupted.
+- `comindly server` runs a team server (the app, `/api/v1` and `/mcp`, listening on `0.0.0.0:7878`);
+  it refuses to start without `COMINDLY_PUBLIC_URL`. The container image runs it.
+- `comindly doctor` shows which server the command line is signed in to, as whom, and whether its
+  token still works.
+- `GET /ready` for orchestrators: `200` once an index is loaded and the accounts can be read.
+- `comindly config` shows your preferences; `set`, `import <file> [--override]`, `export [file]` and
+  `history` change them, read and write them as TOML, and list earlier versions.
+- The index's shared settings also hold `scip` and `auto_index`.
+- Personal access tokens expire: 30 days, 90 days (the default), a year or never, chosen when one is
+  created. Expired tokens stop working, show as expired and are removed 30 days later. A command line's
+  token from `comindly login` lasts 90 days; when it expires, the command says to sign in again.
+- An audit log for admins: Settings → Audit and `GET /api/v1/audit`, newest first, with paging and
+  filters by who and what. Sign-outs are recorded too; token values and codes never are.
+- Every response carries an `X-Request-Id` (a safe one sent by the caller is kept), and every log line
+  written while handling a request carries it as `request_id`. An indexing job records the request that
+  started it.
+- An access line per request: method, path, status, time, request id and the member's email, never
+  tokens or cookies. Health checks log it at debug; `COMINDLY_LOG_LEVEL` sets the level.
+- Traces over OTLP/HTTP when `OTEL_EXPORTER_OTLP_ENDPOINT` is set: a span per request and per indexing
+  job; `OTEL_SERVICE_NAME` names the service (`comindly` by default). Built into the container image and
+  the Linux release binaries; a build from source needs `--features otel`, and a build without it says so
+  when the variable is set. An unreachable collector delays shutdown by at most 2 seconds.
+- **Activity** in the app: what comindly works on in the background. Tiles for what runs, waits,
+  succeeded and failed filter the list, which groups runs by day; each run opens as a timeline of its
+  steps with durations, results, warnings, errors, a live progress bar and LLM cost, with the plain log
+  to copy. The header's indexing pill and the failure toast open the run there.
+- `GET /api/v1/view` sends an `ETag` and answers `304 Not Modified` to a client that already has that
+  version. `comindly ui` against a server keeps the last view in your cache folder (readable only by you,
+  removed by `comindly logout`) and downloads it again only when it changed.
+- `comindly app` on Linux and Windows opens the app in your browser, locally or on a server, instead of
+  stopping with an error.
+- comindly is also published as `comindly-core` (the engine, including indexing as an async,
+  cancellable pipeline that reports events), `comindly-server` and `comindly-ui`.
+
+### Changed
+
+- `comindly ui --web` is the web UI on this machine; a team server runs with `comindly server`.
+- `preflight` treats a constraint whose check passes as verified, as `ledger` does.
+- The HTTP API moved to `/api/v1`, and every error has one shape, `{"error": {"code", "message"}}`, with
+  a matching status.
+- Your preferences are kept in a versioned table instead of `config.toml`. An existing
+  `config.toml` is imported on the first run and renamed `config.toml.imported`; a later one is not read.
+  Models, LLM steps, limits, the output format, SCIP and automatic re-indexing are the index's shared
+  settings only, and settings from an old `config.toml` move there.
+- A server keeps no configuration file: the repositories it indexes are kept with its accounts, and
+  settings a 0.3 server kept move over on its first start.
+- A server reads and checks its settings when it starts and stops with a message when one is missing or
+  wrong. On SIGTERM it stops taking requests and lets a running job stop at its next checkpoint.
+- Indexing from the app or the server runs inside the process as a job; cancelling stops it at its next
+  checkpoint, LLM requests in flight included.
+- Admins named in `COMINDLY_ADMIN_EMAILS` cannot be demoted in the app.
+- Logs are written through `tracing`; readable and JSON lines keep their format and field names.
+- A new look for the app and the docs site, with one palette: ink and paper with the mark's teal and
+  lime, Geist throughout, a tinted pill for the current page, and the repository graph behind the
+  sign-in, approval and first-run pages. The docs site has a new landing page and a **Copy page**
+  button for every page's Markdown, and serves its fonts itself instead of loading them from Google.
+- The indexing log in Settings → Repositories is the same step timeline as Activity.
+- The terminal UI against a server knows your role: signed in as a viewer, it says read-only and
+  explains instead of sending reviews the server would refuse.
+- The tagline is "Your team's engineering memory for coding agents", in the README, the banners, the
+  social preview and the crate description.
+
+### Fixed
+
+- Errors in the indexing log are shown in red; they used a colour the theme did not define.
+- The social preview image and the app icon PNGs show the whole mark; ImageMagick's renderer dropped
+  most of it, so the asset script uses resvg when it is installed.
+
+### Removed
+
+- `comindly config init`; `comindly config export` writes a file to start from.
+
 ## [0.3.4](https://github.com/sayef/comindly/compare/v0.3.3...v0.3.4) - 2026-10-23
 
 ### Fixed
@@ -13,7 +110,6 @@ All notable changes to this project are documented here. The format follows
 - Cancel stops indexing in container images too; it relied on a `kill` program that slim images lack.
 
 ## [0.3.3](https://github.com/sayef/comindly/compare/v0.3.2...v0.3.3) - 2026-10-23
-||||||| parent of 785ad0e (Cancel indexing by signalling the process group directly, which works in slim images)
 
 ### Added
 
@@ -32,8 +128,8 @@ All notable changes to this project are documented here. The format follows
   they are written, so an interrupted indexing run continues where it stopped instead of starting over.
 - A limit always picks the same symbols (ties are broken by id).
 - Team settings saved on a server record the admin who saved them; the separate LLM card is gone there.
+
 ## [0.3.2](https://github.com/sayef/comindly/compare/v0.3.1...v0.3.2) - 2026-10-22
-||||||| parent of b145d1b (Cost controls and resumable LLM steps, structured JSON logs, a step-by-step indexing log, and Add all)
 
 ### Fixed
 

@@ -1,0 +1,163 @@
+{% extends "main.html" %}
+
+{% block tabs %}
+{{ super() }}
+<div class="cm-home">
+  <section class="cm-hero">
+    <canvas class="cm-graph" aria-hidden="true"></canvas>
+    <div class="cm-hero__veil" aria-hidden="true"></div>
+    <div class="cm-wrap cm-hero__text">
+      <p class="cm-label">Open source · self-hosted · MCP</p>
+      <h1>Your team's engineering<br>memory for coding agents.</h1>
+      <p class="cm-lede">Know what breaks before you change it. comindly maps your repositories into one graph, keeps
+        what the team learned next to the code, and serves both to agents over MCP.</p>
+      <div class="cm-actions">
+        <a class="cm-btn cm-btn--solid" href="{{ 'getting-started/' | url }}">Get started</a>
+        <a class="cm-btn" href="https://github.com/sayef/comindly">GitHub</a>
+      </div>
+      <button class="cm-install" type="button" data-cm-copy="curl -LsSf https://raw.githubusercontent.com/sayef/comindly/main/scripts/install.sh | sh" title="Copy">
+        <span class="cm-install__prompt">$</span> curl -LsSf …/scripts/install.sh | sh <span class="cm-install__hint">copy</span>
+      </button>
+    </div>
+  </section>
+
+  <section class="cm-section">
+    <div class="cm-wrap">
+      <p class="cm-label cm-label--accent">The graph</p>
+      <h2>One graph across<br>every repository.</h2>
+      <p class="cm-sub">Calls, imports and service contracts from Python, TypeScript, Go, Java, Kotlin and Rust, linked
+        across repositories into one index that lives in a folder or your own bucket.</p>
+      <figure class="cm-panel">
+        <img src="{{ 'assets/screenshots/overview-dark.webp' | url }}" alt="The org map of an example shop: five repositories and the service contracts between them" width="1440" height="900" loading="lazy">
+      </figure>
+      <div class="cm-facts">
+        <div><p class="cm-label">Symbols</p><p>Tree-sitter for every supported language, SCIP where an indexer is present.</p></div>
+        <div><p class="cm-label">Contracts</p><p>HTTP routes and clients, queues, topics, buckets and tables, from code and Terraform.</p></div>
+        <div><p class="cm-label">Versions</p><p>CI builds a new version on each merge; readers switch atomically.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="cm-section">
+    <div class="cm-wrap cm-split">
+      <div>
+        <p class="cm-label cm-label--accent">Blast radius</p>
+        <h2>Change one function, see every caller.</h2>
+        <p class="cm-sub">Before an agent edits <code>place_order</code>, it asks who depends on it: in this repository,
+          in the services that call its route, and in the consumers of the queue it publishes to.</p>
+        <ul class="cm-list">
+          <li><code>ripple</code> what breaks across services</li>
+          <li><code>context_pack</code> what to read first</li>
+          <li><code>preflight</code> constraints and failing checks before a commit</li>
+        </ul>
+      </div>
+      <figure class="cm-panel cm-panel--tilt">
+        <img src="{{ 'assets/screenshots/explorer-dark.webp' | url }}" alt="comindly showing create_order: its callers across repositories, blast radius and flow walkthrough" width="1440" height="900" loading="lazy">
+      </figure>
+    </div>
+  </section>
+
+  <section class="cm-section">
+    <div class="cm-wrap cm-split cm-split--flip">
+      <div>
+        <p class="cm-label cm-label--accent">The ledger</p>
+        <h2>What the team learned,<br>where agents look.</h2>
+        <p class="cm-sub">Decisions, failed attempts and constraints are anchored to symbols. They follow the code, go
+          stale when it changes, and reach agents only once someone trusts them.</p>
+        <ul class="cm-list">
+          <li><code>why</code> reasoning blame for a symbol</li>
+          <li><code>remember</code> a decision, constraint or dead end</li>
+          <li>Review, archive or erase any record</li>
+        </ul>
+      </div>
+      <figure class="cm-panel cm-panel--tilt-left">
+        <img src="{{ 'assets/screenshots/ledger-dark.webp' | url }}" alt="The ledger: decisions and constraints with their status and trust" width="1440" height="900" loading="lazy">
+      </figure>
+    </div>
+  </section>
+
+  <section class="cm-section">
+    <div class="cm-wrap">
+      <p class="cm-label cm-label--accent">Open source</p>
+      <h2>One binary. Your storage.</h2>
+      <p class="cm-sub">CLI, MCP server, web UI and desktop app in one MIT-licensed binary. No server required; a team
+        that wants one runs a single container.</p>
+      <div class="cm-code-grid">
+        <div class="cm-code">
+          <div class="cm-code__bar"><span></span><span></span><span></span><em>terminal</em></div>
+<pre><code><span class="c">#</span> <span class="m">index three services into one graph</span>
+<span class="k">comindly</span> link ../orders ../payments ../catalog
+
+<span class="c">#</span> <span class="m">what breaks if this changes?</span>
+<span class="k">comindly</span> explore OrderService.place_order<span class="cm-caret"></span></code></pre>
+        </div>
+        <div class="cm-code">
+          <div class="cm-code__bar"><span></span><span></span><span></span><em>~/.cursor/mcp.json</em></div>
+<pre><code>{
+  <span class="s">"mcpServers"</span>: {
+    <span class="s">"comindly"</span>: {
+      <span class="s">"command"</span>: <span class="v">"comindly"</span>,
+      <span class="s">"args"</span>: [<span class="v">"serve"</span>]
+    }
+  }
+}</code></pre>
+        </div>
+      </div>
+      <div class="cm-stats">
+        <div><strong>6</strong><span>languages</span></div>
+        <div><strong>1</strong><span>binary</span></div>
+        <div><strong>0</strong><span>servers required</span></div>
+        <div><strong>~0.2 s</strong><span>search against S3</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="cm-section">
+    <div class="cm-wrap cm-faq">
+      <h2>Questions answered</h2>
+      <details>
+        <summary>Does code leave my infrastructure?</summary>
+        <p>Not unless you enable LLM steps. Parsing, resolution, embeddings, search and the ledger run locally and write
+          to the directory or bucket you choose. <code>--no-llm</code> turns every LLM step off.</p>
+      </details>
+      <details>
+        <summary>Do I need to run a server?</summary>
+        <p>No. A folder or your own bucket holds the index; CI builds it and every agent reads it. A team that wants
+          sign-in, roles and a shared web app runs one container.</p>
+      </details>
+      <details>
+        <summary>How fresh is the index?</summary>
+        <p>As fresh as the last build. Re-indexing is incremental, readers switch versions atomically, and hooks on a
+          remote index read a local mirror that refreshes in the background.</p>
+      </details>
+      <details>
+        <summary>Which agents work with it?</summary>
+        <p>Any agent that speaks MCP: Claude Code, Cursor, Codex, Gemini CLI and others. comindly serves MCP over
+          stdio, or over HTTP from a team server.</p>
+      </details>
+      <details>
+        <summary>Which languages?</summary>
+        <p>Python, TypeScript, JavaScript, Go, Java, Kotlin and Rust.</p>
+      </details>
+      <p class="cm-more"><a href="{{ 'faq/' | url }}">All questions →</a></p>
+    </div>
+  </section>
+
+  <section class="cm-cta">
+    <div class="cm-cta__glow" aria-hidden="true"></div>
+    <div class="cm-wrap">
+      <h2>Index your first repositories.</h2>
+      <div class="cm-ticker" aria-hidden="true">
+        <div>search · find · zoom · ripple · context_pack · contracts · flow · why · preflight · guide · search · find · zoom · ripple · context_pack · contracts · flow · why · preflight · guide ·&nbsp;</div>
+      </div>
+      <div class="cm-actions cm-actions--center">
+        <a class="cm-btn cm-btn--solid" href="{{ 'getting-started/' | url }}">Get started</a>
+        <a class="cm-btn" href="{{ 'concepts/' | url }}">How it works</a>
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block site_nav %}{% endblock %}
+{% block content %}{% endblock %}

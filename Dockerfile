@@ -14,7 +14,7 @@ COPY . .
 COPY --from=ui /src/ui/dist ui/dist
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
-    cargo build --release --locked && cp target/release/comindly /usr/local/bin/comindly
+    cargo build --release --locked --features otel && cp target/release/comindly /usr/local/bin/comindly
 
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git openssh-client \
@@ -28,7 +28,7 @@ ENV COMINDLY_LOG_FORMAT=json
 VOLUME /data
 EXPOSE 7878
 ENTRYPOINT ["comindly"]
-CMD ["ui", "--web", "--host", "0.0.0.0"]
+CMD ["server"]
 
 # A binary built outside Docker for each platform: scripts/docker-local.sh, or the release workflow.
 FROM runtime AS local

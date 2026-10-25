@@ -7,13 +7,20 @@ system's WebKit, no browser and no bundled Chromium. The window shows a loading 
 index loads, then the UI from a private server on a random local port that only this window can
 call. Links to other sites open in your browser.
 
-Started from a terminal, it sees your shell's environment (storage credentials for an index in a bucket). Linux
-and Windows: use the web UI.
+Started from a terminal, it sees your shell's environment (storage credentials for an index in a bucket). On
+Linux and Windows, `comindly app` opens the same app in your browser instead: the local web UI, or the
+server's address when you use one.
+
+Against a server (after `comindly login <url>`, or with `--server <url>`), the window opens that
+server's app instead, and the title shows which server. You sign in in the window as in a browser,
+and it remembers the session. A sign-in link from an email opens in your browser; to sign the window
+in with it, copy the link and choose **View → Open Link from Clipboard** (<kbd>⌘L</kbd>). `--local`,
+or an explicit `--index-dir`, opens this machine's index as before.
 
 ## Web UI
 
-`comindly ui --web [--port 7878] [--open]` serves the same UI on 127.0.0.1 only. With `--host 0.0.0.0`
-and `COMINDLY_PUBLIC_URL` it runs as a team server instead ([Self-hosting](self-hosting.md)). It prints a link
+`comindly ui --web [--port 7878] [--open]` serves the same UI on 127.0.0.1 only. A team server runs
+with `comindly server` instead ([Self-hosting](self-hosting.md)). It prints a link
 with an access token; open it once (or pass `--open`) and the browser keeps the token in a cookie,
 so the plain address works as a bookmark afterwards. Other programs and web pages cannot call the
 UI's API without it. The token is kept in `~/.config/comindly/ui-token`; delete the file to issue a
@@ -58,12 +65,22 @@ new one.
   comindly indexes all repositories together so cross-repo links stay complete, so **Index now** waits
   until every indexed repository has a folder here, unless you choose to drop the missing ones. With
   **Re-index automatically** on (`auto_index`), the app checks every freshness interval whether a default
-  branch moved on the remote and re-indexes without LLM steps when one did.
-- **Settings**: the index location (with a connection test), the team settings (shared LLM and
-  embedding model), your own API key, your name on ledger records, and how often to check for a
-  new index version. Changing the index location switches the UI without a restart.
-  On a team server, Settings also has **Members** and **Integrations** (admins) and **Your access**
-  (your sign-in code, personal access tokens and how to connect an agent).
+  branch moved on the remote and re-indexes without LLM steps when one did; it is one of the index's
+  shared settings.
+- **Settings**: the index location (with a connection test), the index's shared settings (LLM
+  endpoint and model, embedding model, LLM steps, limits and prices), your own API key, your name on
+  ledger records, and how often to check for a new index version. Changing the index location switches
+  the UI without a restart. On a team server, Settings also has **Members** and **Integrations**
+  (admins) and **Your access** (your sign-in code, personal access tokens and how to connect an agent);
+  viewers see everything read-only.
+- **Activity**: what comindly works on in the background. Tiles count what runs, waits, succeeded and
+  failed (click one to filter); the list groups runs under **Now**, **Today**, **Yesterday** and earlier
+  days. A run opens as a timeline: one row per step with its duration, its results, notes, warnings and
+  errors, a live progress bar for the step in progress, and the LLM tokens and cost. **Plain log** shows
+  the text to copy into an issue; the request id finds the run in the server's logs. Admins can cancel a
+  run or remove it from the queue. The server keeps the last 50 runs.
+- **Approving a command line**: `comindly login` opens `/device?code=…`; the page shows which machine
+  asks to act as you and the code its terminal shows, with **Approve** and **Deny**.
 - **Get started**: checks of this setup (as `comindly doctor`), how to register the MCP server with
   Claude Code, Cursor, Codex or VS Code with this index's path filled in, hooks, and every MCP tool
   with a question that uses it.
@@ -130,6 +147,12 @@ Conventions: one table, with where each comes from
 Search: describe what you are looking for
 ///
 
+![Activity: indexing runs grouped by day, one opened as a timeline of its steps](../assets/screenshots/activity.webp#only-light)
+![Activity: indexing runs grouped by day, one opened as a timeline of its steps](../assets/screenshots/activity-dark.webp#only-dark)
+/// caption
+Activity: indexing runs grouped by day, one opened as a timeline of its steps
+///
+
 ![Get started: register the MCP server with your agent](../assets/screenshots/setup.webp#only-light)
 ![Get started: register the MCP server with your agent](../assets/screenshots/setup-dark.webp#only-dark)
 /// caption
@@ -137,7 +160,9 @@ Get started: register the MCP server with your agent
 ///
 
 What is running shows in the header's corner (indexing with its current step, or any action in
-progress), with **Cancel** where it can be stopped; indexing stops with every process it started. Finished actions appear as toasts in the bottom-right corner.
+progress), with **Cancel** where it can be stopped; indexing stops at its next checkpoint and keeps
+what it already saved. Clicking it opens the run under **Activity**, whose sidebar entry counts what
+runs and waits. Finished actions appear as toasts in the bottom-right corner.
 
 Press <kbd>⌘K</kbd> (<kbd>Ctrl K</kbd>) anywhere to search: by name, and by describing what you are
 looking for ("where do we retry HTTP calls"), which uses the same hybrid search as the MCP `search`
@@ -147,4 +172,14 @@ pan. Dark by default; the header toggles a light theme. Against a read-only inde
 ## Terminal UI
 
 `comindly ui` is the compact terminal view: overview, contracts, ledger (with a timeline), explorer and
-conventions.
+conventions. On the ledger tab, <kbd>c</kbd> confirms and <kbd>x</kbd> retracts the selected record;
+<kbd>r</kbd> reads the index again.
+
+Against a server (after `comindly login <url>`, or with `--server <url>`), it shows the server's index
+and names the server in its title. Reviews go to the server under your name; signed in as a viewer,
+the help line says read-only and <kbd>c</kbd>/<kbd>x</kbd> explain why instead of sending a review. The
+server's index changes as it re-indexes and colleagues add records: press <kbd>r</kbd> to fetch it
+again. The whole view is fetched at once, compressed (about 10 KB for the example company; a large
+index is tens of MB), and kept in your cache folder (readable only by you, removed by `comindly
+logout`): starting again or pressing <kbd>r</kbd> downloads it only when it changed. `--local`, or an
+explicit `--index-dir`, uses the index on this machine.

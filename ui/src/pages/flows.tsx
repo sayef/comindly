@@ -94,7 +94,7 @@ function FlowView({ id }: { id: string }) {
       ) : (
         <>
           <div className="flex flex-col gap-2">
-            <h1 className="text-2xl font-semibold tracking-tight">{f.entry.name}</h1>
+            <h1 className="text-[28px] font-semibold tracking-[-0.035em]">{f.entry.name}</h1>
             <Journey repos={journey(f.entry, f.steps)} />
           </div>
           {f.narration && (
@@ -150,7 +150,7 @@ export function FlowsPage() {
   return (
     <div className="flex flex-col gap-5">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Flows</h1>
+        <h1 className="text-[28px] font-semibold tracking-[-0.035em]">Flows</h1>
         <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
           Where work starts and where it travels: calls, then across HTTP routes, topics and queues into the services that handle
           them. With LLM summaries on when indexing, flows also get a written walkthrough.

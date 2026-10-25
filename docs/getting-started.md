@@ -41,11 +41,11 @@ git clone https://github.com/sayef/comindly && cd comindly && cargo build --rele
 
 ## 2. Index your code
 
-The quickest way is the app: `comindly app` (macOS) or `comindly ui --web --open`, then **Settings → Repositories**
+The quickest way is the app: `comindly app` (its own window on macOS, the browser elsewhere), then **Settings → Repositories**
 → Scan a folder → tick your repositories → **Index now**. The same from the terminal:
 
 ```sh
-comindly repos add ../shared-lib ../orders ../payments   # remembered in config.toml
+comindly repos add ../shared-lib ../orders ../payments   # remembered in your preferences
 comindly repos add https://github.com/acme/billing.git    # a clone URL: comindly clones it itself
 comindly link --index-dir ~/comindly-index                 # each repo's default branch, never your folders
 ```

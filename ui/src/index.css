@@ -21,6 +21,7 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-brand: var(--brand);
   --color-brand-foreground: var(--brand-foreground);
+  --color-lime: var(--lime);
   --color-warning: var(--warning);
   --color-danger: var(--danger);
   --color-border: var(--border);
@@ -35,56 +36,58 @@
   --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-/* Graphite: dark first, hairline borders, one green accent. */
+/* Ink and paper, teal as the one accent, the mark's lime for highlights; as on the docs site. */
 :root {
   --radius: 0.6rem;
-  --background: #fbfcfc;
-  --foreground: #0c1110;
+  --background: #ffffff;
+  --foreground: #0b110e;
   --card: #ffffff;
-  --card-foreground: #0c1110;
+  --card-foreground: #0b110e;
   --popover: #ffffff;
-  --popover-foreground: #0c1110;
-  --primary: #0c1110;
+  --popover-foreground: #0b110e;
+  --primary: #0b110e;
   --primary-foreground: #ffffff;
-  --secondary: #f1f4f3;
-  --secondary-foreground: #0c1110;
-  --muted: #f1f4f3;
-  --muted-foreground: #5a6662;
-  --accent: #e3f5ec;
-  --accent-foreground: #0b6e4c;
-  --brand: #12a36d;
-  --brand-foreground: #03130c;
+  --secondary: #f2f5f3;
+  --secondary-foreground: #0b110e;
+  --muted: #f2f5f3;
+  --muted-foreground: #5b6560;
+  --accent: #e8f6f3;
+  --accent-foreground: #0f766e;
+  --brand: #0f766e;
+  --brand-foreground: #ffffff;
+  --lime: #4d9a12;
   --warning: #a8650c;
   --danger: #c2410c;
-  --border: #e3e8e6;
-  --input: #d5dcd9;
-  --ring: #12a36d;
-  --sidebar: #f6f8f7;
+  --border: #e6eae8;
+  --input: #d3dad6;
+  --ring: #0f766e;
+  --sidebar: #f7f9f8;
 }
 
 .dark {
-  --background: #0a0c0d;
-  --foreground: #e6ece9;
-  --card: #0f1214;
-  --card-foreground: #e6ece9;
-  --popover: #121618;
-  --popover-foreground: #e6ece9;
-  --primary: #e6ece9;
-  --primary-foreground: #0a0c0d;
-  --secondary: #161b1d;
-  --secondary-foreground: #e6ece9;
-  --muted: #161b1d;
-  --muted-foreground: #8b9692;
-  --accent: #10261c;
-  --accent-foreground: #6ee7b0;
-  --brand: #3ddc97;
-  --brand-foreground: #04140d;
+  --background: #0b110e;
+  --foreground: #eef2ef;
+  --card: #101814;
+  --card-foreground: #eef2ef;
+  --popover: #121a16;
+  --popover-foreground: #eef2ef;
+  --primary: #eef2ef;
+  --primary-foreground: #0b110e;
+  --secondary: #151e19;
+  --secondary-foreground: #eef2ef;
+  --muted: #151e19;
+  --muted-foreground: #949d98;
+  --accent: #10292a;
+  --accent-foreground: #5eead4;
+  --brand: #2dd4bf;
+  --brand-foreground: #04120f;
+  --lime: #a3e635;
   --warning: #f5c46b;
   --danger: #f08a7a;
-  --border: #1c2124;
-  --input: #2a3135;
-  --ring: #3ddc97;
-  --sidebar: #0c0f10;
+  --border: #1e2723;
+  --input: #2b3631;
+  --ring: #2dd4bf;
+  --sidebar: #080d0b;
 }
 
 /* Small uppercase mono labels: section names, table heads, stat captions. */
@@ -134,7 +137,7 @@
   }
 }
 
-/* The map's zoom controls and attribution in Graphite colours. */
+/* The map's zoom controls and attribution in the app's colours. */
 .react-flow__controls {
   box-shadow: none;
   border: 1px solid var(--color-border);

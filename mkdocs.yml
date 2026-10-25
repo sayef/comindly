@@ -1,5 +1,5 @@
 site_name: comindly
-site_description: "Cross-repo code intelligence for coding agents: one versioned graph in your own storage."
+site_description: "Your team's engineering memory for coding agents: one graph of your repositories and what the team learned, in your own storage."
 site_url: https://comindly.pages.dev/
 repo_url: https://github.com/sayef/comindly
 repo_name: sayef/comindly
@@ -10,9 +10,8 @@ theme:
   name: material
   logo: assets/wordmark-dark.svg
   favicon: assets/icon.svg
-  font:
-    text: Source Sans 3
-    code: JetBrains Mono
+  custom_dir: overrides
+  font: false
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
@@ -49,9 +48,15 @@ theme:
 
 extra_css:
   - stylesheets/extra.css
+  - stylesheets/home.css
+
+extra_javascript:
+  - javascripts/site.js
 
 plugins:
   - search
+  # Fonts and other external assets are downloaded at build time and served from the site itself.
+  - privacy
 
 markdown_extensions:
   - admonition

@@ -67,7 +67,7 @@ fn bench(c: &mut Criterion) {
         })
         .collect();
     c.bench_function("ledger derive 1000 records", |b| {
-        b.iter(|| comindly::ledger::derive(&records, &all))
+        b.iter(|| comindly::ledger::derive(&records, &all, &Default::default()))
     });
 }
 
