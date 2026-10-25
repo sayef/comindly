@@ -17,6 +17,7 @@ const NAV = [
   { to: "/ledger", label: "Ledger" },
   { to: "/conventions", label: "Conventions" },
   { to: "/packages", label: "Packages" },
+  { to: "/activity", label: "Activity" },
   { to: "/setup", label: "Get started" },
 ];
 
@@ -29,7 +30,7 @@ function Logo({ className }: { className?: string }) {
   );
 }
 
-function NavItem({ to, label, count }: { to: string; label: string; count?: number }) {
+function NavItem({ to, label, count, busy }: { to: string; label: string; count?: number; busy?: number }) {
   return (
     <NavLink
       to={to}
@@ -37,7 +38,7 @@ function NavItem({ to, label, count }: { to: string; label: string; count?: numb
       className={({ isActive }) =>
         cn(
           "group flex min-h-9 items-center gap-2.5 rounded-[7px] px-2.5 text-[13.5px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground",
-          isActive && "bg-muted font-medium text-foreground",
+          isActive && "bg-accent font-medium text-accent-foreground hover:bg-accent hover:text-accent-foreground",
         )
       }
     >
@@ -46,6 +47,7 @@ function NavItem({ to, label, count }: { to: string; label: string; count?: numb
           <span className={cn("size-1.5 rounded-[2px] bg-input transition-colors", isActive && "bg-brand")} />
           <span className="flex-1">{label}</span>
           {!!count && <Badge variant="warning">{count}</Badge>}
+          {!!busy && <Badge variant="brand">{busy}</Badge>}
         </>
       )}
     </NavLink>
@@ -78,6 +80,8 @@ export function Layout() {
         .filter(([k]) => k === "stale" || k === "orphaned")
         .reduce((n, [, v]) => n + v, 0)
     : 0;
+  const job = useQuery({ queryKey: ["index-job"], queryFn: api.indexJob });
+  const busy = (job.data?.running ? 1 : 0) + (job.data?.queued?.length ?? 0);
   const version = versions.data?.length ?? 0;
   const latest = versions.data?.at(-1);
 
@@ -119,7 +123,7 @@ export function Layout() {
 
         <nav className="flex flex-col gap-0.5" aria-label="Main">
           {NAV.map((n) => (
-            <NavItem key={n.to} to={n.to} label={n.label} count={n.label === "Ledger" ? inbox : undefined} />
+            <NavItem key={n.to} to={n.to} label={n.label} count={n.label === "Ledger" ? inbox : undefined} busy={n.to === "/activity" ? busy : undefined} />
           ))}
         </nav>
 
@@ -129,7 +133,7 @@ export function Layout() {
             className={({ isActive }) =>
               cn(
                 "flex min-h-9 items-center gap-2.5 rounded-[7px] px-2.5 text-[13.5px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground",
-                isActive && "bg-muted font-medium text-foreground",
+                isActive && "bg-accent font-medium text-accent-foreground hover:bg-accent hover:text-accent-foreground",
               )
             }
           >
@@ -168,7 +172,7 @@ export function Layout() {
           </div>
           <button
             onClick={() => setPalette(true)}
-            className="flex h-10 w-full min-w-0 items-center gap-2.5 rounded-lg border bg-card px-3 text-sm text-muted-foreground transition-colors hover:border-input"
+            className="flex h-10 w-full min-w-0 items-center gap-2.5 rounded-lg border bg-sidebar px-3 text-sm text-muted-foreground transition-colors hover:border-input"
           >
             <Search className="size-4 shrink-0" />
             <span className="flex-1 truncate text-left">Search symbols, files, contracts</span>
@@ -201,7 +205,7 @@ export function Layout() {
               className={({ isActive }) =>
                 cn(
                   "rounded-md px-3 py-1.5 text-xs whitespace-nowrap",
-                  isActive ? "bg-muted font-medium text-foreground" : "text-muted-foreground",
+                  isActive ? "bg-accent font-medium text-accent-foreground" : "text-muted-foreground",
                 )
               }
             >
@@ -209,7 +213,7 @@ export function Layout() {
             </NavLink>
           ))}
         </nav>
-        <main className="min-h-0 flex-1 overflow-y-auto">
+        <main className="relative min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto w-full min-w-0 max-w-[1400px] px-4 py-7 md:px-7">
             <Outlet />
           </div>

@@ -117,6 +117,21 @@ for (const theme of mode === "server" ? [] : ["light", "dark"]) {
   await shot(`palette${suffix}`);
 }
 
+// Last, since it re-indexes: two runs from the app, the second queued behind the first, for the Activity page.
+if (mode !== "server") {
+  for (let i = 0; i < 2; i++) await evaluate(post("/api/v1/index", { llm: false, drop_unlisted: false }));
+  const jobs = `fetch("/api/v1/jobs").then((r) => r.json()).then((j) => j.jobs)`;
+  for (let i = 0; i < 120 && (await evaluate(`${jobs}.then((l) => l.some((j) => j.status === "queued" || j.status === "running"))`)); i++) await sleep(1000);
+  const first = await evaluate(`${jobs}.then((l) => l[l.length - 1]?.id)`);
+  for (const theme of ["light", "dark"]) {
+    await evaluate(`localStorage.setItem("comindly.theme", "${theme}")`);
+    await go(`/activity/${first}`);
+    await evaluate(`[...document.querySelectorAll("button")].find((b) => b.textContent.startsWith("Parsing"))?.click()`);
+    await sleep(500);
+    await shot(`activity${theme === "dark" ? "-dark" : ""}`);
+  }
+}
+
 ws.close();
 proc.kill();
 await sleep(300);

@@ -27,7 +27,7 @@
 | `comindly hook <agent> <event>` / `comindly init-hooks <claude\|cursor\|gemini\|codex\|generic>` | Agent hook adapter / config snippet |
 | `comindly eval graph [--scip <dir>]` | Graph quality on the gold fixture (precision/recall per edge kind) |
 | `comindly repos [add <folders or clone URLs…> \| remove <names…> \| scan <dir>]` | Indexed repositories, and the list `comindly link` indexes when given no folders |
-| `comindly app [--index-dir <dir>]` | The UI in its own window (macOS) |
+| `comindly app [--index-dir <dir>]` | The UI in its own window on macOS; in the browser on Linux and Windows |
 | `comindly team [set k=v… \| key]` | The index's shared settings (models, LLM steps and limits, prices, format, SCIP, automatic re-indexing); `key` stores your own API key |
 | `comindly join <index>` | Use a team's index on this machine |
 | `comindly ui [--web [--port 7878] [--host <addr>] [--open]] [--index-dir <dir>]` | Terminal UI (incl. a ledger timeline), or the web UI on 127.0.0.1 (overview, contracts, flows, ledger review, explorer with a neighbourhood graph, conventions) |
@@ -46,7 +46,7 @@ reads the changes from git on this machine and asks the server what they touch. 
 folders parses them here. `link` starts indexing on the server and shows its progress here;
 Ctrl-C cancels it there. The server indexes its own repository list, so `link` takes no folders and
 `index` is refused. `ui` shows the server's index in the terminal (reviews go to the server, <kbd>r</kbd>
-fetches it again), and `app` opens the server's web app in the window, where you sign in. `ui --web`
+fetches it again), and `app` opens the server's web app in the window (the browser on Linux and Windows), where you sign in. `ui --web`
 always serves this machine's index.
 
 `--server <url>` (or `COMINDLY_SERVER`) picks a server for one command; `COMINDLY_TOKEN` stands in for

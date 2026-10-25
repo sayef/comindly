@@ -326,6 +326,28 @@ export interface IndexEvent {
   usd?: number;
 }
 
+export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
+
+/** A job as the server keeps it; a waiting one carries its `position`, 1 for the next to run. */
+export interface JobRow {
+  id: string;
+  kind: string;
+  started_by: string | null;
+  status: JobStatus;
+  created: string;
+  started: string | null;
+  finished: string | null;
+  error: string | null;
+  request_id?: string;
+  position?: number;
+}
+
+export interface JobDetail {
+  job: JobRow;
+  events: IndexEvent[];
+  position: number | null;
+}
+
 export interface IndexJob {
   id?: string;
   running: boolean;
@@ -489,6 +511,8 @@ export const api = {
   startIndex: (llm: boolean, drop_unlisted = false) => post("/api/v1/index", { llm, drop_unlisted }),
   cancelIndex: () => post("/api/v1/index/cancel", {}),
   cancelJob: (id: string) => post(`/api/v1/jobs/${id}/cancel`, {}),
+  jobs: () => get<{ jobs: JobRow[] }>("/api/v1/jobs").then((r) => r.jobs),
+  job: (id: string) => get<JobDetail>(`/api/v1/jobs/${encodeURIComponent(id)}`),
   indexWatch: () => get<{ enabled: boolean; last: { checked: string | null; result: string } }>("/api/v1/index/watch"),
   team: () => get<Team>("/api/v1/team"),
   saveTeam: (settings: TeamSettings, version: number | null) => post("/api/v1/team", { settings, version }),

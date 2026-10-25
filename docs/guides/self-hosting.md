@@ -28,7 +28,7 @@ Secret Manager mounts), so rotating one is a change in your secret store and a r
 | `OPENAI_API_KEY` | optional | LLM key, likewise; `COMINDLY_LLM_BASE_URL` for any OpenAI-compatible endpoint. |
 | `COMINDLY_LOG_FORMAT` | the image sets it | `json`: one JSON event per line (timestamp, level, kind, step, message, `job_id`, `request_id`, counts, tokens, cost) for Datadog, CloudWatch or Loki. Unset: readable lines. |
 | `COMINDLY_LOG_LEVEL` | optional | `error`, `warn`, `info` (default) or `debug`. `debug` adds access lines for `/health` and `/ready`. |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | optional | Send traces over OTLP/HTTP (protobuf) to this collector, e.g. `http://otel-collector:4318`: a span per request (request id, method, route, status) and per indexing job (job id, the request that started it). Unset: no export. `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` and `OTEL_EXPORTER_OTLP_HEADERS` work as usual. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | optional | Send traces over OTLP/HTTP (protobuf) to this collector, e.g. `http://otel-collector:4318`: a span per request (request id, method, route, status) and per indexing job (job id, the request that started it). Unset: no export. `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` and `OTEL_EXPORTER_OTLP_HEADERS` work as usual. Built into the container image and the Linux release binaries; a build from source needs `--features otel`. An unreachable collector delays shutdown by at most 2 s. |
 | `OTEL_SERVICE_NAME` | optional | The service name on exported traces; `comindly` by default. |
 | `COMINDLY_TRUST_PROXY` | behind a proxy | `true` when a proxy you run sets `X-Forwarded-For`, so sign-in limits apply per client. |
 

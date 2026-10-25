@@ -1,7 +1,7 @@
 //! `comindly ui`: a terminal UI over the index — overview, contracts, ledger, explorer and
 //! conventions. Data loads once; rendering is a pure function of the app state.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -39,11 +39,36 @@ pub struct App {
     quit: bool,
     /// The server the data came from; reviews and reloads then go there.
     server: Option<crate::client::Client>,
+    /// Signed in to that server as a viewer: reviews would be refused.
+    viewer: bool,
 }
 
-/// The terminal UI's data from a server's `/api/v1/view`.
+/// The terminal UI's data from a server's `/api/v1/view`, downloaded only when it changed since the
+/// copy cached for that server.
 pub fn fetch(c: &crate::client::Client) -> Result<Data> {
-    let view: crate::view::View = crate::rt::block_on(c.get("/api/v1/view", &()))?;
+    let file = view_cache(c.base());
+    let cached = std::fs::read(&file).ok().and_then(|b| {
+        let at = b.iter().position(|&x| x == b'\n')?;
+        Some((
+            String::from_utf8(b[..at].to_vec()).ok()?,
+            b[at + 1..].to_vec(),
+        ))
+    });
+    let fresh = crate::rt::block_on(
+        c.get_if_changed("/api/v1/view", cached.as_ref().map(|(t, _)| t.as_str())),
+    )?;
+    let body = match (fresh, cached) {
+        (Some((tag, body)), _) => {
+            if !tag.is_empty() {
+                let _ = save_private(&file, &[tag.as_bytes(), b"\n", &body].concat());
+            }
+            body
+        }
+        (None, Some((_, body))) => body,
+        (None, None) => anyhow::bail!("{} answered without a view", c.base()),
+    };
+    let view: crate::view::View =
+        serde_json::from_slice(&body).context("unexpected answer from the server")?;
     if let Some(problem) = view.problem.as_ref().filter(|_| view.symbols.is_empty()) {
         anyhow::bail!("{} has no index yet: {problem}", c.base());
     }
@@ -68,11 +93,20 @@ impl App {
             status: String::new(),
             quit: false,
             server: None,
+            viewer: false,
         }
     }
 
     /// Show data fetched from `server`, and send reviews and reloads there.
     pub fn on_server(mut self, server: crate::client::Client) -> App {
+        let me = crate::rt::block_on(server.get::<crate::api::Me>("/api/v1/auth/me", &()));
+        self.viewer = matches!(
+            me,
+            Ok(crate::api::Me::Server {
+                role: Some(crate::server::Role::Viewer),
+                ..
+            })
+        );
         self.server = Some(server);
         self
     }
@@ -159,6 +193,11 @@ impl App {
 
     /// Confirm or retract the selected ledger record as a human reviewer.
     fn review(&mut self, kind: crate::ledger::RelationKind) {
+        if self.viewer {
+            self.status =
+                "read-only: viewers cannot review; ask an admin for the member role".into();
+            return;
+        }
         if let Some(c) = &self.server {
             let selected = self.lists[2].selected().unwrap_or(0);
             let Some(id) = self.entries().get(selected).map(|e| e.record.id.clone()) else {
@@ -342,7 +381,9 @@ impl App {
             } else {
                 format!("  filter: {}", self.filter)
             };
-            let actions = if self.tab == 2 {
+            let actions = if self.viewer {
+                " · r reload · read-only (viewer)"
+            } else if self.tab == 2 {
                 " · c confirm · x retract · r reload"
             } else {
                 " · r reload"
@@ -760,6 +801,35 @@ fn when(r: &crate::ledger::Record) -> &str {
         .unwrap_or(&r.created)
 }
 
+/// Where the last view from the server at `base` is kept: one file per server.
+fn view_cache(base: &str) -> std::path::PathBuf {
+    let name: String = base
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    crate::config::cache_dir()
+        .join("views")
+        .join(format!("{name}.json"))
+}
+
+/// Forget the view cached for the server at `base`, as signing out does.
+pub fn forget_view(base: &str) {
+    let _ = std::fs::remove_file(view_cache(base));
+}
+
+/// Write `bytes` to `path`, readable only by this user.
+fn save_private(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let mut o = std::fs::OpenOptions::new();
+    o.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
+    o.open(path)?.write_all(bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -810,5 +880,30 @@ mod tests {
             screen.contains("http:GET /v1/courses/{}"),
             "contracts tab shows the route"
         );
+    }
+
+    #[test]
+    fn a_viewer_is_told_before_reviewing() {
+        let graph = crate::graph::CodeGraph::build(&[], &[]);
+        let mut app = App::new(Data {
+            contracts: graph.contracts(None, false),
+            conventions: Vec::new(),
+            entries: Vec::new(),
+            manual: Vec::new(),
+            deps: Vec::new(),
+            root: None,
+            problem: None,
+            graph,
+            symbols: Vec::new(),
+            edges: Vec::new(),
+        });
+        app.viewer = true;
+        app.switch(2);
+        app.review(crate::ledger::RelationKind::Confirms);
+        assert!(app.status.starts_with("read-only"));
+        let mut term = Terminal::new(TestBackend::new(160, 20)).unwrap();
+        term.draw(|f| app.draw(f)).unwrap();
+        let screen = format!("{:?}", term.backend().buffer());
+        assert!(screen.contains("read-only (viewer)"));
     }
 }

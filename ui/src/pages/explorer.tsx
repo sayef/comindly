@@ -107,7 +107,7 @@ export function ExplorerPage() {
             <RepoDot repo={f.repo} /> {f.repo === "_contracts" ? "service contract" : f.repo}
             {f.repo !== "_contracts" && <span className="font-mono">{f.location}</span>}
           </div>
-          <h1 className="mt-1 flex items-center gap-2 text-2xl font-semibold tracking-tight">
+          <h1 className="mt-1 flex items-center gap-2 text-[28px] font-semibold tracking-[-0.035em]">
             {f.name}
             <Badge variant="outline">{f.kind}</Badge>
           </h1>

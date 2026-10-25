@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { RepoDot } from "@/components/symbol";
+import { Link } from "react-router";
 import { IndexLog } from "@/components/index-log";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -309,7 +310,21 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
             </Button>
           </p>
         ))}
-        <IndexLog events={j?.events ?? []} running={!!j?.running} />
+        {!!j?.events.length && (
+          <div className="mt-2 flex flex-col gap-2">
+            <IndexLog
+              events={j.events}
+              running={j.running}
+              status={j.running ? "running" : j.cancelled ? "cancelled" : j.ok === false ? "failed" : "succeeded"}
+              started={j.started}
+              finished={j.finished}
+              summary={false}
+            />
+            <Link to={j.id ? `/activity/${j.id}` : "/activity"} className="self-start text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground">
+              All runs under Activity
+            </Link>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -498,7 +513,7 @@ export function RepositoriesPage() {
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Repositories</h1>
+          <h1 className="text-[28px] font-semibold tracking-[-0.035em]">Repositories</h1>
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
             What comindly indexes. Each repository is indexed at its default branch from comindly's own checkout
             {server ? "." : ", so your folders and branches are never touched."}

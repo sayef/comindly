@@ -14,7 +14,7 @@ COPY . .
 COPY --from=ui /src/ui/dist ui/dist
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
-    cargo build --release --locked && cp target/release/comindly /usr/local/bin/comindly
+    cargo build --release --locked --features otel && cp target/release/comindly /usr/local/bin/comindly
 
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git openssh-client \

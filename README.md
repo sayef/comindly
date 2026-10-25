@@ -1,13 +1,14 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/sayef/comindly/main/assets/banner-dark.svg">
-    <img alt="comindly: cross-repo code intelligence for coding agents" src="https://raw.githubusercontent.com/sayef/comindly/main/assets/banner-light.svg" width="620">
+    <img alt="comindly: your team's engineering memory for coding agents" src="https://raw.githubusercontent.com/sayef/comindly/main/assets/banner-light.svg" width="620">
   </picture>
 </p>
 
 <p align="center">
-  One versioned graph of all your team's repositories, in your own storage, served to coding agents over MCP.<br>
-  Who breaks if this changes, which services call this route, and what the team already learned about this code.
+  <b>Your team's engineering memory for coding agents.</b><br>
+  Know what breaks before you change it. comindly maps your repositories into one graph, keeps what the team
+  learned next to the code, and serves both to agents over MCP.
 </p>
 
 <p align="center">
@@ -38,7 +39,7 @@ comindly indexes a whole team's repositories into one versioned knowledge graph,
 coding agents (Claude Code, Cursor, …) over MCP. Unlike grep or per-repo search, it answers
 *structural, cross-repo* questions deterministically:
 
-- **Who breaks if I change this?** — org-wide blast radius (`ripple`)
+- **What breaks if I change this?** — org-wide blast radius (`ripple`)
 - **What's the minimal context to change X safely?** — token-budgeted read-set (`context_pack`)
 - **How does this flow work?** — a call-trace walkthrough (`flow`)
 - **Where across the org is this used / how do I …?** — hybrid search + a pre-generated question catalog
@@ -185,7 +186,7 @@ ledger, packages and search. Shown here on the example shop in [`examples/acme`]
 | `comindly hook <agent> <event>` / `comindly init-hooks <claude\|cursor\|gemini\|codex\|generic>` | Agent hook adapter / config snippet |
 | `comindly eval graph [--scip <dir>]` | Graph quality on the gold fixture (precision/recall per edge kind) |
 | `comindly repos [add <folders or clone URLs…> \| remove <names…> \| scan <dir>]` | Indexed repositories, and the list `comindly link` indexes when given no folders |
-| `comindly app [--index-dir <dir>]` | The UI in its own window (macOS) |
+| `comindly app [--index-dir <dir>]` | The UI in its own window on macOS; in the browser on Linux and Windows |
 | `comindly team [set k=v… \| key]` | The index's shared settings (models, LLM steps and limits, prices, format, SCIP, automatic re-indexing); `key` stores your own API key |
 | `comindly join <index>` | Use a team's index on this machine |
 | `comindly ui [--web [--port 7878] [--host <addr>] [--open]] [--index-dir <dir>]` | Terminal UI (incl. a ledger timeline), or the web UI on 127.0.0.1 (overview, contracts, flows, ledger review, explorer with a neighbourhood graph, conventions) |

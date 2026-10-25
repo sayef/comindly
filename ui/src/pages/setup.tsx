@@ -437,7 +437,7 @@ export function SetupPage() {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <div className="eyebrow">Get started</div>
-          <h1 className="mt-2 text-2xl font-semibold tracking-tight">Give your agent the whole codebase</h1>
+          <h1 className="mt-2 text-[28px] font-semibold tracking-[-0.035em]">Give your agent the whole codebase</h1>
           <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
             comindly answers your coding agent's questions across every repository: what calls what, which services talk through which
             routes and queues, what a change can break, and what the team recorded about the code.

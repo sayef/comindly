@@ -48,6 +48,36 @@ impl Client {
         self.read(r).await
     }
 
+    /// GET `path` unless the server still has the version tagged `tag`: `None` then, else the new
+    /// tag and body.
+    pub async fn get_if_changed(
+        &self,
+        path: &str,
+        tag: Option<&str>,
+    ) -> Result<Option<(String, Vec<u8>)>> {
+        let mut req = self.request(reqwest::Method::GET, path);
+        if let Some(t) = tag {
+            req = req.header(reqwest::header::IF_NONE_MATCH, t);
+        }
+        let r = req
+            .send()
+            .await
+            .with_context(|| format!("cannot reach {}", self.base))?;
+        if r.status() == reqwest::StatusCode::NOT_MODIFIED {
+            return Ok(None);
+        }
+        if !r.status().is_success() {
+            return self.read::<()>(Ok(r)).await.map(|_| None);
+        }
+        let tag = r
+            .headers()
+            .get(reqwest::header::ETAG)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_string();
+        Ok(Some((tag, r.bytes().await?.to_vec())))
+    }
+
     pub async fn post<T: DeserializeOwned>(&self, path: &str, body: &impl Serialize) -> Result<T> {
         let r = self
             .request(reqwest::Method::POST, path)

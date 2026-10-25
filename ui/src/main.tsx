@@ -11,6 +11,7 @@ import { ContractsPage } from "@/pages/contracts";
 import { ConventionsPage } from "@/pages/conventions";
 import { ExplorerPage } from "@/pages/explorer";
 import { FlowsPage } from "@/pages/flows";
+import { ActivityPage } from "@/pages/activity";
 import { LedgerPage } from "@/pages/ledger";
 import { OverviewPage } from "@/pages/overview";
 import { PackagesPage } from "@/pages/packages";
@@ -73,6 +74,8 @@ createRoot(document.getElementById("root")!).render(
                   <Route path="conventions" element={<ConventionsPage />} />
                   <Route path="packages" element={<PackagesPage />} />
                   <Route path="flows" element={<FlowsPage />} />
+                  <Route path="activity" element={<ActivityPage />} />
+                  <Route path="activity/:id" element={<ActivityPage />} />
                   <Route path="setup" element={<SetupPage />} />
                   <Route path="settings" element={<SettingsShell />}>
                     <Route index element={<SettingsPage />} />

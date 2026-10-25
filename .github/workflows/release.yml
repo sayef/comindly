@@ -102,7 +102,8 @@ jobs:
       - if: runner.os == 'macOS'
         run: brew install protobuf cmake
       - run: rustup target add ${{ matrix.target }}
-      - run: cargo build --release --locked --target ${{ matrix.target }}
+      # Linux builds become the server image, so they carry OTLP trace export.
+      - run: cargo build --release --locked --target ${{ matrix.target }} ${{ runner.os == 'Linux' && '--features otel' || '' }}
       - name: Package
         run: |
           tar -C target/${{ matrix.target }}/release -czf "comindly-${{ matrix.target }}.tar.gz" comindly

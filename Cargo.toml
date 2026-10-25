@@ -90,7 +90,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "Deterministic, always-fresh, cross-repo code intelligence for coding agents — self-hosted, single binary."
+description = "Your team's engineering memory for coding agents: a cross-repo code graph and reasoning ledger, self-hosted, single binary."
 readme = "README.md"
 documentation = "https://docs.rs/comindly"
 keywords = ["code-intelligence", "mcp", "agents", "tree-sitter", "code-search"]
@@ -107,8 +107,8 @@ name = "comindly"
 path = "src/main.rs"
 
 [features]
-default = ["otel"]
-# OTLP trace export when OTEL_EXPORTER_OTLP_ENDPOINT is set.
+default = []
+# OTLP trace export when OTEL_EXPORTER_OTLP_ENDPOINT is set; on in the container image and Linux release builds.
 otel = ["comindly-server/otel"]
 
 [dependencies]

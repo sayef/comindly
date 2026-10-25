@@ -28,6 +28,16 @@ pub fn init() -> Guard {
     let registry = tracing_subscriber::registry().with(lines);
     #[cfg(feature = "otel")]
     let registry = registry.with(otel::layer());
+    #[cfg(not(feature = "otel"))]
+    if [
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+    ]
+    .iter()
+    .any(|k| std::env::var(k).is_ok_and(|v| !v.trim().is_empty()))
+    {
+        crate::ui::warn("traces will not be exported: this build has no OTLP support; use the container image or build with `--features otel`");
+    }
     let _ = tracing::subscriber::set_global_default(registry);
     Guard(())
 }
@@ -274,16 +284,29 @@ mod otel {
         )
     }
 
+    /// How long exiting waits for a collector; an unreachable one would otherwise hold it for the export timeout.
+    const AT_EXIT: std::time::Duration = std::time::Duration::from_secs(2);
+
     pub(super) fn flush() {
         if let Some(p) = PROVIDER.get() {
-            let _ = p.force_flush();
+            bounded(move || drop(p.force_flush()));
         }
     }
 
     pub(super) fn shutdown() {
         if let Some(p) = PROVIDER.get() {
-            let _ = p.shutdown();
+            bounded(move || drop(p.shutdown()));
         }
+    }
+
+    /// Runs `f` on its own thread and waits for it at most [`AT_EXIT`].
+    fn bounded(f: impl FnOnce() + Send + 'static) {
+        let (done, wait) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            f();
+            let _ = done.send(());
+        });
+        let _ = wait.recv_timeout(AT_EXIT);
     }
 }
 

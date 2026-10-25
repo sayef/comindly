@@ -1,6 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { KeyRound, Mail } from "lucide-react";
 import { useState } from "react";
+import { Backdrop } from "@/components/backdrop";
 import { Outcome } from "@/components/notice";
 import { Reveal } from "@/components/reveal";
 import { Button } from "@/components/ui/button";
@@ -24,14 +25,16 @@ const home = () => {
 
 export function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex min-h-full items-center justify-center bg-sidebar p-6">
-      <div className="w-full max-w-sm">
+    <div className="relative flex min-h-full items-center justify-center overflow-hidden bg-background p-6">
+      <Backdrop />
+      <div className="relative w-full max-w-sm">
         <div className="mb-6 flex items-center justify-center gap-2.5">
           <img src="/logo.svg" alt="" className="size-8 dark:hidden" />
           <img src="/logo-dark.svg" alt="" className="hidden size-8 dark:block" />
-          <span className="text-lg font-semibold tracking-tight">comindly</span>
+          <span className="text-lg font-semibold tracking-[-0.03em]">comindly</span>
         </div>
-        <div className="rounded-xl border bg-card p-6 shadow-sm">{children}</div>
+        <div className="rounded-xl border bg-card/90 p-6 shadow-[0_24px_60px_-20px_rgb(0_0_0/0.35)] backdrop-blur">{children}</div>
+        <p className="eyebrow mt-5 text-center">Your team's engineering memory for coding agents</p>
       </div>
     </div>
   );

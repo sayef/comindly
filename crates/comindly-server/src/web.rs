@@ -967,7 +967,9 @@ async fn ledger(Cur(s): Cur) -> Json<Vec<Entry>> {
 }
 
 /// What the terminal UI shows, for `comindly ui` against this server.
-async fn view(Cur(s): Cur) -> Response {
+/// The whole view a client rebuilds its data from, tagged with its hash: a client that already
+/// holds that tag gets `304 Not Modified` instead of the graph again.
+async fn view(Cur(s): Cur, headers: axum::http::HeaderMap) -> Response {
     let packages = match graph_uri(&s) {
         Some(u) => crate::index::read_packages(&u).await.unwrap_or_default(),
         None => Vec::new(),
@@ -976,7 +978,7 @@ async fn view(Cur(s): Cur) -> Response {
     let findings = crate::checks::run(&entries, &s.data.symbols, &s.data.edges, &packages);
     crate::checks::promote(&mut entries, &findings);
     let manual = s.manual.read().await.clone();
-    Json(api::View {
+    let body = match serde_json::to_vec(&api::View {
         symbols: (&s.data.symbols[..]).into(),
         edges: (&s.data.edges[..]).into(),
         entries: entries.into(),
@@ -984,8 +986,26 @@ async fn view(Cur(s): Cur) -> Response {
         manual: manual.into(),
         deps: (&s.data.deps[..]).into(),
         problem: s.data.problem.clone(),
-    })
-    .into_response()
+    }) {
+        Ok(b) => b,
+        Err(e) => return failure(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    };
+    let tag = format!("\"{}\"", &blake3::hash(&body).to_hex()[..32]);
+    if headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.split(',').any(|t| t.trim() == tag))
+    {
+        return (StatusCode::NOT_MODIFIED, [(header::ETAG, tag)]).into_response();
+    }
+    (
+        [
+            (header::CONTENT_TYPE, "application/json".to_string()),
+            (header::ETAG, tag),
+        ],
+        body,
+    )
+        .into_response()
 }
 
 /// Entries with each anchor named as the graph shows it (`Class.method`).

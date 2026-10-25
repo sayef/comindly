@@ -30,7 +30,7 @@ export function LedgerPage() {
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Ledger</h1>
+          <h1 className="text-[28px] font-semibold tracking-[-0.035em]">Ledger</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             What the code does not say: failed attempts, decisions and constraints, anchored to the symbols they are about.
           </p>

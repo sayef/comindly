@@ -13,10 +13,10 @@ The mark is a ring of ten petals around a graph, the petals running from teal to
 `#F3F6F2` on dark). The name follows the mark in bold. Green is the one accent; links on light backgrounds
 take the darker `#15803D`, which reads at body size. Text is converted to outlines from
 [Space Grotesk](https://github.com/floriankarsten/space-grotesk) (the name) and
-[Source Sans 3](https://github.com/adobe-fonts/source-sans) (the tagline), both under the SIL Open Font
+[Geist](https://github.com/vercel/geist-font) (the tagline), both under the SIL Open Font
 License, so the files need no fonts. The graph is adapted from the [Phosphor Icons](https://phosphoricons.com)
 `graph` glyph (MIT).
 
-Regenerate everything with `python assets/src/build.py <font dir>` (needs `fonttools`, and ImageMagick
-for the PNGs), where the directory holds the variable fonts `SpaceGrotesk.ttf` and `SourceSans3.ttf`. It
+Regenerate everything with `python assets/src/build.py <font dir>` (needs `fonttools`, and resvg or ImageMagick
+for the PNGs), where the directory holds the variable fonts `SpaceGrotesk.ttf` and `Geist.ttf`. It
 also refreshes the copies in `docs/assets/` and `ui/public/`.

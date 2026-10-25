@@ -101,6 +101,28 @@ fn a_server_sends_the_terminal_ui_what_the_index_holds() {
     assert!(remote.root.is_none(), "a server's data is read-only here");
     same(&local, &remote);
 
+    // A client holding the current tag gets 304 instead of the graph again, until the view changes.
+    let tagged = |tag: &str| {
+        comindly::rt::block_on(async {
+            let r = reqwest::Client::new()
+                .get(format!("{base}/api/v1/view"))
+                .header("cookie", &cookie)
+                .header("if-none-match", tag)
+                .send()
+                .await?;
+            let etag = r
+                .headers()
+                .get("etag")
+                .map(|v| v.to_str().unwrap().to_string());
+            anyhow::Ok((r.status().as_u16(), etag.unwrap_or_default()))
+        })
+        .unwrap()
+    };
+    let (status, tag) = tagged("\"none\"");
+    assert_eq!(status, 200);
+    assert!(!tag.is_empty());
+    assert_eq!(tagged(&tag), (304, tag.clone()));
+
     let id = local.entries[0].record.id.clone();
     let confirmed: serde_json::Value = comindly::rt::block_on(async {
         reqwest::Client::new()
@@ -117,5 +139,10 @@ fn a_server_sends_the_terminal_ui_what_the_index_holds() {
     let local = Data::load(&root, &verifier).unwrap();
     assert_eq!(local.entries[0].trust, comindly::ledger::Trust::T3);
     same(&local, &fetch());
+    assert_eq!(
+        tagged(&tag).0,
+        200,
+        "a review changes the view, so the old tag no longer matches"
+    );
     std::fs::remove_dir_all(&tmp).ok();
 }

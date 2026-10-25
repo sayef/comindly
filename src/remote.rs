@@ -330,6 +330,15 @@ pub fn dispatch(c: &Client, cmd: &Cmd) -> Option<ExitCode> {
                 }
             }
         }
+        #[cfg(not(target_os = "macos"))]
+        Cmd::App { index_dir: None } => {
+            crate::open_in_browser(c.base());
+            comindly::ui::ok(&format!(
+                "opened {} in your browser; sign in there",
+                c.base()
+            ));
+            ExitCode::SUCCESS
+        }
         _ => return None,
     })
 }

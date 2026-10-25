@@ -315,7 +315,7 @@ enum Cmd {
         #[arg(long, default_value = "0.0.0.0")]
         host: String,
     },
-    /// The web UI in its own window (macOS); a server's app when you use one
+    /// The web UI in its own window on macOS, in the browser elsewhere; a server's app when you use one
     App {
         #[arg(long = "index-dir")]
         index_dir: Option<String>,
@@ -1864,19 +1864,24 @@ fn cmd_app(from: Option<&str>) -> ExitCode {
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = from;
-        comindly::ui::err("the desktop app is macOS only for now; use `comindly ui --web --open`");
-        ExitCode::FAILURE
+        comindly::ui::note(
+            "the desktop window is macOS only; opening the app in your browser instead",
+        );
+        cmd_ui(from, Some(("127.0.0.1".into(), 7878)), true)
     }
 }
 
 fn open_in_browser(url: &str) {
-    let opener = if cfg!(target_os = "macos") {
-        "open"
+    let mut cmd = if cfg!(target_os = "macos") {
+        std::process::Command::new("open")
+    } else if cfg!(windows) {
+        let mut c = std::process::Command::new("cmd");
+        c.args(["/C", "start", ""]);
+        c
     } else {
-        "xdg-open"
+        std::process::Command::new("xdg-open")
     };
-    let _ = std::process::Command::new(opener).arg(url).spawn();
+    let _ = cmd.arg(url).spawn();
 }
 
 /// The working tree's changes in `repo` against `base`, or the exit code when there is nothing to check.
@@ -2489,6 +2494,7 @@ fn cmd_logout() -> ExitCode {
         Some(l) => match comindly::credentials::set_login(None) {
             Ok(()) => {
                 let c = comindly::client::Client::new(&l.url, Some(l.token.clone()));
+                comindly::tui::forget_view(c.base());
                 comindly::ui::ok(&format!("signed out of {} on this machine", l.url));
                 match comindly::rt::block_on(c.revoke_own_token()) {
                     Ok(true) => comindly::ui::ok("revoked its access token on the server"),

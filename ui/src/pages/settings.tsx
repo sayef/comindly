@@ -60,7 +60,7 @@ export function SettingsPage() {
   return (
     <div className="flex max-w-3xl flex-col gap-5">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
+        <h1 className="text-[28px] font-semibold tracking-[-0.035em]">Settings</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           {server ? (
             <>

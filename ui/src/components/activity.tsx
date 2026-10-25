@@ -31,7 +31,7 @@ export function Activity() {
   const next = j?.queued?.[0];
   const queued = next && (
     <Pill>
-      <Link to="/settings/repositories" className="flex items-center gap-2" title="Indexing starts when the running job ends">
+      <Link to={`/activity/${next.id}`} className="flex items-center gap-2" title="Indexing starts when the running job ends">
         <Clock className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="font-medium">Queued</span>
         {j.queued!.length > 1 && <span className="text-muted-foreground">+{j.queued!.length - 1}</span>}
@@ -50,7 +50,7 @@ export function Activity() {
       else if (j.ok) toast.success("Indexing finished; every page shows the new index");
       else
         toast.error("Indexing failed", {
-          action: { label: "See the log", onClick: () => window.location.assign("/settings/repositories") },
+          action: { label: "See the log", onClick: () => window.location.assign(j.id ? `/activity/${j.id}` : "/activity") },
         });
       qc.invalidateQueries({ predicate: (q) => q.queryKey[0] !== "index-job" });
     }
@@ -62,7 +62,7 @@ export function Activity() {
     return (
       <div className="flex items-center gap-2">
         <Pill>
-          <Link to="/settings/repositories" className="flex min-w-0 items-center gap-2" title={step ? `Indexing: ${step}` : "Indexing"}>
+          <Link to={j.id ? `/activity/${j.id}` : "/activity"} className="flex min-w-0 items-center gap-2" title={step ? `Indexing: ${step}` : "Indexing"}>
             <Loader2 className="size-3.5 shrink-0 animate-spin text-brand" />
             <span className="font-medium">Indexing</span>
             <span className="hidden max-w-44 truncate text-muted-foreground 2xl:inline">{step}</span>

@@ -44,8 +44,8 @@ tracing-opentelemetry = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
 
 [features]
-default = ["otel"]
-# OTLP trace export when OTEL_EXPORTER_OTLP_ENDPOINT is set.
+default = []
+# OTLP trace export when OTEL_EXPORTER_OTLP_ENDPOINT is set; on in the container image and Linux release builds.
 otel = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp", "dep:tracing-opentelemetry", "dep:reqwest"]
 
 [dev-dependencies]

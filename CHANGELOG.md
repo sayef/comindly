@@ -50,8 +50,18 @@ All notable changes to this project are documented here. The format follows
 - An access line per request: method, path, status, time, request id and the member's email, never
   tokens or cookies. Health checks log it at debug; `COMINDLY_LOG_LEVEL` sets the level.
 - Traces over OTLP/HTTP when `OTEL_EXPORTER_OTLP_ENDPOINT` is set: a span per request and per indexing
-  job; `OTEL_SERVICE_NAME` names the service (`comindly` by default). Builds without it:
-  `--no-default-features`.
+  job; `OTEL_SERVICE_NAME` names the service (`comindly` by default). Built into the container image and
+  the Linux release binaries; a build from source needs `--features otel`, and a build without it says so
+  when the variable is set. An unreachable collector delays shutdown by at most 2 seconds.
+- **Activity** in the app: what comindly works on in the background. Tiles for what runs, waits,
+  succeeded and failed filter the list, which groups runs by day; each run opens as a timeline of its
+  steps with durations, results, warnings, errors, a live progress bar and LLM cost, with the plain log
+  to copy. The header's indexing pill and the failure toast open the run there.
+- `GET /api/v1/view` sends an `ETag` and answers `304 Not Modified` to a client that already has that
+  version. `comindly ui` against a server keeps the last view in your cache folder (readable only by you,
+  removed by `comindly logout`) and downloads it again only when it changed.
+- `comindly app` on Linux and Windows opens the app in your browser, locally or on a server, instead of
+  stopping with an error.
 - comindly is also published as `comindly-core` (the engine, including indexing as an async,
   cancellable pipeline that reports events), `comindly-server` and `comindly-ui`.
 
@@ -73,6 +83,21 @@ All notable changes to this project are documented here. The format follows
   checkpoint, LLM requests in flight included.
 - Admins named in `COMINDLY_ADMIN_EMAILS` cannot be demoted in the app.
 - Logs are written through `tracing`; readable and JSON lines keep their format and field names.
+- A new look for the app and the docs site, with one palette: ink and paper with the mark's teal and
+  lime, Geist throughout, a tinted pill for the current page, and the repository graph behind the
+  sign-in, approval and first-run pages. The docs site has a new landing page and a **Copy page**
+  button for every page's Markdown, and serves its fonts itself instead of loading them from Google.
+- The indexing log in Settings → Repositories is the same step timeline as Activity.
+- The terminal UI against a server knows your role: signed in as a viewer, it says read-only and
+  explains instead of sending reviews the server would refuse.
+- The tagline is "Your team's engineering memory for coding agents", in the README, the banners, the
+  social preview and the crate description.
+
+### Fixed
+
+- Errors in the indexing log are shown in red; they used a colour the theme did not define.
+- The social preview image and the app icon PNGs show the whole mark; ImageMagick's renderer dropped
+  most of it, so the asset script uses resvg when it is installed.
 
 ### Removed
 

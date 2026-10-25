@@ -1,0 +1,11 @@
+{% if page.cm_source %}
+  <button type="button" class="md-content__button cm-copy-page" data-cm-copy-page title="Copy this page as Markdown">
+    {% include ".icons/material/content-copy.svg" %}<span>Copy page</span>
+  </button>
+  <textarea hidden class="cm-source">{{ page.cm_source | e }}</textarea>
+{% endif %}
+{% if page.edit_url and "content.action.edit" in features %}
+  <a href="{{ page.edit_url }}" title="{{ lang.t('action.edit') }}" class="md-content__button md-icon" rel="edit">
+    {% include ".icons/" ~ (config.theme.icon.edit or "material/file-edit-outline") ~ ".svg" %}
+  </a>
+{% endif %}

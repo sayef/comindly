@@ -3,6 +3,7 @@ import { ArrowUpRight } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { type Direction, TreeView, useOrg } from "@/components/org-views";
+import { Backdrop } from "@/components/backdrop";
 import { RepoDot } from "@/components/symbol";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,6 +15,7 @@ import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { Outcome } from "@/components/notice";
 import { api, attention, isChallenged, type OrgMap } from "@/lib/api";
 import { useAccess } from "@/lib/me";
+import { cn } from "@/lib/utils";
 
 /** A per-browser preference, or `fallback` when storage is unavailable. */
 function remembered(key: string, fallback: string) {
@@ -177,10 +179,8 @@ export function OverviewPage() {
 
   if (o?.problem && server && !(admin && !teamName)) {
     return (
-      <div className="mx-auto flex max-w-xl flex-col items-center gap-4 py-16 text-center">
-        <img src="/logo.svg" alt="" className="size-12 dark:hidden" />
-        <img src="/logo-dark.svg" alt="" className="hidden size-12 dark:block" />
-        <h1 className="text-xl font-semibold">{teamName ? `You're in ${teamName}` : "Welcome to comindly"}</h1>
+      <Welcome>
+        <h1 className="text-2xl font-semibold tracking-[-0.03em]">{teamName ? `You're in ${teamName}` : "Welcome to comindly"}</h1>
         <p className="text-sm text-muted-foreground">
           {admin
             ? "Nothing is indexed yet. Add the team's repositories and index them; everyone signed in here then sees the same graph."
@@ -191,30 +191,26 @@ export function OverviewPage() {
             <Link to="/settings/repositories">Add repositories</Link>
           </Button>
         )}
-      </div>
+      </Welcome>
     );
   }
 
   if (o?.problem && server) {
     return (
-      <div className="mx-auto flex max-w-xl flex-col items-center gap-4 py-16 text-center">
-        <img src="/logo.svg" alt="" className="size-12 dark:hidden" />
-        <img src="/logo-dark.svg" alt="" className="hidden size-12 dark:block" />
-        <h1 className="text-xl font-semibold">Welcome to comindly</h1>
+      <Welcome>
+        <h1 className="text-2xl font-semibold tracking-[-0.03em]">Welcome to comindly</h1>
         <p className="text-sm text-muted-foreground">Name the team; then add its repositories and index them.</p>
         <div className="w-full max-w-sm">
           <CreateTeam at={o.root ?? undefined} />
         </div>
-      </div>
+      </Welcome>
     );
   }
 
   if (o?.problem && teamName && !switching) {
     return (
-      <div className="mx-auto flex max-w-xl flex-col items-center gap-4 py-16 text-center">
-        <img src="/logo.svg" alt="" className="size-12 dark:hidden" />
-        <img src="/logo-dark.svg" alt="" className="hidden size-12 dark:block" />
-        <h1 className="text-xl font-semibold">You're in {teamName}</h1>
+      <Welcome>
+        <h1 className="text-2xl font-semibold tracking-[-0.03em]">You're in {teamName}</h1>
         <p className="text-sm text-muted-foreground">
           Nothing is indexed yet. Add the team's repositories and index them; everyone in {teamName} then sees the same graph.
         </p>
@@ -229,16 +225,14 @@ export function OverviewPage() {
         <button className="text-xs text-muted-foreground underline underline-offset-2" onClick={() => setSwitching(true)}>
           Join or create a different team
         </button>
-      </div>
+      </Welcome>
     );
   }
 
   if (o?.problem) {
     return (
-      <div className="mx-auto flex max-w-3xl flex-col items-center gap-4 py-16 text-center">
-        <img src="/logo.svg" alt="" className="size-12 dark:hidden" />
-        <img src="/logo-dark.svg" alt="" className="hidden size-12 dark:block" />
-        <h1 className="text-xl font-semibold">Welcome to comindly</h1>
+      <Welcome wide>
+        <h1 className="text-2xl font-semibold tracking-[-0.03em]">Welcome to comindly</h1>
         <p className="text-sm text-muted-foreground">Join your team, start one, or index just for yourself.</p>
         <div className="grid w-full gap-3 sm:grid-cols-2">
           <JoinTeam />
@@ -262,7 +256,7 @@ export function OverviewPage() {
           </p>
           <pre className="mt-1 whitespace-pre-wrap [overflow-wrap:anywhere]">{o.problem}</pre>
         </details>
-      </div>
+      </Welcome>
     );
   }
 
@@ -273,7 +267,7 @@ export function OverviewPage() {
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-[26px] font-semibold tracking-[-0.02em]">Overview</h1>
+          <h1 className="text-[28px] font-semibold tracking-[-0.035em]">Overview</h1>
           <p className="mt-1.5 text-sm text-muted-foreground">
             How the team's repositories depend on each other, in code and through service contracts.
           </p>
@@ -524,6 +518,20 @@ export function OverviewPage() {
             )}
           </CardContent>
         </Card>
+      </div>
+    </div>
+  );
+}
+
+/** A first visit: the logo over the repository graph, which spans the whole main area, then what to do. */
+function Welcome({ wide, children }: { wide?: boolean; children: React.ReactNode }) {
+  return (
+    <div className="flex min-h-[calc(100vh-60px-3.5rem)] items-center">
+      <Backdrop />
+      <div className={cn("relative mx-auto flex flex-col items-center gap-4 py-16 text-center", wide ? "max-w-3xl" : "max-w-xl")}>
+        <img src="/logo.svg" alt="" className="size-12 dark:hidden" />
+        <img src="/logo-dark.svg" alt="" className="hidden size-12 dark:block" />
+        {children}
       </div>
     </div>
   );
