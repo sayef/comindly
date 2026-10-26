@@ -6,6 +6,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- A mint accent on neutral greys replaces teal and lime in the web app, the docs and the logo.
+
+### Fixed
+
+- A server's memory no longer grows with each index job. Jobs run in a child process again, as in
+  0.3, which gets its keys on stdin and stops when the server does; one LanceDB cache (320 MB at most,
+  down from 7 GB per connection) and one embedding model are shared by every reader.
+- A job killed for running out of memory says so instead of failing without a reason.
+- The ledger's Needs review tab lists only the records that need review, matching its count.
+- The ledger history reads in the past tense: Confirmed, Archived, Invalidated.
+- Setup checks show commands as code, and the access page shows dates as YYYY-MM-DD.
+
 ## [0.4.0-beta.1](https://github.com/sayef/comindly/compare/v0.3.4...v0.4.0-beta.1) - 2026-10-25
 
 ### Added

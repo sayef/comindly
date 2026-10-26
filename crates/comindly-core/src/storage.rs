@@ -7,9 +7,23 @@ use anyhow::{Context, Result};
 use object_store::path::Path as ObjPath;
 use object_store::ObjectStore;
 
-/// A LanceDB connection builder for `uri`.
+/// A LanceDB connection builder for `uri`, on the process's one session.
 pub fn connect(uri: &str) -> lancedb::connection::ConnectBuilder {
-    lancedb::connect(uri)
+    lancedb::connect(uri).session(session())
+}
+
+/// Caches and object stores shared by every connection, bounded instead of Lance's 7 GB default.
+fn session() -> Arc<lancedb::Session> {
+    static SESSION: std::sync::OnceLock<Arc<lancedb::Session>> = std::sync::OnceLock::new();
+    SESSION
+        .get_or_init(|| {
+            Arc::new(lancedb::Session::new(
+                256 << 20,
+                64 << 20,
+                Arc::new(lancedb::ObjectStoreRegistry::default()),
+            ))
+        })
+        .clone()
 }
 
 /// The object store and path for a remote `uri`, with the same credentials LanceDB uses.

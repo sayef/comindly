@@ -34,6 +34,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// One index job for a server, read from stdin
+    #[command(name = "index-job", hide = true)]
+    IndexJob,
     /// Index a single repo into the default index dir (searchable by default)
     Index {
         /// Repository path
@@ -533,6 +536,13 @@ fn main() -> ExitCode {
         }
     }
     match cli.cmd {
+        Cmd::IndexJob => match comindly::indexer::child() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("index job: {e:#}");
+                ExitCode::FAILURE
+            }
+        },
         Cmd::Index {
             repo,
             index_dir,

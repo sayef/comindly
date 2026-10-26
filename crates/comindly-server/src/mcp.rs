@@ -47,7 +47,7 @@ pub struct ComindlyServer {
     /// Symbols by rendered id — used by `search` to look up candidate metadata.
     symbols: Arc<HashMap<String, Symbol>>,
     /// Query embedder for `search`; `None` if the model could not be loaded (offline).
-    embedder: Arc<Option<Embedder>>,
+    embedder: Option<Arc<Embedder>>,
     uri: Arc<String>,
     /// The index's tables, held open so LanceDB caches their metadata and indexes.
     tables: Arc<crate::index::Tables>,
@@ -614,7 +614,7 @@ impl ComindlyServer {
     )]
     async fn search(&self, Parameters(p): Parameters<SearchParam>) -> CallToolResult {
         let limit = p.limit.unwrap_or(12) as usize;
-        let Some(embedder) = self.embedder.as_ref() else {
+        let Some(embedder) = self.embedder.as_deref() else {
             let dto = SearchDto {
                 query: p.query.clone(),
                 results: vec![],
@@ -1521,7 +1521,7 @@ pub async fn load(uri: &str, markdown: bool, fresh: std::time::Duration) -> Resu
 
     // The embedder powers `search`; graph tools work without it, so a load failure is non-fatal.
     let model = crate::config::index_settings(root).await.embed_model;
-    let embedder = match tokio::task::spawn_blocking(move || crate::embed::Embedder::load(&model))
+    let embedder = match tokio::task::spawn_blocking(move || crate::embed::Embedder::shared(&model))
         .await
         .map_err(anyhow::Error::from)
         .and_then(|r| r)
@@ -1541,7 +1541,7 @@ pub async fn load(uri: &str, markdown: bool, fresh: std::time::Duration) -> Resu
         style_guide: Arc::new(style_guide),
         flows: Arc::new(flows),
         symbols: Arc::new(by_id),
-        embedder: Arc::new(embedder),
+        embedder,
         uri: Arc::new(uri.to_string()),
         tables: Arc::new(crate::index::Tables::connect(uri, fresh).await?),
         records: Arc::new(tokio::sync::Mutex::new(None)),

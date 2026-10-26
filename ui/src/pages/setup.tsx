@@ -228,7 +228,11 @@ function Health({ s, server }: { s: Setup | undefined; server: boolean }) {
       ) : (
         <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-warning" />
       )}
-      <span className={cn("min-w-0 text-[13px] [overflow-wrap:anywhere]", !c.ok && "text-muted-foreground")}>{sentence(c.message)}</span>
+      <span className={cn("min-w-0 text-[13px] [overflow-wrap:anywhere]", !c.ok && "text-muted-foreground")}>
+        {sentence(c.message)
+          .split("`")
+          .map((part, i) => (i % 2 ? <code key={i} className="font-mono text-[12px] text-foreground">{part}</code> : part))}
+      </span>
     </li>
   );
   return (

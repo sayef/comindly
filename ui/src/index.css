@@ -21,7 +21,6 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-brand: var(--brand);
   --color-brand-foreground: var(--brand-foreground);
-  --color-lime: var(--lime);
   --color-warning: var(--warning);
   --color-danger: var(--danger);
   --color-border: var(--border);
@@ -36,58 +35,56 @@
   --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-/* Ink and paper, teal as the one accent, the mark's lime for highlights; as on the docs site. */
+/* Neutral ink and paper, mint as the one accent, pale mint for highlights; as on the docs site. */
 :root {
   --radius: 0.6rem;
   --background: #ffffff;
-  --foreground: #0b110e;
+  --foreground: #171717;
   --card: #ffffff;
-  --card-foreground: #0b110e;
+  --card-foreground: #171717;
   --popover: #ffffff;
-  --popover-foreground: #0b110e;
-  --primary: #0b110e;
+  --popover-foreground: #171717;
+  --primary: #171717;
   --primary-foreground: #ffffff;
-  --secondary: #f2f5f3;
-  --secondary-foreground: #0b110e;
-  --muted: #f2f5f3;
-  --muted-foreground: #5b6560;
-  --accent: #e8f6f3;
-  --accent-foreground: #0f766e;
-  --brand: #0f766e;
+  --secondary: #f3f3f4;
+  --secondary-foreground: #171717;
+  --muted: #f3f3f4;
+  --muted-foreground: #646466;
+  --accent: #e7f5f0;
+  --accent-foreground: #0f604a;
+  --brand: #13795b;
   --brand-foreground: #ffffff;
-  --lime: #4d9a12;
   --warning: #a8650c;
-  --danger: #c2410c;
-  --border: #e6eae8;
-  --input: #d3dad6;
-  --ring: #0f766e;
-  --sidebar: #f7f9f8;
+  --danger: #be123c;
+  --border: #e5e5e7;
+  --input: #d4d4d8;
+  --ring: #13795b;
+  --sidebar: #f8f8f9;
 }
 
 .dark {
-  --background: #0b110e;
-  --foreground: #eef2ef;
-  --card: #101814;
-  --card-foreground: #eef2ef;
-  --popover: #121a16;
-  --popover-foreground: #eef2ef;
-  --primary: #eef2ef;
-  --primary-foreground: #0b110e;
-  --secondary: #151e19;
-  --secondary-foreground: #eef2ef;
-  --muted: #151e19;
-  --muted-foreground: #949d98;
-  --accent: #10292a;
-  --accent-foreground: #5eead4;
-  --brand: #2dd4bf;
-  --brand-foreground: #04120f;
-  --lime: #a3e635;
+  --background: #0e0e0f;
+  --foreground: #ededed;
+  --card: #151517;
+  --card-foreground: #ededed;
+  --popover: #19191b;
+  --popover-foreground: #ededed;
+  --primary: #ededed;
+  --primary-foreground: #0e0e0f;
+  --secondary: #1d1d20;
+  --secondary-foreground: #ededed;
+  --muted: #1d1d20;
+  --muted-foreground: #9a9a9c;
+  --accent: #142721;
+  --accent-foreground: #a8ebd7;
+  --brand: #8be3c9;
+  --brand-foreground: #04201a;
   --warning: #f5c46b;
-  --danger: #f08a7a;
-  --border: #1e2723;
-  --input: #2b3631;
-  --ring: #2dd4bf;
-  --sidebar: #080d0b;
+  --danger: #fb7185;
+  --border: #252528;
+  --input: #333337;
+  --ring: #8be3c9;
+  --sidebar: #0a0a0b;
 }
 
 /* Small uppercase mono labels: section names, table heads, stat captions. */
