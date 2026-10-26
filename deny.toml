@@ -11,6 +11,10 @@ ignore = [
     # responses from the object store the user configures. Drop once lancedb moves to object_store 0.14.
     { id = "RUSTSEC-2026-0194", reason = "quick-xml via object_store 0.13 (lancedb pin); trusted storage only" },
     { id = "RUSTSEC-2026-0195", reason = "quick-xml via object_store 0.13 (lancedb pin); trusted storage only" },
+    # zstd 0.13 is pinned by arrow 58 and lance 10; it only decompresses index files from trusted storage.
+    { id = "RUSTSEC-2026-0391", reason = "zstd 0.13 via arrow/lance (lancedb pin); trusted storage only" },
+    { id = "RUSTSEC-2026-0398", reason = "zstd-safe 7 via arrow/lance; the seekable feature is not built" },
+    { id = "RUSTSEC-2026-0403", reason = "zstd-safe 7 via arrow/lance (lancedb pin); trusted storage only" },
     # rsa (no fixed release) signs Google and Azure credential requests on this machine; the timing
     # attack needs an attacker measuring many decryptions, which never happen here.
     { id = "RUSTSEC-2023-0071", reason = "rsa via gcs/azure credential signing only; no decryption oracle" },
