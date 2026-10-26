@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0-beta.2](https://github.com/sayef/comindly/compare/v0.4.0-beta.1...v0.4.0-beta.2) - 2026-10-26
+
 ### Changed
 
 - A mint accent on neutral greys replaces teal and lime in the web app, the docs and the logo.
