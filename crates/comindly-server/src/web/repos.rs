@@ -305,61 +305,45 @@ pub(super) async fn begin(
                     .root
                     .clone()
                     .context("read-only UI")?;
-                let repos = app.repos();
                 let team = crate::team::load(&root)
                     .await
                     .map(|t| t.settings)
                     .unwrap_or_default();
-                let mut settings = crate::context::Settings::resolve(&team, crate::config::env);
-                if !llm {
-                    settings.enrich = false;
-                    settings.flows = false;
-                    settings.guide = false;
-                }
-                let client = if settings.enrich || settings.flows || settings.guide {
-                    let key =
-                        crate::credentials::llm_key(team.name.as_deref(), app.server.as_deref()).0;
-                    crate::llm::LlmClient::new(
-                        settings.llm_base_url.as_deref(),
-                        &settings.llm_model,
-                        key.as_deref(),
-                    )
-                    .ok()
-                } else {
-                    None
+                let llm_key = llm
+                    .then(|| {
+                        crate::credentials::llm_key(team.name.as_deref(), app.server.as_deref()).0
+                    })
+                    .flatten();
+                let git = app
+                    .server
+                    .as_ref()
+                    .map(|s| {
+                        s.secrets
+                            .secret_names()
+                            .into_iter()
+                            .filter_map(|n| {
+                                let host = n.strip_prefix("git:")?.to_string();
+                                Some((host, s.secrets.secret(&n)?))
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let spec = crate::indexer::Spec {
+                    root: root.clone(),
+                    repos: app.repos(),
+                    llm,
+                    llm_key,
+                    git,
                 };
-                let scip = settings.scip;
-                let creds = crate::config::git_credentials(app.server.clone());
-                let mut ctx = crate::context::IndexContext::new(
-                    root.clone(),
-                    settings,
-                    job.clone(),
-                    crate::config::cache_dir(),
-                )
-                .with_llm(client)
-                .with_git(creds);
-                ctx.cancel = job.cancel.clone();
-                let run = async {
-                    let sources =
-                        crate::pipeline::checkout(&ctx, &crate::config::expanded(&repos)).await?;
-                    crate::pipeline::link(&ctx, sources, true, scip).await
-                };
-                match run.await {
-                    Ok(_) => {
-                        if let Err(e) = app.reload(&root).await {
-                            ctx.report.error(format!("reload failed: {e:#}"));
-                        }
-                        Ok(())
-                    }
-                    Err(e) if e.is::<crate::context::Cancelled>() => {
-                        ctx.report.warn("Cancelled; what was already saved stays.");
-                        Err(e)
-                    }
-                    Err(e) => {
-                        ctx.report.error(crate::storage::explain(&format!("{e:#}")));
-                        Err(e)
-                    }
+                crate::indexer::run(&spec, job.clone()).await?;
+                if let Err(e) = app.reload(&root).await {
+                    job.emit(Event::new(
+                        Level::Error,
+                        Kind::Error,
+                        format!("reload failed: {e:#}"),
+                    ));
                 }
+                Ok(())
             })
         })
 }

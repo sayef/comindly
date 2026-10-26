@@ -9,7 +9,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api, attention, when } from "@/lib/api";
 
-
 export function LedgerPage() {
   const ledger = useQuery({ queryKey: ["ledger"], queryFn: api.ledger });
   const overview = useQuery({ queryKey: ["overview"], queryFn: api.overview });
@@ -21,7 +20,7 @@ export function LedgerPage() {
     const all = (ledger.data ?? []).filter((e) => !needle || JSON.stringify(e.record).toLowerCase().includes(needle));
     return view === "timeline"
       ? all.slice().sort((a, b) => when(b).localeCompare(when(a)))
-      : all.slice().sort((a, b) => attention(a) - attention(b) || b.record.created.localeCompare(a.record.created));
+      : all.filter((e) => attention(e) < 3).sort((a, b) => attention(a) - attention(b) || b.record.created.localeCompare(a.record.created));
   }, [ledger.data, view, q]);
   const pending = (ledger.data ?? []).filter((e) => attention(e) < 3).length;
 
@@ -67,7 +66,7 @@ export function LedgerPage() {
               <code className="font-mono">comindly remember</code>; agents add them through MCP.
             </>
           ) : (
-            "No records match."
+            view === "review" && !q ? "Nothing needs review." : "No records match."
           )}
         </div>
       )}

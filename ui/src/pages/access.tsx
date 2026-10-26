@@ -13,7 +13,7 @@ import { Section } from "@/pages/settings";
 import { Code } from "@/pages/setup";
 
 const select = "h-9 rounded-md border bg-card px-2 text-sm";
-const day = (t?: string | null) => (t ? new Date(t).toLocaleDateString() : "—");
+const day = (t?: string | null) => (t ? t.slice(0, 10) : "—");
 
 export function MembersPage() {
   const qc = useQueryClient();

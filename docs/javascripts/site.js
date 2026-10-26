@@ -32,7 +32,7 @@ function graph(canvas) {
   const REPOS = ["storefront", "orders", "payments", "catalog", "shipping"];
   const LINKS = [[0, 1], [0, 2], [1, 3], [2, 4], [3, 4], [0, 4], [1, 4]];
   const STEP = 420, HOLD = 1100, FADE = 1500, DEPTH = 5;
-  const LIME = [163, 230, 53], TEAL = [45, 212, 191];
+  const PALE = [194, 241, 227], MINT = [139, 227, 201];
   const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const ctx = canvas.getContext("2d");
   let W = 0, H = 0, nodes = [], edges = [], adj = [], centers = [], ripples = [];
@@ -155,7 +155,7 @@ function graph(canvas) {
     for (const e of edges) {
       const [ax, ay, cx, cy, bx, by] = bend(e, t);
       ctx.setLineDash(e.contract ? [3, 6] : []);
-      ctx.strokeStyle = e.contract ? "rgba(45,212,191,0.18)" : "rgba(243,246,242,0.09)";
+      ctx.strokeStyle = e.contract ? "rgba(139,227,201,0.18)" : "rgba(242,242,242,0.09)";
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(ax, ay);
@@ -173,7 +173,7 @@ function graph(canvas) {
         if (p <= 0) continue;
         const a = fade(t, start + STEP);
         if (a <= 0) continue;
-        const rgb = mix(LIME, TEAL, s.d / (DEPTH - 1));
+        const rgb = mix(PALE, MINT, s.d / (DEPTH - 1));
         trace(bend(edges[s.edge], t), edges[s.edge].a !== s.from, p);
         ctx.strokeStyle = `rgba(${rgb},${0.18 * a})`;
         ctx.lineWidth = 4;
@@ -191,7 +191,7 @@ function graph(canvas) {
       const [x, y] = at(i, t);
       const g = glow.get(i) ?? 0;
       const base = 0.3 + 0.14 * Math.sin(t * 0.0009 + n.phase);
-      ctx.fillStyle = g ? `rgba(${mix(TEAL, LIME, g)},${Math.max(base, g)})` : `rgba(243,246,242,${base})`;
+      ctx.fillStyle = g ? `rgba(${mix(MINT, PALE, g)},${Math.max(base, g)})` : `rgba(242,242,242,${base})`;
       ctx.beginPath();
       ctx.arc(x, y, n.size + g * 1.6, 0, Math.PI * 2);
       ctx.fill();
@@ -201,7 +201,7 @@ function graph(canvas) {
       const age = t - r.t0;
       if (age < 0 || age > 1600) continue;
       const [x, y] = at(r.origin, t);
-      ctx.strokeStyle = `rgba(163,230,53,${0.6 * (1 - age / 1600)})`;
+      ctx.strokeStyle = `rgba(194,241,227,${0.6 * (1 - age / 1600)})`;
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.arc(x, y, 4 + age / 40, 0, Math.PI * 2);
@@ -210,7 +210,7 @@ function graph(canvas) {
 
     ctx.font = '500 10px "Geist Mono", ui-monospace, monospace';
     ctx.textAlign = "center";
-    ctx.fillStyle = "rgba(243,246,242,0.32)";
+    ctx.fillStyle = "rgba(242,242,242,0.32)";
     if (W > 760) centers.forEach(([x, y], i) => ctx.fillText(REPOS[i].toUpperCase().split("").join(" "), x, y + H * 0.12 + 22));
   }
 

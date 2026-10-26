@@ -10,6 +10,7 @@ pub mod cache;
 pub mod config;
 pub mod credentials;
 pub mod doctor;
+pub mod indexer;
 pub mod jobs;
 pub mod mcp;
 pub mod server;

@@ -25,10 +25,10 @@ def instance(name, weight):
 BOLD = instance("SpaceGrotesk.ttf", 700)
 MEDIUM = instance("Geist.ttf", 500)
 
-INK, PAPER = "#0E1512", "#F3F6F2"
+INK, PAPER = "#131315", "#F2F2F2"
 THEMES = {
-    "light": {"text": INK, "tagline": "#55605A", "petals": ("#0D9488", "#4D9A12"), "back": PAPER},
-    "dark": {"text": PAPER, "tagline": "#A3ADA6", "petals": ("#2DD4BF", "#A3E635"), "back": INK},
+    "light": {"text": INK, "tagline": "#646466", "petals": ("#0F604A", "#1F9A74"), "back": PAPER},
+    "dark": {"text": PAPER, "tagline": "#9A9A9C", "petals": ("#6FDBB9", "#C2F1E3"), "back": INK},
 }
 TAGLINE = "Your team’s engineering memory for coding agents"
 
@@ -122,8 +122,8 @@ if __name__ == "__main__":
     points, points_w = text_path(MEDIUM, "call graph · service contracts · team ledger · MCP · your own storage", 0, 0, 25)
     social = f"""<rect width="1280" height="640" fill="{INK}"/>
 <g transform="translate({(1280 - w) / 2:.1f} 190)">{body}</g>
-<g transform="translate({(1280 - tag_w) / 2:.1f} 420)"><path d="{tag}" fill="#A3ADA6"/></g>
-<g transform="translate({(1280 - points_w) / 2:.1f} 478)"><path d="{points}" fill="#4ADE80"/></g>"""
+<g transform="translate({(1280 - tag_w) / 2:.1f} 420)"><path d="{tag}" fill="#9A9A9C"/></g>
+<g transform="translate({(1280 - points_w) / 2:.1f} 478)"><path d="{points}" fill="#8BE3C9"/></g>"""
     (OUT / "social-preview.svg").write_text(svg(1280, 640, social, "comindly"))
 
     # PNGs for places that take no SVG (GitHub social preview, app bundles); ImageMagick's own renderer drops the mark, so resvg first.

@@ -9,6 +9,8 @@
 //! search) — never the sole retrieval path.
 
 use crate::model::Symbol;
+use std::sync::{Arc, Mutex};
+
 use anyhow::{Context, Result};
 use model2vec_rs::model::StaticModel;
 
@@ -27,6 +29,18 @@ impl Embedder {
         let model = StaticModel::from_pretrained(repo_or_path, None, Some(true), None)
             .with_context(|| format!("load Model2Vec model `{repo_or_path}`"))?;
         Ok(Self { model })
+    }
+
+    /// The model loaded once and shared by every reader in this process.
+    pub fn shared(repo_or_path: &str) -> Result<Arc<Self>> {
+        static LOADED: Mutex<Option<(String, Arc<Embedder>)>> = Mutex::new(None);
+        let mut loaded = LOADED.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((_, e)) = loaded.as_ref().filter(|(n, _)| n == repo_or_path) {
+            return Ok(e.clone());
+        }
+        let e = Arc::new(Self::load(repo_or_path)?);
+        *loaded = Some((repo_or_path.to_string(), e.clone()));
+        Ok(e)
     }
 
     /// Embed a batch of documents.

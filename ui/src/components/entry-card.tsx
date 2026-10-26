@@ -10,6 +10,8 @@ import { useAccess } from "@/lib/me";
 import { api, type Entry, isChallenged, type ReviewAction, when } from "@/lib/api";
 import { cn, sentence } from "@/lib/utils";
 
+const DONE: Record<string, string> = { confirm: "Confirmed", archive: "Archived", invalidate: "Invalidated", dispute: "Disputed", supersede: "Superseded", retract: "Retracted" };
+
 const STATUS: Record<string, "brand" | "warning" | "danger" | "outline"> = {
   active: "brand",
   moved: "brand",
@@ -127,7 +129,7 @@ export function EntryCard({ entry, writable, compact = false }: { entry: Entry; 
         <ol className="mt-3 flex flex-col gap-1 border-l pl-3 text-xs text-muted-foreground">
           {entry.history.map((h) => (
             <li key={h.id} className={cn(!h.counted && "italic")}>
-              <span className="font-medium text-foreground">{h.action}</span> by {h.who} · {h.at.slice(0, 10)}
+              <span className="font-medium text-foreground">{DONE[h.action] ?? h.action}</span> by {h.who} · {h.at.slice(0, 10)}
               {h.reason && <span>: {h.reason}</span>}
               {!h.counted && <span> (waiting for a person)</span>}
             </li>

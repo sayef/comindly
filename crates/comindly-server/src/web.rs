@@ -51,7 +51,7 @@ struct Extras {
 }
 
 struct Search {
-    embedder: crate::embed::Embedder,
+    embedder: Arc<crate::embed::Embedder>,
     by_id: HashMap<String, crate::model::Symbol>,
 }
 
@@ -88,7 +88,7 @@ impl Session {
                     None => crate::embed::DEFAULT_MODEL.to_string(),
                 };
                 let embedder =
-                    tokio::task::spawn_blocking(move || crate::embed::Embedder::load(&model))
+                    tokio::task::spawn_blocking(move || crate::embed::Embedder::shared(&model))
                         .await
                         .ok()?
                         .ok()?;
