@@ -30,6 +30,7 @@ pub struct Settings {
     pub format: String,
     pub scip: crate::scip::Mode,
     pub auto_index: bool,
+    pub auto_index_llm: bool,
 }
 
 impl Settings {
@@ -72,6 +73,7 @@ impl Settings {
                 .and_then(|s| crate::scip::Mode::parse(&s))
                 .unwrap_or(crate::scip::Mode::Auto),
             auto_index: team.auto_index.unwrap_or(false),
+            auto_index_llm: team.auto_index_llm.unwrap_or(false),
         }
     }
 }

@@ -163,7 +163,7 @@ docker run -d --name comindly -p 127.0.0.1:7878:7878 \
   ghcr.io/sayef/comindly:latest
 ```
 
-Pin a version tag (`ghcr.io/sayef/comindly:0.4.0-beta.2`) for anything you rely on. Generate the two
+Pin a version tag (`ghcr.io/sayef/comindly:0.4.0-beta.3`) for anything you rely on. Generate the two
 secrets once, for example with `openssl rand -base64 32`, and keep them in your secret store.
 
 ### Kubernetes
@@ -181,7 +181,7 @@ spec:
       serviceAccountName: comindly   # its cloud role reads the bucket
       containers:
         - name: comindly
-          image: ghcr.io/sayef/comindly:0.4.0-beta.2
+          image: ghcr.io/sayef/comindly:0.4.0-beta.3
           ports: [{ containerPort: 7878 }]
           env:
             - { name: COMINDLY_PUBLIC_URL, value: https://comindly.example.com }

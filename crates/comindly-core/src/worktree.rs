@@ -187,6 +187,22 @@ pub fn remote_default(repo: &Path, creds: &dyn Credentials) -> Result<(String, S
         &["ls-remote", "--symref", "origin", "HEAD"],
         auth.as_ref(),
     )?;
+    let (branch, commit) = parse_head(&out)?;
+    let _ = git(repo, &["remote", "set-head", "origin", &branch]);
+    Ok((branch, commit))
+}
+
+/// The default branch and its commit of the repository at `url`, without a local clone.
+pub fn remote_head(url: &str, creds: &dyn Credentials) -> Result<(String, String)> {
+    let out = git_auth(
+        &std::env::temp_dir(),
+        &["ls-remote", "--symref", url, "HEAD"],
+        auth_for(url, creds).as_ref(),
+    )?;
+    parse_head(&out)
+}
+
+fn parse_head(out: &str) -> Result<(String, String)> {
     let branch = out
         .lines()
         .find_map(|l| l.strip_prefix("ref: refs/heads/"))
@@ -199,7 +215,6 @@ pub fn remote_default(repo: &Path, creds: &dyn Credentials) -> Result<(String, S
         .and_then(|l| l.split_whitespace().next())
         .context("the remote's default branch has no commit")?
         .to_string();
-    let _ = git(repo, &["remote", "set-head", "origin", &branch]);
     Ok((branch, commit))
 }
 
@@ -480,6 +495,11 @@ mod tests {
         ensure_clone(&url, &mine, &NoCredentials).unwrap();
         ensure_clone(&url, &mine, &NoCredentials).unwrap();
         let (branch, commit) = remote_default(&mine, &NoCredentials).unwrap();
+        assert_eq!(
+            remote_head(&url, &NoCredentials).unwrap(),
+            (branch.clone(), commit.clone()),
+            "the same answer without a clone"
+        );
         assert_eq!(branch, "trunk");
         let c = prepare(&base.join("cache"), &mine, &NoCredentials).unwrap();
         assert_eq!(c.target, "origin/trunk");

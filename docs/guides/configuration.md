@@ -62,7 +62,7 @@ comindly team set llm_base_url=                  # an empty value removes a sett
 
 Keys: `name`, `llm_model`, `llm_base_url`, `embed_model`, `embed`, `enrich`, `flows`, `guide`,
 `max_enrich`, `max_flows`, `llm_concurrency`, `llm_price_in`, `llm_price_out`, `format` (`md` or `json`),
-`scip` (`auto`, `require` or `off`) and `auto_index`. Where one is unset, comindly's default applies.
+`scip` (`auto`, `require` or `off`), `auto_index` and `auto_index_llm`. Where one is unset, comindly's default applies.
 See [Team setup](team-setup.md#team-settings).
 
 ## Environment

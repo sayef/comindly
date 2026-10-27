@@ -233,6 +233,9 @@ enum Cmd {
         /// Kind-specific field `key=value` (repeatable), e.g. outcome=reverted
         #[arg(long)]
         field: Vec<String>,
+        /// Code that shaped this, `path:START-END` from a local file (repeatable, up to 3)
+        #[arg(long)]
+        snippet: Vec<String>,
         #[arg(long = "index-dir")]
         index_dir: Option<String>,
     },
@@ -417,7 +420,7 @@ enum Cmd {
 
 #[derive(Subcommand)]
 enum TeamWhat {
-    /// Set team settings, KEY=VALUE: name, llm_model, llm_base_url, embed_model, embed, enrich, flows, guide, max_enrich, max_flows, llm_concurrency, llm_price_in, llm_price_out, format, scip, auto_index (empty removes)
+    /// Set team settings, KEY=VALUE: name, llm_model, llm_base_url, embed_model, embed, enrich, flows, guide, max_enrich, max_flows, llm_concurrency, llm_price_in, llm_price_out, format, scip, auto_index, auto_index_llm (empty removes)
     Set {
         #[arg(required = true, value_name = "KEY=VALUE")]
         pairs: Vec<String>,
@@ -520,8 +523,8 @@ enum ConfigAction {
 }
 
 fn main() -> ExitCode {
-    let _telemetry = comindly::telemetry::init();
     let matches = Cli::command().get_matches();
+    let _telemetry = comindly::telemetry::init(matches.subcommand_name() == Some("server"));
     // An older config.toml is imported once; a server keeps its settings in its database.
     if std::env::var_os("COMINDLY_PUBLIC_URL").is_none() {
         comindly::config::adopt_file();
@@ -682,6 +685,7 @@ fn main() -> ExitCode {
             trigger,
             evidence,
             field,
+            snippet,
             index_dir,
         } => cmd_remember(
             &kind,
@@ -691,6 +695,7 @@ fn main() -> ExitCode {
             trigger,
             evidence,
             &field,
+            &snippet,
             index_dir.as_deref(),
         ),
         Cmd::Why { focus, index_dir } => cmd_why(&focus, index_dir.as_deref()),
@@ -1257,6 +1262,35 @@ fn human() -> comindly::ledger::Provenance {
     comindly::ledger::Provenance::human("cli", &comindly::config::local_identity())
 }
 
+/// `path:START-END` lines of local files, with the commit when the file is in a git checkout.
+fn read_snippets(specs: &[String]) -> anyhow::Result<Vec<comindly::ledger::Snippet>> {
+    use anyhow::Context;
+    specs
+        .iter()
+        .map(|spec| {
+            let (path, range) = spec
+                .rsplit_once(':')
+                .with_context(|| format!("snippet `{spec}`: use path:START-END"))?;
+            let (a, b) = range.split_once('-').unwrap_or((range, range));
+            let (a, b): (usize, usize) = (a.trim().parse()?, b.trim().parse()?);
+            anyhow::ensure!(
+                a >= 1 && b >= a,
+                "snippet `{spec}`: START-END counts from 1"
+            );
+            let text = std::fs::read_to_string(path).with_context(|| format!("read {path}"))?;
+            let code: Vec<&str> = text.lines().skip(a - 1).take(b - a + 1).collect();
+            let dir = Path::new(path)
+                .parent()
+                .filter(|d| !d.as_os_str().is_empty());
+            Ok(comindly::ledger::Snippet {
+                path: path.to_string(),
+                code: code.join("\n"),
+                commit: comindly::git::head_commit(dir.unwrap_or(Path::new("."))).ok(),
+            })
+        })
+        .collect()
+}
+
 #[allow(clippy::too_many_arguments)] // CLI dispatch: flags map 1:1 to clap args
 fn cmd_remember(
     kind: &str,
@@ -1266,11 +1300,19 @@ fn cmd_remember(
     trigger: Option<String>,
     evidence: Vec<String>,
     fields: &[String],
+    snippets: &[String],
     from: Option<&str>,
 ) -> ExitCode {
     let Some(kind) = comindly::ledger::Kind::parse(kind) else {
         comindly::ui::err("kind must be decision, attempt, constraint, gotcha, intent or question");
         return ExitCode::FAILURE;
+    };
+    let snippets = match read_snippets(snippets) {
+        Ok(s) => s,
+        Err(e) => {
+            comindly::ui::err(&format!("{e:#}"));
+            return ExitCode::FAILURE;
+        }
     };
     let cfg = comindly::config::Config::load();
     let (symbols, edges) = match comindly::index::read_graph_blocking(&cfg.graph_dir(from)) {
@@ -1285,10 +1327,12 @@ fn cmd_remember(
     };
     let g = comindly::graph::CodeGraph::build(&symbols, &edges);
     let by_id: HashMap<String, &Symbol> = symbols.iter().map(|s| (s.id.render(), s)).collect();
+    let commits =
+        comindly::index::read_repo_commits_blocking(&cfg.graph_dir(from)).unwrap_or_default();
     let mut anchors = Vec::new();
     for focus in on {
         match g.lookup(focus).and_then(|i| by_id.get(&g.node(i).id)) {
-            Some(s) => anchors.push(comindly::ledger::Anchor::of(s)),
+            Some(s) => anchors.push(comindly::ledger::Anchor::of(s).at(&commits)),
             None => {
                 comindly::ui::err(&format!(
                     "no symbol matches `{focus}` (try `comindly find`)"
@@ -1297,10 +1341,18 @@ fn cmd_remember(
             }
         }
     }
+    let commit = anchors.first().and_then(|a| a.commit.clone());
     let mut rec = comindly::ledger::Record::new(kind, title, anchors, human());
     rec.body = body.to_string();
     rec.trigger = trigger;
     rec.evidence = evidence;
+    rec.snippets = snippets
+        .into_iter()
+        .map(|mut s| {
+            s.commit = s.commit.or_else(|| commit.clone());
+            s
+        })
+        .collect();
     for f in fields {
         if let Some((k, v)) = f.split_once('=') {
             rec.fields.insert(
@@ -1820,6 +1872,7 @@ fn team_run(what: Option<TeamWhat>, root: &str) -> anyhow::Result<()> {
                         s.scip = text
                     }
                     "auto_index" => s.auto_index = flag()?,
+                    "auto_index_llm" => s.auto_index_llm = flag()?,
                     other => anyhow::bail!("unknown team setting `{other}`"),
                 }
             }

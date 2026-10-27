@@ -1,8 +1,8 @@
 //! Terminal UI helpers — styled status lines, spinners, and progress bars; with
 //! `COMINDLY_LOG_FORMAT=json`, the same messages as one JSON event per line.
 //!
-//! Everything writes to **stderr** so `comindly serve`'s stdout stays pure JSON-RPC. Styling and
-//! animation degrade automatically when stderr is not a TTY (pipes, CI), keeping logs clean.
+//! Everything writes to **stderr** so `comindly serve`'s stdout stays pure JSON-RPC; a server's log
+//! lines go to stdout. Styling and animation degrade when stderr is not a TTY (pipes, CI).
 
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
@@ -58,7 +58,7 @@ impl Extra {
 }
 
 /// One log line as a `tracing` event, rendered by [`crate::telemetry`]; `line` is its readable
-/// form. Without a subscriber (tests, embedders) the line is written to stderr directly.
+/// form. Without a subscriber (tests, embedders) the line is written to the log stream directly.
 fn emit(level: Level, kind: &str, message: &str, x: Extra, line: impl FnOnce() -> String) {
     let line = (!json_logs()).then(line);
     let routed = tracing::dispatcher::get_default(|d| !d.is::<tracing::subscriber::NoSubscriber>());
@@ -79,7 +79,7 @@ fn emit(level: Level, kind: &str, message: &str, x: Extra, line: impl FnOnce() -
         opt(&mut f, "tokens_out", x.tokens_out.map(Into::into));
         opt(&mut f, "usd", x.usd.map(Into::into));
         opt(&mut f, "line", line.map(Into::into));
-        eprintln!("{}", crate::telemetry::render(level, f, json_logs()));
+        crate::telemetry::write(&crate::telemetry::render(level, f, json_logs()));
         return;
     }
     macro_rules! at {

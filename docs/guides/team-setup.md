@@ -64,10 +64,15 @@ second save is refused and asks to reload).
 | `llm_price_in`, `llm_price_out` | The model's price in USD per million input and output tokens, so indexing shows its cost | not set |
 | `format` | What agents get as text, `md` or `json`; every answer also carries the data as structured JSON | `md` |
 | `scip` | Compiler-grade resolution: `auto` uses SCIP indexes when present, `require` fails without them, `off` uses tree-sitter only | `auto` |
-| `auto_index` | Re-index when a listed repository's default branch moves on its remote (checked from the app or server, without LLM steps) | off |
+| `auto_index` | Re-index when a listed repository's default branch moves on its remote (checked from the app or server) | off |
+| `auto_index_llm` | Run the LLM steps on those automatic re-indexes too; only new or changed code is sent | off |
 
 Summaries, walkthroughs and style guides are kept and reused while their input is unchanged, and saved as
-they are written (summaries every 500), so an interrupted run continues where it stopped.
+they are written (summaries every 500), so an interrupted run continues where it stopped. Those of code
+that changed are written again, and those of code that is gone are dropped. A style guide is
+rewritten section by section, only where a measured ratio moved past the nearest ten percent or more
+than a fifth of the section's other evidence differs from what it was written from. A server that restarts
+without its clones does not re-index for that alone; it clones again only when a default branch moved.
 
 ### API keys
 

@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `auto_index_llm` runs summaries, style guides and walkthroughs on automatic re-indexes, for new or
+  changed code only.
+- Ledger records store the indexed commit of each anchor and up to three snippets of the code that
+  shaped them (`remember --snippet path:START-END`, MCP `snippets`).
+
+### Changed
+
+- `comindly server` logs to stdout.
+- A summary is written again only when its symbol's name, signature or path changed, not whenever
+  its file did.
+- Style guides are rewritten per section, and only when that section's evidence drifted.
+
+### Fixed
+
+- A server that restarted without its clones no longer re-indexes everything when nothing moved.
+- Style guides of repositories removed from the index are dropped.
+
 ## [0.4.0-beta.2](https://github.com/sayef/comindly/compare/v0.4.0-beta.1...v0.4.0-beta.2) - 2026-10-26
 
 ### Changed

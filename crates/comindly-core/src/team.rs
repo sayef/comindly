@@ -51,6 +51,9 @@ pub struct TeamSettings {
     /// Re-index when a listed repository's default branch moves on its remote.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_index: Option<bool>,
+    /// Also run the LLM steps on automatic re-indexes, for new or changed code only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_index_llm: Option<bool>,
     /// Clone URLs of the team's repositories, so everyone can get the same set.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub repos: Vec<String>,

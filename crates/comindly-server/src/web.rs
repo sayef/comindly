@@ -1406,6 +1406,12 @@ async fn remember(
         let root = s.data.root.as_deref().context("read-only UI")?;
         let kind = crate::ledger::Kind::parse(&b.kind).context("unknown kind")?;
         let g = &s.data.graph;
+        let commits = match graph_uri(&s) {
+            Some(u) => crate::index::read_repo_commits(&u)
+                .await
+                .unwrap_or_default(),
+            None => Default::default(),
+        };
         let mut anchors = Vec::new();
         for focus in &b.on {
             let id = g
@@ -1413,8 +1419,9 @@ async fn remember(
                 .map(|i| g.node(i).id)
                 .with_context(|| format!("no symbol matches `{focus}`"))?;
             let sym = s.data.symbols.iter().find(|x| x.id.render() == id);
-            anchors.push(crate::ledger::Anchor::of(sym.context("symbol not loaded")?));
+            anchors.push(crate::ledger::Anchor::of(sym.context("symbol not loaded")?).at(&commits));
         }
+        let commit = anchors.first().and_then(|a| a.commit.clone());
         let mut rec = Record::new(kind, &b.title, anchors, provenance(who.as_deref()));
         rec.body = b.body.trim().to_string();
         rec.trigger = b.trigger.filter(|t| !t.trim().is_empty());
@@ -1426,6 +1433,15 @@ async fn remember(
         for (k, v) in b.fields.into_iter().filter(|(_, v)| !v.trim().is_empty()) {
             rec.fields.insert(k, Value::String(v));
         }
+        rec.snippets = b
+            .snippets
+            .into_iter()
+            .filter(|s| !s.code.trim().is_empty())
+            .map(|mut s| {
+                s.commit = s.commit.or_else(|| commit.clone());
+                s
+            })
+            .collect();
         let ledger = crate::ledger::Ledger::open(root)?.signed_by(signer(who.as_deref()));
         ledger.put(&rec).await?;
         let records = ledger.all().await?;

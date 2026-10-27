@@ -69,6 +69,9 @@ pub struct RememberRequest {
     pub evidence: Vec<String>,
     #[serde(default)]
     pub fields: BTreeMap<String, String>,
+    /// Code that shaped the record, stored with the indexed commit.
+    #[serde(default)]
+    pub snippets: Vec<crate::ledger::Snippet>,
 }
 
 /// The new record's id.
