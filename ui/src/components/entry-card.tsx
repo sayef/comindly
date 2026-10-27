@@ -118,9 +118,19 @@ export function EntryCard({ entry, writable, compact = false }: { entry: Entry; 
           )}
         </dl>
       )}
+      {!compact &&
+        r.snippets?.map((sn, i) => (
+          <figure key={i} className="mt-3 min-w-0 text-xs">
+            <figcaption className="mb-1 font-mono text-muted-foreground">
+              {sn.path}
+              {sn.commit && ` @ ${sn.commit.slice(0, 10)}`}
+            </figcaption>
+            <pre className="overflow-x-auto rounded bg-muted p-2 font-mono text-[11px]">{sn.code}</pre>
+          </figure>
+        ))}
       <div className="mt-3 flex flex-wrap gap-1.5">
         {r.anchors.map((a) => (
-          <span key={a.symbol} className="max-w-full truncate rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]" title={`${a.path}:${a.line}`}>
+          <span key={a.symbol} className="max-w-full truncate rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]" title={`${a.path}:${a.line}${a.commit ? ` @ ${a.commit.slice(0, 10)}` : ""}`}>
             {a.repo}:{a.name}
           </span>
         ))}

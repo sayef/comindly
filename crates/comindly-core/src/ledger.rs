@@ -178,6 +178,9 @@ pub struct Anchor {
     pub line: u32,
     #[serde(default)]
     pub fingerprint: Option<Fingerprint>,
+    /// The indexed commit of the anchor's repository when the record was written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
 }
 
 impl Anchor {
@@ -189,9 +192,28 @@ impl Anchor {
             name: s.name.clone(),
             line: s.range.start.line,
             fingerprint: s.fingerprint,
+            commit: None,
         }
     }
+
+    /// With the commit `commits` (by repository) records for the anchor's repository.
+    pub fn at(mut self, commits: &std::collections::HashMap<String, String>) -> Anchor {
+        self.commit = commits.get(&self.repo).cloned();
+        self
+    }
 }
+
+/// Code that shaped a record, as it was at `commit`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Snippet {
+    pub path: String,
+    pub code: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
+}
+
+const MAX_SNIPPETS: usize = 3;
+const MAX_SNIPPET_LINES: usize = 60;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Record {
@@ -211,6 +233,8 @@ pub struct Record {
     /// `commit:<sha>`, `mr:!412`, `test:<path>::<name>`, `url:…`, or free text.
     #[serde(default)]
     pub evidence: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub snippets: Vec<Snippet>,
     #[serde(default)]
     pub relation: Option<Relation>,
     pub provenance: Provenance,
@@ -233,6 +257,7 @@ impl Record {
             fields: BTreeMap::new(),
             anchors,
             evidence: Vec::new(),
+            snippets: Vec::new(),
             relation: None,
             provenance,
             created: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
@@ -281,13 +306,15 @@ impl Record {
     /// All free text of a record, for content checks.
     fn text(&self) -> String {
         let fields: Vec<String> = self.fields.values().map(|v| v.to_string()).collect();
+        let code: Vec<&str> = self.snippets.iter().map(|s| s.code.as_str()).collect();
         format!(
-            "{} {} {} {} {}",
+            "{} {} {} {} {} {}",
             self.title,
             self.body,
             self.trigger.as_deref().unwrap_or(""),
             self.evidence.join(" "),
-            fields.join(" ")
+            fields.join(" "),
+            code.join(" ")
         )
     }
 
@@ -314,6 +341,17 @@ impl Record {
                 bail!("only constraints carry a check");
             }
             crate::checks::Rule::parse(rule)?;
+        }
+        if self.snippets.len() > MAX_SNIPPETS {
+            bail!("at most {MAX_SNIPPETS} snippets");
+        }
+        if self.snippets.iter().any(|s| {
+            s.path.trim().is_empty()
+                || s.code.trim().is_empty()
+                || s.code.lines().count() > MAX_SNIPPET_LINES
+                || s.code.chars().count() > 4000
+        }) {
+            bail!("a snippet needs a path and 1–{MAX_SNIPPET_LINES} lines of code (4000 characters at most)");
         }
         if self.kind == Kind::Attempt && self.evidence.is_empty() {
             bail!("an attempt needs evidence (a revert commit, failing test, error, MR, …)");
@@ -1005,9 +1043,25 @@ pub fn markdown(title: &str, entries: &[&Entry]) -> String {
         let at: Vec<String> = r
             .anchors
             .iter()
-            .map(|a| format!("`{}` ({}:{})", a.name, a.path, a.line))
+            .map(|a| {
+                format!(
+                    "`{}` ({}:{}{})",
+                    a.name,
+                    a.path,
+                    a.line,
+                    at_commit(&a.commit)
+                )
+            })
             .collect();
         o.push_str(&format!("- about: {}\n", at.join(", ")));
+        for s in &r.snippets {
+            o.push_str(&format!(
+                "- code then, {}{}:\n```\n{}\n```\n",
+                s.path,
+                at_commit(&s.commit),
+                s.code.trim_end()
+            ));
+        }
         o.push_str(&format!(
             "- by {} on {} · id `{}`\n",
             e.by,
@@ -1049,6 +1103,12 @@ pub fn markdown(title: &str, entries: &[&Entry]) -> String {
         }
     }
     o
+}
+
+fn at_commit(c: &Option<String>) -> String {
+    c.as_deref()
+        .map(|c| format!(" @ {}", c.get(..10).unwrap_or(c)))
+        .unwrap_or_default()
 }
 
 /// One compact line for embedding in other tool results.

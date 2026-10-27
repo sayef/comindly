@@ -616,12 +616,29 @@ async fn summaries(
     } else {
         HashMap::new()
     };
+    // A summary is written from the name, signature and path only, so it stays valid while they do.
+    let key = |s: &Symbol| {
+        fingerprint([
+            s.name.clone(),
+            s.signature.clone().unwrap_or_default(),
+            s.file_path.clone(),
+        ])
+    };
+    let stored_keys = read_keys(dst, "enrich_keys").await;
     let mut rows: Vec<TextRow> = Vec::new();
+    let mut keys: Vec<(String, String)> = Vec::new();
     let mut todo: Vec<&Symbol> = Vec::new();
     for s in &defs {
-        let rid = s.id.render();
-        match prior.get(&rid).filter(|_| !stale.contains(&rid)) {
-            Some((sum, q)) => rows.push((s.id.clone(), sum.clone(), q.clone())),
+        let (rid, k) = (s.id.render(), key(s));
+        let valid = match stored_keys.get(&rid) {
+            Some(old) => *old == k,
+            None => !stale.contains(&rid),
+        };
+        match prior.get(&rid).filter(|_| valid) {
+            Some((sum, q)) => {
+                rows.push((s.id.clone(), sum.clone(), q.clone()));
+                keys.push((rid, k));
+            }
             None => todo.push(s),
         }
     }
@@ -664,11 +681,15 @@ async fn summaries(
         for (s, e) in chunk.iter().zip(out.unwrap_or_else(|v| v)) {
             if let Some(e) = e {
                 rows.push((s.id.clone(), e.summary, e.queries));
+                keys.push((s.id.render(), key(s)));
                 generated += 1;
             }
         }
         if cancelled || chunk.len() == CHECKPOINT {
             crate::index::write_enrichment(dst, &rows)
+                .await
+                .context("saving summaries")?;
+            write_keys(dst, "enrich_keys", &keys)
                 .await
                 .context("saving summaries")?;
         }
@@ -681,6 +702,9 @@ async fn summaries(
     }
     let failed = todo.len().saturating_sub(generated);
     let v = crate::index::write_enrichment(dst, &rows)
+        .await
+        .context("write enrichment failed")?;
+    write_keys(dst, "enrich_keys", &keys)
         .await
         .context("write enrichment failed")?;
     r.done(format!(
@@ -727,7 +751,7 @@ fn usage(ctx: &IndexContext, llm: &crate::llm::LlmClient) -> Usage {
     Usage::priced(i, o, ctx.settings.prices)
 }
 
-/// A style guide per repository, reused while its input (the measured evidence) is unchanged.
+/// A style guide per repository; a section is written again only when its evidence drifted.
 async fn style_guides(
     ctx: &IndexContext,
     llm: &Arc<crate::llm::LlmClient>,
@@ -745,6 +769,21 @@ async fn style_guides(
         .await
         .unwrap_or_default();
     let mut keys: Vec<(String, String)> = stored_keys.clone().into_iter().collect();
+    let before = guides.len();
+    guides.retain(|(g, _)| roots.iter().any(|(r, _)| r == g));
+    keys.retain(|(g, _)| roots.iter().any(|(r, _)| r == g));
+    if guides.len() < before {
+        crate::index::write_style_guide(dst, &guides)
+            .await
+            .context("saving the style guide")?;
+        write_keys(dst, "guide_keys", &keys)
+            .await
+            .context("saving the style guide")?;
+        r.note(format!(
+            "{} style guide(s) of removed repositories dropped",
+            before - guides.len()
+        ));
+    }
     let mut reused = 0usize;
     let (syms, edgs, roots_owned) = (symbols.clone(), edges.clone(), roots.to_vec());
     let per_repo = blocking(move || {
@@ -775,6 +814,9 @@ async fn style_guides(
             .collect::<Vec<_>>()
     })
     .await?;
+    let mut bodies: HashMap<String, String> = read_keys(dst, "guide_sections").await;
+    let mut basis: HashMap<String, String> = read_keys(dst, "guide_basis").await;
+    let mut redone = 0usize;
     for (repo, sections) in per_repo {
         ctx.check()?;
         let key = fingerprint(
@@ -782,16 +824,41 @@ async fn style_guides(
                 .iter()
                 .map(|s| format!("{}\0{}\0{}", s.title, s.guidance, s.evidence)),
         );
-        if stored_keys.get(&repo) == Some(&key) && guides.iter().any(|(g, _)| *g == repo) {
+        let sid = |title: &str| format!("{repo}\0{title}");
+        let old_doc = guides
+            .iter()
+            .find(|(g, _)| *g == repo)
+            .map(|(_, d)| d.clone());
+        // Guides written before sections were stored: adopt the current one as the baseline.
+        if let Some(doc) = old_doc
+            .as_ref()
+            .filter(|_| stored_keys.get(&repo) == Some(&key))
+        {
+            for sec in &sections {
+                let id = sid(&sec.title);
+                if !bodies.contains_key(&id) {
+                    bodies.insert(id.clone(), guide_section_of(doc, &sec.title));
+                    basis.insert(id, guide_basis(sec));
+                }
+            }
             reused += 1;
             continue;
         }
-        let total = sections.len() as u64;
+        let todo: Vec<&crate::styleguide::Section> = sections
+            .iter()
+            .filter(|sec| {
+                let id = sid(&sec.title);
+                !(bodies.contains_key(&id)
+                    && basis
+                        .get(&id)
+                        .is_some_and(|b| guide_similar(b, &guide_basis(sec))))
+            })
+            .collect();
+        let total = todo.len() as u64;
         let mut done = 0u64;
-        let bodies = run_llm(
+        let out = run_llm(
             ctx,
-            sections
-                .iter()
+            todo.iter()
                 .map(|sec| {
                     (
                         sec.title.clone(),
@@ -820,10 +887,17 @@ async fn style_guides(
         )
         .await
         .map_err(|_| Cancelled)?;
+        for (sec, body) in todo.iter().zip(out) {
+            if let Some(body) = body {
+                let id = sid(&sec.title);
+                bodies.insert(id.clone(), body.trim().to_string());
+                basis.insert(id, guide_basis(sec));
+                redone += 1;
+            }
+        }
         let mut doc = String::new();
-        for (sec, body) in sections.iter().zip(bodies) {
-            let body = body.unwrap_or_default();
-            let t = body.trim();
+        for sec in &sections {
+            let t = bodies.get(&sid(&sec.title)).map(|b| b.trim()).unwrap_or("");
             if t.is_empty() || t.eq_ignore_ascii_case("No consistent convention observed.") {
                 continue;
             }
@@ -835,8 +909,9 @@ async fn style_guides(
         }
         doc.push_str("\n_AI-generated from the codebase; review before enforcing._\n");
         r.done(format!(
-            "{repo}: style guide ({} sections)",
-            doc.matches("\n## ").count() + 1
+            "{repo}: style guide ({} sections, {} rewritten)",
+            doc.matches("\n## ").count() + 1,
+            todo.len()
         ));
         guides.retain(|(g, _)| *g != repo);
         guides.push((repo.clone(), doc));
@@ -848,12 +923,116 @@ async fn style_guides(
         write_keys(dst, "guide_keys", &keys)
             .await
             .context("saving the style guide")?;
+        save_guide_sections(dst, &bodies, &basis, roots).await?;
+    }
+    save_guide_sections(dst, &bodies, &basis, roots).await?;
+    if redone > 0 {
+        r.note(format!("{redone} style guide section(s) rewritten"));
     }
     if reused > 0 {
         r.note(format!("{reused} unchanged style guide(s) reused"));
     }
     r.note(format!("spent: {}", usage(ctx, llm)));
     Ok(())
+}
+
+/// Sections of indexed repositories only, so a removed repository's text goes too.
+async fn save_guide_sections(
+    dst: &str,
+    bodies: &HashMap<String, String>,
+    basis: &HashMap<String, String>,
+    roots: &[(String, PathBuf)],
+) -> Result<()> {
+    let keep = |id: &String| {
+        roots
+            .iter()
+            .any(|(r, _)| id.split('\0').next() == Some(r.as_str()))
+    };
+    let pick = |m: &HashMap<String, String>| -> Vec<(String, String)> {
+        m.iter()
+            .filter(|(id, _)| keep(id))
+            .map(|(a, b)| (a.clone(), b.clone()))
+            .collect()
+    };
+    write_keys(dst, "guide_sections", &pick(bodies))
+        .await
+        .context("saving the style guide")?;
+    write_keys(dst, "guide_basis", &pick(basis))
+        .await
+        .context("saving the style guide")?;
+    Ok(())
+}
+
+/// A section's body in a guide document, or empty.
+fn guide_section_of(doc: &str, title: &str) -> String {
+    let head = format!("## {title}\n");
+    let Some(i) = doc.find(&head) else {
+        return String::new();
+    };
+    let rest = &doc[i + head.len()..];
+    let end = rest
+        .find("\n## ")
+        .or_else(|| rest.find("\n_AI-generated"))
+        .unwrap_or(rest.len());
+    rest[..end].trim().to_string()
+}
+
+/// What a section is written from, with counts dropped and percentages rounded to tens, so
+/// ordinary churn does not count as a change.
+fn guide_basis(sec: &crate::styleguide::Section) -> String {
+    let mut out = fingerprint([sec.title.clone(), sec.guidance.clone()]);
+    for line in sec.evidence.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        out.push('\n');
+        let mut num = String::new();
+        let mut chars = line.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c.is_ascii_digit() || (c == '.' && !num.is_empty()) {
+                num.push(c);
+                if chars
+                    .peek()
+                    .is_some_and(|n| n.is_ascii_digit() || *n == '.')
+                {
+                    continue;
+                }
+                if chars.peek() == Some(&'%') {
+                    let p: f64 = num.trim_end_matches('.').parse().unwrap_or(0.0);
+                    out.push_str(&format!("{}", (p / 10.0).round() as u32 * 10));
+                } else {
+                    out.push('#');
+                }
+                num.clear();
+            } else {
+                out.push(c);
+            }
+        }
+    }
+    out
+}
+
+/// Same guidance, the same measured ratios (to the nearest ten), and at most a fifth of the other
+/// evidence lines differ.
+fn guide_similar(a: &str, b: &str) -> bool {
+    const MIN_SHARED: f64 = 0.8;
+    let split = |t: &str| -> (Option<String>, HashSet<String>, HashSet<String>) {
+        let mut l = t.lines();
+        let head = l.next().map(str::to_string);
+        let (measured, other): (Vec<&str>, Vec<&str>) = l.partition(|x| x.contains('%'));
+        (
+            head,
+            measured.into_iter().map(str::to_string).collect(),
+            other.into_iter().map(str::to_string).collect(),
+        )
+    };
+    let ((ha, ma, oa), (hb, mb, ob)) = (split(a), split(b));
+    if ha != hb || ma != mb {
+        return false;
+    }
+    let union = oa.union(&ob).count();
+    union == 0 || oa.intersection(&ob).count() as f64 / union as f64 >= MIN_SHARED
 }
 
 /// Walkthroughs of the flows reaching furthest, reused while their trace is unchanged and saved
@@ -1185,4 +1364,52 @@ fn dependencies(edges: &[Edge]) -> Vec<Dependency> {
 
 fn short(sha: &str) -> String {
     sha.chars().take(8).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::styleguide::Section;
+
+    fn sec(evidence: &str) -> Section {
+        Section {
+            title: "Naming".into(),
+            guidance: "State the casing".into(),
+            evidence: evidence.into(),
+        }
+    }
+
+    #[test]
+    fn guide_sections_ignore_churn_but_not_drift() {
+        let lines: Vec<String> = (0..10)
+            .map(|i| format!("def handler_{}(x): pass", (b'a' + i) as char))
+            .collect();
+        let base = format!("snake_case 97.3% (1234/1268)\n{}", lines.join("\n"));
+        let a = guide_basis(&sec(&base));
+        let counts = guide_basis(&sec(&base.replace("97.3% (1234/1268)", "96.8% (1301/1340)")));
+        assert!(guide_similar(&a, &counts), "counts moving is churn");
+        let shifted = guide_basis(&sec(&base.replace("97.3%", "61.0%")));
+        assert!(
+            !guide_similar(&a, &shifted),
+            "a measured ratio moving rewrites"
+        );
+        let one = guide_basis(&sec(&base.replacen("handler_a", "handle_a", 1)));
+        assert!(guide_similar(&a, &one), "one changed excerpt line is churn");
+        let many = guide_basis(&sec(&base.replace("handler_", "Handler")));
+        assert!(!guide_similar(&a, &many), "most lines changed is drift");
+        let mut other = sec(&base);
+        other.guidance = "New prompt".into();
+        assert!(
+            !guide_similar(&a, &guide_basis(&other)),
+            "new guidance rewrites"
+        );
+    }
+
+    #[test]
+    fn finds_a_section_in_a_guide() {
+        let doc = "## Naming\n\nUse snake_case.\n\n## Testing\n\nPytest.\n\n\n_AI-generated from the codebase; review before enforcing._\n";
+        assert_eq!(guide_section_of(doc, "Naming"), "Use snake_case.");
+        assert_eq!(guide_section_of(doc, "Testing"), "Pytest.");
+        assert_eq!(guide_section_of(doc, "Types"), "");
+    }
 }

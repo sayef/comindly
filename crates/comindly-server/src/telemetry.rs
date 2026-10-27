@@ -2,7 +2,7 @@
 //! `COMINDLY_LOG_FORMAT=json`, one JSON object per line; spans sent over OTLP when configured.
 
 use std::fmt::Debug;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use console::style;
 use serde_json::{Map, Value};
@@ -11,9 +11,10 @@ use tracing::{span, Level, Subscriber};
 use tracing_subscriber::layer::{Context, Layer, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;
 
-/// Set up logging (and OTLP export when `OTEL_EXPORTER_OTLP_ENDPOINT` is set) for this process.
-/// Keep the guard until the process ends; dropping it sends the spans still queued.
-pub fn init() -> Guard {
+/// Set up logging (and OTLP export when `OTEL_EXPORTER_OTLP_ENDPOINT` is set) for this process,
+/// to stdout when `stdout`, else stderr. Keep the guard until the process ends.
+pub fn init(stdout: bool) -> Guard {
+    let _ = STDOUT.set(stdout);
     let level = match std::env::var("COMINDLY_LOG_LEVEL").as_deref() {
         Ok("error") => Level::ERROR,
         Ok("warn") => Level::WARN,
@@ -21,10 +22,11 @@ pub fn init() -> Guard {
         Ok("trace") => Level::TRACE,
         _ => Level::INFO,
     };
-    let lines =
-        Lines::stderr(crate::ui::json_logs()).with_filter(tracing_subscriber::filter::filter_fn(
-            move |m| ours(m.target()) && (m.is_span() || *m.level() <= level),
-        ));
+    let lines = Lines::to(crate::ui::json_logs(), write).with_filter(
+        tracing_subscriber::filter::filter_fn(move |m| {
+            ours(m.target()) && (m.is_span() || *m.level() <= level)
+        }),
+    );
     let registry = tracing_subscriber::registry().with(lines);
     #[cfg(feature = "otel")]
     let registry = registry.with(otel::layer());
@@ -40,6 +42,17 @@ pub fn init() -> Guard {
     }
     let _ = tracing::subscriber::set_global_default(registry);
     Guard(())
+}
+
+static STDOUT: OnceLock<bool> = OnceLock::new();
+
+/// Write one log line to the process's log stream: stdout on a server, stderr elsewhere.
+pub fn write(line: &str) {
+    if STDOUT.get() == Some(&true) {
+        println!("{line}");
+    } else {
+        eprintln!("{line}");
+    }
 }
 
 /// Sends what is queued for export; for when the process is about to exit.
@@ -112,14 +125,7 @@ pub struct Lines {
 }
 
 impl Lines {
-    pub fn stderr(json: bool) -> Self {
-        Lines {
-            json,
-            out: Arc::new(|l| eprintln!("{l}")),
-        }
-    }
-
-    /// Lines handed to `out` instead of stderr.
+    /// Lines handed to `out`.
     pub fn to(json: bool, out: impl Fn(&str) + Send + Sync + 'static) -> Self {
         Lines {
             json,

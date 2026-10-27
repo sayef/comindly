@@ -63,7 +63,7 @@ pub async fn run(spec: &Spec, job: Arc<crate::jobs::Running>) -> Result<()> {
     let logs = async {
         let mut lines = BufReader::new(err).lines();
         while let Ok(Some(l)) = lines.next_line().await {
-            eprintln!("{l}");
+            crate::telemetry::write(&l);
         }
     };
     let exit = async {

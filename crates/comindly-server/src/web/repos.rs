@@ -349,19 +349,30 @@ pub(super) async fn begin(
 }
 
 /// With `auto_index` on, check every freshness interval whether a default branch moved on the
-/// remote (`git ls-remote`, no download) and queue a re-index when one did.
+/// remote (`git ls-remote`, no download) and queue a re-index when one did, with the LLM steps
+/// when `auto_index_llm` is on.
 pub(super) async fn watch(app: Shared) {
     loop {
         let fresh = app.config().fresh();
         tokio::time::sleep(fresh.max(std::time::Duration::from_secs(60))).await;
-        if !app.settings().auto_index {
+        let settings = app.settings();
+        if !settings.auto_index {
             continue;
         }
         let result = match moved(&app).await {
             Ok(m) if m.is_empty() => "every default branch is indexed".to_string(),
             Ok(m) => {
                 let why = format!("Automatic re-index: {} moved", m.join(", "));
-                match begin(&app, false, false, Some(why.clone()), None, None).await {
+                match begin(
+                    &app,
+                    settings.auto_index_llm,
+                    false,
+                    Some(why.clone()),
+                    None,
+                    None,
+                )
+                .await
+                {
                     Ok(s) if s.coalesced => format!("{why}; a re-index is already queued"),
                     Ok(s) if s.position.is_some() => format!("{why}; queued"),
                     Ok(_) => why,
@@ -390,11 +401,15 @@ async fn moved(app: &Shared) -> anyhow::Result<Vec<String>> {
         for r in &repos {
             let p = Path::new(&r.path);
             let name = worktree::name(p);
-            if !p.exists() {
-                out.push(name);
-                continue;
-            }
-            let (_, head) = worktree::remote_default(p, creds.as_ref())?;
+            // After a restart the clone may be gone; asking the remote avoids a needless re-index.
+            let head = match (p.exists(), &r.remote) {
+                (true, _) => worktree::remote_default(p, creds.as_ref())?.1,
+                (false, Some(url)) => worktree::remote_head(url, creds.as_ref())?.1,
+                (false, None) => {
+                    out.push(name);
+                    continue;
+                }
+            };
             if indexed
                 .get(&name)
                 .is_none_or(|c| !head.starts_with(c.as_str()) && !c.starts_with(&head))

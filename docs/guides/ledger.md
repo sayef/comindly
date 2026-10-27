@@ -5,7 +5,14 @@ What the code does not say.
 Records are short, typed facts anchored to symbols: an `attempt` that failed or was reverted, a
 `decision` with its rejected alternatives, a `constraint`, a `gotcha`, an `intent`, a `question`.
 They follow the code: moved code keeps its records, changed code marks them **stale**, deleted
-code marks them **orphaned**.
+code marks them **orphaned**. Each anchor stores the indexed commit it was written against, and a
+record can carry up to three short snippets of the code that shaped it, so a reader can see what was
+true then:
+
+```bash
+comindly remember decision --on parse_order --title "Strip whitespace from order ids" \
+  --snippet app/orders.py:12-20
+```
 
 Where records come from:
 

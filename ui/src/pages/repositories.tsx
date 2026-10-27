@@ -26,7 +26,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Outcome } from "@/components/notice";
 import { useAbort } from "@/lib/abort";
 import { useAccess } from "@/lib/me";
-import { ApiError, api, type NeedsToken, pickFolder, type ScanHit } from "@/lib/api";
+import { ApiError, api, type NeedsToken, pickFolder, type ScanHit, type TeamSettings } from "@/lib/api";
 
 const field = "flex flex-col gap-1 text-xs font-medium";
 
@@ -235,7 +235,8 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
   const settings = useQuery({ queryKey: ["settings"], queryFn: api.settings });
   const team = useQuery({ queryKey: ["team"], queryFn: api.team });
   const auto = useMutation({
-    mutationFn: (on: boolean) => api.saveTeam({ ...team.data!.settings, auto_index: on }, team.data!.version),
+    mutationFn: (s: Pick<TeamSettings, "auto_index" | "auto_index_llm">) =>
+      api.saveTeam({ ...team.data!.settings, ...s }, team.data!.version),
     onSuccess: () => (qc.invalidateQueries({ queryKey: ["team"] }), qc.invalidateQueries({ queryKey: ["index-watch"] })),
   });
 
@@ -284,9 +285,18 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
             type="checkbox"
             checked={team.data?.settings.auto_index ?? false}
             disabled={!team.data || auto.isPending}
-            onChange={(e) => auto.mutate(e.target.checked)}
+            onChange={(e) => auto.mutate({ auto_index: e.target.checked })}
           />
-          Re-index automatically when a default branch moves (checked every {settings.data?.cache_ttl_secs ?? 300} s, without LLM)
+          Re-index automatically when a default branch moves (checked every {settings.data?.cache_ttl_secs ?? 300} s)
+        </label>
+        <label className="ml-6 flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={team.data?.settings.auto_index_llm ?? false}
+            disabled={!team.data || auto.isPending || !team.data.settings.auto_index}
+            onChange={(e) => auto.mutate({ auto_index_llm: e.target.checked })}
+          />
+          With LLM steps: summaries, style guides and walkthroughs for new or changed code only
         </label>
         {watch.data?.enabled && watch.data.last.checked && (
           <p className="text-xs text-muted-foreground">

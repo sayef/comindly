@@ -252,6 +252,7 @@ pub fn dispatch(c: &Client, cmd: &Cmd) -> Option<ExitCode> {
             trigger,
             evidence,
             field,
+            snippet,
             index_dir: None,
         } => {
             let req = api::RememberRequest {
@@ -266,6 +267,13 @@ pub fn dispatch(c: &Client, cmd: &Cmd) -> Option<ExitCode> {
                     .filter_map(|f| f.split_once('='))
                     .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
                     .collect(),
+                snippets: match crate::read_snippets(snippet) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        comindly::ui::err(&format!("{e:#}"));
+                        return Some(ExitCode::FAILURE);
+                    }
+                },
             };
             show(c.post("/api/v1/remember", &req), |r: api::Remembered| {
                 comindly::ui::ok(&format!("recorded {kind} `{title}` ({})", r.id));

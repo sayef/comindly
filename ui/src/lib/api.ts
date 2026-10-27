@@ -70,6 +70,13 @@ export interface Anchor {
   path: string;
   name: string;
   line: number;
+  commit?: string;
+}
+
+export interface Snippet {
+  path: string;
+  code: string;
+  commit?: string;
 }
 
 export interface LedgerRecord {
@@ -81,6 +88,7 @@ export interface LedgerRecord {
   fields: Record<string, unknown>;
   anchors: Anchor[];
   evidence: string[];
+  snippets?: Snippet[];
   provenance: { author: string; actor: string; source: string; agent: string | null; name?: string };
   created: string;
 }
@@ -207,6 +215,7 @@ export interface TeamSettings {
   format?: "md" | "json";
   scip?: "auto" | "require" | "off";
   auto_index?: boolean;
+  auto_index_llm?: boolean;
   repos?: string[];
 }
 

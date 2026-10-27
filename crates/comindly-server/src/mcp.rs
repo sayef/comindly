@@ -167,6 +167,9 @@ impl ComindlyServer {
     ) -> anyhow::Result<String> {
         let kind = crate::ledger::Kind::parse(&p.kind)
             .ok_or_else(|| anyhow::anyhow!("unknown kind `{}`", p.kind))?;
+        let commits = crate::index::read_repo_commits(&self.uri)
+            .await
+            .unwrap_or_default();
         let mut anchors = Vec::new();
         for focus in &p.on {
             let idx = self
@@ -178,9 +181,19 @@ impl ComindlyServer {
                 .symbols
                 .get(&id)
                 .ok_or_else(|| anyhow::anyhow!("symbol `{id}` not loaded"))?;
-            anchors.push(crate::ledger::Anchor::of(s));
+            anchors.push(crate::ledger::Anchor::of(s).at(&commits));
         }
+        let commit = anchors.first().and_then(|a| a.commit.clone());
         let mut rec = crate::ledger::Record::new(kind, &p.title, anchors, by);
+        rec.snippets = p
+            .snippets
+            .into_iter()
+            .map(|s| crate::ledger::Snippet {
+                path: s.path,
+                code: s.code,
+                commit: s.commit.or_else(|| commit.clone()),
+            })
+            .collect();
         rec.body = p.body.unwrap_or_default();
         rec.trigger = p.trigger;
         rec.evidence = p.evidence;
@@ -465,6 +478,19 @@ struct RememberParam {
     /// Kind-specific fields, e.g. `{"outcome": "reverted"}`, `{"alternatives": "…"}`.
     #[serde(default)]
     fields: std::collections::BTreeMap<String, String>,
+    /// Up to 3 short excerpts (60 lines each) of the code that shaped this, as it is now.
+    #[serde(default)]
+    snippets: Vec<SnippetParam>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema, Default)]
+struct SnippetParam {
+    /// File path, e.g. `app/auth/session.py`.
+    path: String,
+    code: String,
+    /// The commit the code is from; defaults to the indexed commit.
+    #[serde(default)]
+    commit: Option<String>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema, Default)]
