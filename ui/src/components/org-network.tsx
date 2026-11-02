@@ -12,6 +12,8 @@ const MIN_HEIGHT = 360;
 const MAX_HEIGHT = 640;
 
 interface L {
+  /** Code references (imports and calls), apart from contracts. */
+  code: number;
   from: string;
   to: string;
   weight: number;
@@ -36,6 +38,51 @@ function curve(p: { x: number; y: number }[]) {
   return d;
 }
 
+const KIND: Record<string, string> = { http: "HTTP routes", sqs: "Queues", sns: "Topics", s3: "Buckets", table: "Tables" };
+
+/** How two repositories are connected: contracts grouped by type, then code references. */
+function LinkCard({ l, x, y, width, height }: { l: L; x: number; y: number; width: number; height: number }) {
+  const groups = new Map<string, string[]>();
+  for (const v of l.via) {
+    const i = v.indexOf(":");
+    const k = i > 0 ? v.slice(0, i) : "other";
+    groups.set(k, [...(groups.get(k) ?? []), i > 0 ? v.slice(i + 1) : v]);
+  }
+  const left = Math.min(x + 14, width - 300);
+  // Open away from the nearer edge, so the card is never cut off.
+  const place = y > height / 2 ? { bottom: height - y + 14 } : { top: y + 14 };
+  return (
+    <div className="pointer-events-none absolute z-10 max-h-[calc(100%-1.5rem)] w-72 overflow-hidden rounded-lg border bg-popover p-3 text-xs shadow-float" style={{ left, ...place }}>
+      <p className="mb-2 text-sm">
+        <span className="font-semibold">{l.from}</span> <span className="text-muted-foreground">uses</span> <span className="font-semibold">{l.to}</span>
+      </p>
+      <div className="flex flex-col gap-2">
+        {[...groups].map(([k, names]) => (
+          <div key={k}>
+            <p className="eyebrow">
+              {KIND[k] ?? "Contracts"} <span className="nums font-normal">{names.length}</span>
+            </p>
+            <ul className="mt-0.5 flex flex-col gap-0.5">
+              {names.slice(0, 6).map((n) => (
+                <li key={n} className="truncate font-mono text-accent-foreground">
+                  {n}
+                </li>
+              ))}
+              {names.length > 6 && <li className="text-muted-foreground">and {names.length - 6} more</li>}
+            </ul>
+          </div>
+        ))}
+        {l.code > 0 && (
+          <p className="text-muted-foreground">
+            <span className="nums font-semibold text-foreground">{l.code}</span> code reference{l.code === 1 ? "" : "s"} (imports and calls)
+          </p>
+        )}
+        {l.cycle && <p className="text-warning">Part of a cycle: these repositories also depend back on each other.</p>}
+      </div>
+    </div>
+  );
+}
+
 /** Repositories laid out left to right, from what starts work to the shared code it ends up in. */
 export function OrgNetwork({ org }: { org: Org }) {
   const box = useRef<HTMLDivElement>(null);
@@ -57,6 +104,7 @@ export function OrgNetwork({ org }: { org: Org }) {
           from,
           to,
           weight: es.reduce((n, e) => n + (e.weight || 1), 0),
+          code: es.filter((e) => e.kind !== "contract").reduce((n, e) => n + (e.weight || 1), 0),
           contract: es.some((e) => e.kind === "contract"),
           cycle: inCycle(from, to),
           via: [...new Set(es.flatMap((e) => e.via ?? []))],
@@ -133,7 +181,11 @@ export function OrgNetwork({ org }: { org: Org }) {
     }
     return s;
   }, [focus, links]);
-  const most = Math.max(1, ...links.map((l) => l.weight));
+  const [tip, setTip] = useState<{ l: L; x: number; y: number } | null>(null);
+  const showTip = (l: L, e: React.PointerEvent) => {
+    const r = box.current!.getBoundingClientRect();
+    setTip({ l, x: e.clientX - r.left, y: e.clientY - r.top });
+  };
 
   const uses = picked ? links.filter((l) => l.from === picked) : [];
   const usedBy = picked ? links.filter((l) => l.to === picked) : [];
@@ -182,21 +234,31 @@ export function OrgNetwork({ org }: { org: Org }) {
                 const kind = l.cycle ? "cycle" : l.contract ? "contract" : "code";
                 const stroke =
                   kind === "contract" ? "var(--color-brand)" : kind === "cycle" ? "var(--color-warning)" : lit ? "var(--color-foreground)" : "var(--color-input)";
+                const hot = tip?.l === l;
                 return (
-                  <path
-                    key={`${l.from}>${l.to}`}
-                    d={curve(l.points)}
-                    fill="none"
-                    stroke={stroke}
-                    strokeWidth={1 + 1.25 * Math.sqrt(l.weight / most)}
-                    strokeOpacity={focus && !lit ? 0.12 : lit || kind === "code" ? 1 : 0.75}
-                    strokeDasharray={kind === "cycle" ? "6 4" : undefined}
-                    strokeLinecap="round"
-                    markerEnd={`url(#tip-${kind === "code" && lit ? "lit" : kind})`}
-                    className="transition-[stroke-opacity] duration-150"
-                  >
-                    <title>{`${l.from} uses ${l.to}: ${l.weight} link${l.weight === 1 ? "" : "s"}${l.via.length ? `, through ${l.via.slice(0, 4).join(", ")}` : ""}`}</title>
-                  </path>
+                  <g key={`${l.from}>${l.to}`}>
+                    <path
+                      d={curve(l.points)}
+                      fill="none"
+                      stroke={hot && kind === "code" ? "var(--color-foreground)" : stroke}
+                      strokeWidth={hot ? 2.5 : 1.5}
+                      strokeOpacity={focus && !lit && !hot ? 0.12 : lit || hot || kind === "code" ? 1 : 0.8}
+                      strokeDasharray={kind === "cycle" ? "6 4" : undefined}
+                      strokeLinecap="round"
+                      markerEnd={`url(#tip-${kind === "code" && (lit || hot) ? "lit" : kind})`}
+                      className="pointer-events-none transition-[stroke-opacity] duration-150"
+                    />
+                    <path
+                      d={curve(l.points)}
+                      fill="none"
+                      stroke="transparent"
+                      strokeWidth={14}
+                      className="cursor-help"
+                      onPointerEnter={(e) => showTip(l, e)}
+                      onPointerMove={(e) => showTip(l, e)}
+                      onPointerLeave={() => setTip(null)}
+                    />
+                  </g>
                 );
               })}
             {nodes.map((n) => {
@@ -257,6 +319,8 @@ export function OrgNetwork({ org }: { org: Org }) {
             <Maximize />
           </Button>
         </div>
+
+        {tip && <LinkCard l={tip.l} x={tip.x} y={tip.y} width={width} height={height} />}
 
         {picked && (
           <div data-panel className="absolute top-3 right-3 bottom-3 flex w-80 max-w-[calc(100%-1.5rem)] flex-col overflow-hidden rounded-lg border bg-popover shadow-float">
