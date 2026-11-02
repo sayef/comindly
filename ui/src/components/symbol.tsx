@@ -16,12 +16,12 @@ export function SymbolLink({ node, showRepo = true }: { node: Node; showRepo?: b
   return (
     <Link
       to={`/explorer?focus=${encodeURIComponent(node.id)}`}
-      title={contract ? node.name : `${node.repo} · ${node.location}`}
+      title={contract ? node.name : `${node.repo}, ${node.location}`}
       className="group inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-sm text-sm hover:text-brand"
     >
       <RepoDot repo={node.repo} />
-      <span className={cn("min-w-0 truncate", contract && "font-mono text-[13px]")}>
-        {showRepo && !contract && <span className="text-muted-foreground group-hover:text-brand/80">{node.repo} · </span>}
+      <span className={cn("min-w-0 truncate", contract && "font-mono text-xs")}>
+        {showRepo && !contract && <span className="text-muted-foreground group-hover:text-brand/80">{node.repo} </span>}
         {node.name}
       </span>
     </Link>

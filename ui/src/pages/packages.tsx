@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { RepoDot } from "@/components/symbol";
+import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -20,11 +21,11 @@ function compare(a: string, b: string) {
 }
 
 function Pin({ p }: { p: Package }) {
-  if (!p.skewed || !p.locked || !p.published) return <span className="font-mono text-xs">{p.locked ?? "—"}</span>;
+  if (!p.skewed || !p.locked || !p.published) return <span className="font-mono text-xs">{p.locked ?? "not pinned"}</span>;
   const behind = compare(p.locked, p.published) < 0;
   return (
-    <span className={cn("flex items-center gap-2 font-mono text-xs", behind && "text-warning")}>
-      {p.locked}
+    <span className="flex items-center gap-2 text-xs">
+      <span className={cn("font-mono", behind && "text-warning")}>{p.locked}</span>
       {behind ? (
         <Badge variant="warning" title={`The publisher's source is at ${p.published}`}>
           Behind
@@ -50,39 +51,38 @@ export function PackagesPage() {
   }, [rows.data, only]);
   const skewed = (rows.data ?? []).filter((p) => p.skewed).length;
 
+  const names = new Set((rows.data ?? []).map((p) => `${p.ecosystem}:${p.name}`)).size;
   return (
-    <div className="flex flex-col gap-5">
-      <div>
-        <h1 className="text-[28px] font-semibold tracking-[-0.035em]">Internal packages</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Libraries one repository publishes and others depend on, with the version each consumer pins. A pin that differs from the
-          published version is skew: the consumer runs code the publisher has moved on from.
-        </p>
-      </div>
+    <div className="flex flex-col gap-6">
+      <PageHeader title="Internal packages">
+        {names
+          ? `${skewed ? `${skewed} ${skewed === 1 ? "consumer pins" : "consumers pin"}` : "No consumer pins"} a different version than the publisher's source, across ${names} ${names === 1 ? "library" : "libraries"} the indexed repositories publish to each other.`
+          : "Libraries one repository publishes and others depend on, with the version each consumer pins."}
+      </PageHeader>
       <Tabs value={only} onValueChange={(v) => setOnly(v as "all" | "skew")}>
         <TabsList>
           <TabsTrigger value="all">All</TabsTrigger>
           <TabsTrigger value="skew">
-            Version skew <span className="font-mono text-[10px] text-muted-foreground">{skewed}</span>
+            Version skew <span className="nums text-xs font-normal text-muted-foreground">{skewed}</span>
           </TabsTrigger>
         </TabsList>
       </Tabs>
-      {rows.isLoading && <Skeleton className="h-48 rounded-xl" />}
+      {rows.isLoading && <Skeleton className="h-48 rounded-lg" />}
       {!rows.isLoading && groups.length === 0 && (
-        <p className="text-sm text-muted-foreground">
+        <p className="rounded-lg bg-card px-5 py-8 text-muted-foreground">
           {only === "skew" ? "Every consumer pins its publisher's version." : "No internal packages found in the indexed manifests."}
         </p>
       )}
       {groups.map((g) => (
         <Card key={`${g[0].ecosystem}:${g[0].name}`} className="overflow-hidden">
-          <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3">
-            <span className="font-mono text-sm font-semibold">{g[0].name}</span>
+          <div className="flex flex-wrap items-center gap-2 border-b px-5 py-3.5">
+            <span className="font-mono font-semibold">{g[0].name}</span>
             <Badge variant="outline">{g[0].ecosystem}</Badge>
-            <span className="text-xs text-muted-foreground">published by</span>
-            <span className="flex items-center gap-1.5 text-sm">
+            <span className="text-muted-foreground">published by</span>
+            <span className="flex items-center gap-1.5">
               <RepoDot repo={g[0].publisher} /> {g[0].publisher}
             </span>
-            {g[0].published && <span className="font-mono text-xs text-muted-foreground">at {g[0].published}</span>}
+            {g[0].published && <span className="nums text-muted-foreground">at version <span className="font-mono">{g[0].published}</span></span>}
           </div>
           <Table>
             <thead>
@@ -102,7 +102,7 @@ export function PackagesPage() {
                         <RepoDot repo={p.consumer} /> {p.consumer}
                       </span>
                     </Td>
-                    <Td className="font-mono text-xs">{p.requirement ?? "—"}</Td>
+                    <Td className="font-mono text-xs">{p.requirement ?? <span className="font-sans text-muted-foreground">any version</span>}</Td>
                     <Td>
                       <Pin p={p} />
                     </Td>

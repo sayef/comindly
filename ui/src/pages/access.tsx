@@ -9,10 +9,11 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { api, type Role, type SecretState } from "@/lib/api";
+import { PageHeader } from "@/components/page-header";
 import { Section } from "@/pages/settings";
 import { Code } from "@/pages/setup";
 
-const select = "h-9 rounded-md border bg-card px-2 text-sm";
+const select = "h-9 rounded-md border border-input bg-card px-2 text-sm transition-colors duration-100 hover:border-muted-foreground/50";
 const day = (t?: string | null) => (t ? t.slice(0, 10) : "—");
 
 export function MembersPage() {
@@ -43,11 +44,12 @@ export function MembersPage() {
     mutationFn: (e: string) => api.revokeInvite(e),
     onSuccess: refresh,
   });
-  if (!list.data) return <Skeleton className="h-96 rounded-xl" />;
+  if (!list.data) return <Skeleton className="h-96 rounded-lg" />;
   const codes = list.data.sign_in === "code";
 
   return (
-    <div className="flex max-w-4xl flex-col gap-5">
+    <div className="flex max-w-5xl flex-col gap-4">
+      <PageHeader title="Members">Who can sign in here and what each person may do: admins change settings, members add to the ledger and conventions, viewers read.</PageHeader>
       <Section
         title="Invite someone"
         description={
@@ -93,7 +95,7 @@ export function MembersPage() {
       </Section>
 
       <Section
-        title="Members"
+        title="People"
         description="Admins named by the deployment are always admins; change anyone else's role here."
       >
         <Table>
@@ -201,11 +203,11 @@ function SecretRow({ s, canStore }: { s: SecretState; canStore: boolean }) {
   return (
     <div className="flex flex-col gap-2 border-b py-3 last:border-0">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm font-medium">{s.label}</span>
+        <span className="text-sm font-semibold">{s.label}</span>
         {s.source === "deployment" && <Badge variant="outline">From the deployment</Badge>}
         {s.source === "stored" && (
-          <Badge variant="outline" className="font-mono">
-            {s.hint}
+          <Badge variant="outline">
+            <span className="font-mono">{s.hint}</span>
           </Badge>
         )}
         {s.source === "none" && <span className="text-xs text-muted-foreground">Not set</span>}
@@ -250,7 +252,7 @@ export function IntegrationsPage() {
   const list = useQuery({ queryKey: ["secrets"], queryFn: api.secrets });
   const [host, setHost] = useState("");
   const [extra, setExtra] = useState<string[]>([]);
-  if (!list.data) return <Skeleton className="h-96 rounded-xl" />;
+  if (!list.data) return <Skeleton className="h-96 rounded-lg" />;
   const names = new Set(list.data.secrets.map((s) => s.name));
   const rows = [
     ...list.data.secrets,
@@ -264,7 +266,8 @@ export function IntegrationsPage() {
   ];
 
   return (
-    <div className="flex max-w-3xl flex-col gap-5">
+    <div className="flex max-w-5xl flex-col gap-4">
+      <PageHeader title="Integrations">Tokens and keys the server uses to clone repositories and call the LLM. Values are encrypted and never shown again.</PageHeader>
       <Section
         title="Tokens and keys"
         description="What the server uses to list and clone repositories and to call the LLM. Values never come back to the browser. Ones the deployment provides win and are changed where it keeps its secrets."
@@ -330,10 +333,11 @@ export function AccessPage() {
     mutationFn: (id: string) => api.revokeToken(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["tokens"] }),
   });
-  if (!list.data) return <Skeleton className="h-64 rounded-xl" />;
+  if (!list.data) return <Skeleton className="h-64 rounded-lg" />;
 
   return (
-    <div className="flex max-w-3xl flex-col gap-5">
+    <div className="flex max-w-5xl flex-col gap-4">
+      <PageHeader title="Your access">How you sign in, and the personal access tokens your agents and command line use.</PageHeader>
       {me.data?.sign_in === "code" && (
         <Section
           title="Your sign-in code"
@@ -428,13 +432,14 @@ export function AuditPage() {
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.next,
   });
-  if (!log.data) return <Skeleton className="h-96 rounded-xl" />;
+  if (!log.data) return <Skeleton className="h-96 rounded-lg" />;
   const entries = log.data.pages.flatMap((p) => p.entries);
   const when = (t: string) => (t ? new Date(t).toLocaleString() : "—");
 
   return (
-    <div className="flex max-w-4xl flex-col gap-5">
-      <Section title="Audit log" description="Sign-ins, invitations, role changes, tokens, secrets and repositories. Token values and codes are never recorded.">
+    <div className="flex max-w-5xl flex-col gap-4">
+      <PageHeader title="Audit log">Who changed what on this server, newest first.</PageHeader>
+      <Section title="Events" description="Sign-ins, invitations, role changes, tokens, secrets and repositories. Token values and codes are never recorded.">
         {entries.length === 0 ? (
           <p className="text-sm text-muted-foreground">Nothing recorded yet.</p>
         ) : (

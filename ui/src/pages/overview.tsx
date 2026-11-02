@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowUpRight } from "lucide-react";
+import { RefreshCcw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { type Direction, TreeView, useOrg } from "@/components/org-views";
@@ -17,6 +17,8 @@ import { api, attention, isChallenged, type OrgMap } from "@/lib/api";
 import { useAccess } from "@/lib/me";
 import { cn } from "@/lib/utils";
 
+const sentenceCase = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
 /** A per-browser preference, or `fallback` when storage is unavailable. */
 function remembered(key: string, fallback: string) {
   try {
@@ -26,28 +28,35 @@ function remembered(key: string, fallback: string) {
   }
 }
 
-function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
+function Figure({ value, label }: { value: string; label: string }) {
   return (
-    <div className="flex flex-col gap-1.5 bg-card px-[18px] py-4">
-      <span className="eyebrow">{label}</span>
-      <span className="nums text-[30px] font-medium leading-none tracking-[-0.02em]">{value}</span>
-      {hint && <span className="text-xs text-muted-foreground">{hint}</span>}
+    <div className="flex flex-col-reverse">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="nums text-[17px] font-semibold">{value}</dd>
     </div>
   );
 }
 
 function Panel({ title, to, link, children }: { title: string; to: string; link: string; children: React.ReactNode }) {
   return (
-    <section className="overflow-hidden rounded-[10px] border bg-card">
-      <div className="flex items-center justify-between border-b px-5 py-3.5">
-        <h2 className="text-sm font-semibold">{title}</h2>
-        <Link to={to} className="text-xs text-muted-foreground hover:text-foreground">
-          {link} →
+    <section className="overflow-hidden rounded-lg bg-card">
+      <div className="flex items-baseline justify-between gap-3 px-5 pt-4 pb-2">
+        <h2 className="text-[17px] font-semibold">{title}</h2>
+        <Link to={to} className="-my-1 flex min-h-7 items-center px-1 text-xs font-semibold text-brand hover:underline">
+          {link}
         </Link>
       </div>
       {children}
     </section>
   );
+}
+
+/** What the org map says first: the repository most others depend on, and any cycles. */
+function finding(org: ReturnType<typeof useOrg>): string | null {
+  if (org.repos.length < 2) return null;
+  const hub = [...org.usedBy.entries()].sort((a, b) => b[1].size - a[1].size || a[0].localeCompare(b[0]))[0];
+  if (!hub || hub[1].size === 0) return null;
+  return `${hub[1].size} of ${org.repos.length} repositories depend on ${hub[0]}`;
 }
 
 
@@ -77,7 +86,7 @@ function JoinTeam() {
   const join = useMutation({ mutationFn: () => api.join(index), meta: { inline: true }, onSuccess: () => qc.invalidateQueries() });
   return (
     <Card className="flex flex-col p-4 text-left">
-      <div className="text-sm font-medium">Join a team</div>
+      <h2 className="font-semibold">Join a team</h2>
       <p className="mt-1 text-xs text-muted-foreground">
         Where your team's index lives. Bucket access uses the credentials this machine already has.
       </p>
@@ -108,7 +117,7 @@ function CreateTeam({ at }: { at?: string }) {
   });
   return (
     <Card className="flex flex-col p-4 text-left">
-      <div className="text-sm font-medium">Create a team</div>
+      <h2 className="font-semibold">Create a team</h2>
       <p className="mt-1 text-xs text-muted-foreground">
         {at
           ? "The index lives where the deployment set it. You add repositories next."
@@ -180,7 +189,7 @@ export function OverviewPage() {
   if (o?.problem && server && !(admin && !teamName)) {
     return (
       <Welcome>
-        <h1 className="text-2xl font-semibold tracking-[-0.03em]">{teamName ? `You're in ${teamName}` : "Welcome to comindly"}</h1>
+        <h1 className="text-[26px] font-semibold tracking-[-0.02em]">{teamName ? `You're in ${teamName}` : "Welcome to comindly"}</h1>
         <p className="text-sm text-muted-foreground">
           {admin
             ? "Nothing is indexed yet. Add the team's repositories and index them; everyone signed in here then sees the same graph."
@@ -198,7 +207,7 @@ export function OverviewPage() {
   if (o?.problem && server) {
     return (
       <Welcome>
-        <h1 className="text-2xl font-semibold tracking-[-0.03em]">Welcome to comindly</h1>
+        <h1 className="text-[26px] font-semibold tracking-[-0.02em]">Welcome to comindly</h1>
         <p className="text-sm text-muted-foreground">Name the team; then add its repositories and index them.</p>
         <div className="w-full max-w-sm">
           <CreateTeam at={o.root ?? undefined} />
@@ -210,7 +219,7 @@ export function OverviewPage() {
   if (o?.problem && teamName && !switching) {
     return (
       <Welcome>
-        <h1 className="text-2xl font-semibold tracking-[-0.03em]">You're in {teamName}</h1>
+        <h1 className="text-[26px] font-semibold tracking-[-0.02em]">You're in {teamName}</h1>
         <p className="text-sm text-muted-foreground">
           Nothing is indexed yet. Add the team's repositories and index them; everyone in {teamName} then sees the same graph.
         </p>
@@ -232,7 +241,7 @@ export function OverviewPage() {
   if (o?.problem) {
     return (
       <Welcome wide>
-        <h1 className="text-2xl font-semibold tracking-[-0.03em]">Welcome to comindly</h1>
+        <h1 className="text-[26px] font-semibold tracking-[-0.02em]">Welcome to comindly</h1>
         <p className="text-sm text-muted-foreground">Join your team, start one, or index just for yourself.</p>
         <div className="grid w-full gap-3 sm:grid-cols-2">
           <JoinTeam />
@@ -263,50 +272,51 @@ export function OverviewPage() {
   const totalRecords = o ? Object.values(o.ledger).reduce((a, b) => a + b, 0) : 0;
   const needs = (ledger.data ?? []).filter((e) => attention(e) < 3).sort((a, b) => attention(a) - attention(b));
 
+  const said = finding(org);
+  const cycleNote =
+    org.cycles.length === 0
+      ? "None of them depend on each other in a circle."
+      : `${org.cycles.length === 1 ? "One group" : `${org.cycles.length} groups`} depend on each other in a circle, so none in ${org.cycles.length === 1 ? "it" : "them"} can release alone.`;
+
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-[28px] font-semibold tracking-[-0.035em]">Overview</h1>
-          <p className="mt-1.5 text-sm text-muted-foreground">
-            How the team's repositories depend on each other, in code and through service contracts.
+    <div className="flex flex-col gap-8">
+      <header className="flex flex-col gap-5 pt-6 pb-2">
+        <div className="flex max-w-[60rem] flex-col gap-3">
+          <h1 className="text-[34px] leading-[1.15] font-medium tracking-[-0.02em] max-sm:text-[26px]">
+            {said ?? "How the team's repositories depend on each other"}
+          </h1>
+          <p className="max-w-[68ch] text-[17px] leading-normal text-muted-foreground">
+            {said ? `${cycleNote} ` : ""}
+            The map below follows every dependency in code and through service contracts; open a repository to see what it reaches.
           </p>
         </div>
-      </div>
-
-      {o ? (
-        <div className="grid grid-cols-2 gap-px overflow-hidden rounded-[10px] border bg-border lg:grid-cols-4">
-          <Stat label="Repositories" value={String(o.repos.length)} hint={`${o.symbols.toLocaleString()} symbols indexed`} />
-          <Stat
-            label="Cross-repo edges"
-            value={o.cross_repo_edges.toLocaleString()}
-            hint={`of ${o.edges.toLocaleString()} dependency edges`}
-          />
-          <Stat label="Contracts" value={String(o.contracts)} hint={`${o.linked_contracts} with both sides indexed`} />
-          <Stat
-            label="Ledger records"
-            value={String(totalRecords)}
-            hint={needs.length ? `${needs.length} need review` : "none need review"}
-          />
-        </div>
-      ) : (
-        <Skeleton className="h-[106px] rounded-[10px]" />
-      )}
+        {o ? (
+          <dl className="flex flex-wrap gap-x-10 gap-y-3">
+            <Figure value={o.repos.length.toLocaleString()} label="repositories" />
+            <Figure value={o.symbols.toLocaleString()} label="symbols" />
+            <Figure value={o.cross_repo_edges.toLocaleString()} label={`links across repositories, of ${o.edges.toLocaleString()}`} />
+            <Figure value={o.contracts.toLocaleString()} label={`contracts, ${o.linked_contracts} with both sides indexed`} />
+            <Figure value={totalRecords.toLocaleString()} label={needs.length ? `ledger records, ${needs.length} to review` : "ledger records"} />
+          </dl>
+        ) : (
+          <Skeleton className="h-12 max-w-3xl" />
+        )}
+      </header>
 
       <div className="flex flex-col gap-6">
         <Card className="min-w-0 overflow-hidden">
           <div className="flex flex-wrap items-center gap-3 border-b px-5 py-3">
-            <h2 className="flex-1 text-sm font-semibold">Org map</h2>
+            <h2 className="flex-1 text-[17px] font-semibold">Org map</h2>
             {org.cycles.length > 0 && (
               <div className="relative">
                 <button
                   onClick={() => setShowCycles((v) => !v)}
-                  className="flex h-8 items-center gap-1.5 rounded-md border border-warning/40 bg-warning/10 px-2.5 text-xs font-medium text-warning"
+                  className="flex h-8 items-center gap-1.5 rounded-md bg-warning/12 px-2.5 text-xs font-semibold text-warning"
                 >
-                  ↺ {org.cycles.length} {org.cycles.length === 1 ? "cycle" : "cycles"}
+                  <RefreshCcw className="size-3.5" /> {org.cycles.length} {org.cycles.length === 1 ? "cycle" : "cycles"}
                 </button>
                 {showCycles && (
-                  <div className="absolute right-0 z-20 mt-1 flex w-72 flex-col gap-0.5 rounded-lg border bg-popover p-1.5 shadow-lg">
+                  <div className="absolute right-0 z-20 mt-1 flex w-72 flex-col gap-0.5 rounded-lg bg-popover p-1.5 shadow-float">
                     <p className="px-2 py-1.5 text-xs text-muted-foreground">
                       These repositories depend on each other in a circle, so none of them can change or release on its own.
                     </p>
@@ -316,7 +326,7 @@ export function OverviewPage() {
                         onClick={() => (setStart(c[0]), setDir("uses"), setOpen(new Set([c[0]])), setSelected(null), setShowCycles(false))}
                         className="rounded-md px-2 py-1.5 text-left font-mono text-xs hover:bg-muted"
                       >
-                        {c.join(" ⇄ ")}
+                        {c.join(", ")}
                       </button>
                     ))}
                   </div>
@@ -332,7 +342,7 @@ export function OverviewPage() {
                   setOpen(new Set(e.target.value === "*" ? [] : [e.target.value])),
                   setSelected(null)
                 )}
-                className="h-8 rounded-md border border-input bg-card px-2 text-[13px] text-foreground"
+                className="h-8 rounded-md border border-input bg-card px-2 text-xs text-foreground"
               >
                 <option value="*">{dir === "uses" ? "All entry points" : "All shared code"}</option>
                 {org.repos.map((r) => (
@@ -342,18 +352,18 @@ export function OverviewPage() {
                 ))}
               </select>
             </label>
-            <div className="flex rounded-lg border bg-card p-0.5" role="group" aria-label="Direction">
+            <div className="flex h-8 rounded-lg bg-secondary p-0.5" role="group" aria-label="Direction">
               {(
                 [
-                  ["uses", "What it uses →"],
-                  ["usedBy", "← What uses it"],
+                  ["uses", "What it uses"],
+                  ["usedBy", "What uses it"],
                 ] as const
               ).map(([d, label]) => (
                 <button
                   key={d}
                   aria-pressed={dir === d}
                   onClick={() => (setDir(d), setOpen(new Set(start === "*" ? [] : [start])), setSelected(null))}
-                  className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${dir === d ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                  className={`rounded-md px-2.5 text-xs font-semibold transition-colors duration-100 ${dir === d ? "bg-card text-foreground shadow-[0_1px_2px_var(--shadow-ink)]" : "text-muted-foreground hover:text-foreground"}`}
                 >
                   {label}
                 </button>
@@ -367,7 +377,7 @@ export function OverviewPage() {
           ) : (
             <TreeView org={org} roots={roots} dir={dir} open={openKeys} onToggle={toggle} selected={selected} />
           )}
-          <div className="border-t px-5 py-3 font-mono text-xs text-muted-foreground">
+          <div className="border-t px-5 py-3 text-xs text-muted-foreground">
             Click a box to open or close it; each line names the contract it goes through. A dashed box is shown elsewhere in the tree; an
             amber line loops back where repositories depend on each other in a circle.
           </div>
@@ -375,9 +385,9 @@ export function OverviewPage() {
             <div className="border-t px-5 py-3.5">
               <div className="flex items-center justify-between">
                 <span className="eyebrow">Index version</span>
-                <span className="font-mono text-xs text-muted-foreground">
+                <span className="nums text-xs text-muted-foreground">
                   {(versions.data[at ?? last] ?? "").slice(0, 16).replace("T", " ")}
-                  {(at ?? last) === last ? " · latest" : ` · ${(at ?? last) + 1} of ${last + 1}`}
+                  {(at ?? last) === last ? ", the latest" : `, ${(at ?? last) + 1} of ${last + 1}`}
                 </span>
               </div>
               <Slider className="mt-3" min={0} max={last} step={1} value={[at ?? last]} onValueChange={([v]) => setAt(v)} />
@@ -405,23 +415,20 @@ export function OverviewPage() {
         <div className="grid min-w-0 gap-6 lg:grid-cols-2">
           <Panel title="Needs attention" to="/ledger" link="Ledger">
             {needs.length === 0 ? (
-              <p className="px-5 py-4 text-sm text-muted-foreground">
+              <p className="px-5 pt-1 pb-5 text-muted-foreground">
                 Nothing to review. Records that go stale or get disputed show up here.
               </p>
             ) : (
               needs.slice(0, 4).map((e) => (
-                <Link key={e.record.id} to="/ledger" className="flex flex-col gap-1.5 border-b px-5 py-3 last:border-0 hover:bg-muted/40">
-                  <span className="eyebrow flex items-center gap-2">
-                    <span
-                      className={
-                        isChallenged(e) ? "text-warning" : ["stale", "orphaned"].includes(e.status) ? "text-danger" : "text-[#8fb8ff]"
-                      }
-                    >
-                      {isChallenged(e) ? "disputed" : ["stale", "orphaned"].includes(e.status) ? e.status : "unconfirmed"}
-                    </span>
-                    {e.record.kind} · {e.record.anchors[0]?.repo ?? "—"}
+                <Link key={e.record.id} to="/ledger" className="flex flex-col gap-1 border-t px-5 py-3 hover:bg-muted/60">
+                  <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Badge variant={isChallenged(e) ? "warning" : ["stale", "orphaned"].includes(e.status) ? "danger" : "default"}>
+                      {isChallenged(e) ? "Disputed" : ["stale", "orphaned"].includes(e.status) ? sentenceCase(e.status) : "Unconfirmed"}
+                    </Badge>
+                    {sentenceCase(e.record.kind)}
+                    {e.record.anchors[0] ? ` in ${e.record.anchors[0].repo}` : ""}
                   </span>
-                  <span className="text-[13.5px]">{e.record.title}</span>
+                  <span>{e.record.title}</span>
                 </Link>
               ))
             )}
@@ -433,21 +440,21 @@ export function OverviewPage() {
                 <Link
                   key={f.entry.id}
                   to={`/flows?id=${encodeURIComponent(f.entry.id)}`}
-                  className="flex items-center gap-3 border-b px-5 py-3 last:border-0 hover:bg-muted/40"
+                  className="flex items-center gap-3 border-t px-5 py-3 hover:bg-muted/60"
                 >
                   <span className="flex min-w-0 flex-1 items-center gap-2">
                     <RepoDot repo={f.entry.repo} />
-                    <span className="truncate font-mono text-[13px]">{f.entry.name}</span>
+                    <span className="truncate font-mono text-xs">{f.entry.name}</span>
                     <span className="truncate text-xs text-muted-foreground">{f.entry.repo}</span>
                   </span>
-                  <span className="text-xs text-muted-foreground">{f.repos.length} repos</span>
+                  <span className="nums text-xs text-muted-foreground">{f.repos.length} repositories</span>
                   <span className="h-1 w-16 overflow-hidden rounded-full bg-muted">
                     <span className="block h-1 bg-brand" style={{ width: `${(f.repos.length / most) * 100}%` }} />
                   </span>
                 </Link>
               );
             })}
-            {flows.data?.length === 0 && <p className="px-5 py-4 text-sm text-muted-foreground">No flows yet.</p>}
+            {flows.data?.length === 0 && <p className="px-5 pt-1 pb-5 text-muted-foreground">No flows yet. They appear once repositories are indexed.</p>}
           </Panel>
         </div>
       </div>
@@ -471,7 +478,7 @@ export function OverviewPage() {
                     <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
                       <div className="h-full rounded-full bg-brand/70" style={{ width: `${(r.symbols / max) * 100}%` }} />
                     </div>
-                    <span className="w-14 text-right font-mono text-xs tabular-nums text-muted-foreground">
+                    <span className="nums w-14 text-right text-xs text-muted-foreground">
                       {r.symbols.toLocaleString()}
                     </span>
                   </div>
@@ -486,8 +493,8 @@ export function OverviewPage() {
               <CardTitle>Version skew</CardTitle>
               <CardDescription>Internal packages pinned to a different version than their publisher.</CardDescription>
             </div>
-            <Link to="/packages" className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-              Packages <ArrowUpRight className="size-3" />
+            <Link to="/packages" className="text-xs font-semibold text-brand hover:underline">
+              Packages
             </Link>
           </CardHeader>
           <CardContent>
@@ -509,7 +516,7 @@ export function OverviewPage() {
                       <Td>{s.consumer}</Td>
                       <Td className="font-mono text-xs">{s.locked}</Td>
                       <Td className="font-mono text-xs text-muted-foreground">
-                        {s.published} <span className="text-[10px]">({s.publisher})</span>
+                        {s.published} <span className="font-sans text-xs">from {s.publisher}</span>
                       </Td>
                     </Tr>
                   ))}

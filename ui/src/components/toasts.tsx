@@ -17,7 +17,23 @@ declare module "@tanstack/react-query" {
 /** Toasts in the corner for every action that finishes. */
 export function Toasts() {
   const { theme } = useTheme();
-  return <Toaster theme={theme} position="bottom-right" richColors closeButton />;
+  return (
+    <Toaster
+      theme={theme}
+      position="bottom-right"
+      closeButton
+      style={
+        {
+          "--normal-bg": "var(--color-popover)",
+          "--normal-text": "var(--color-popover-foreground)",
+          "--normal-border": "transparent",
+          "--border-radius": "10px",
+          fontFamily: "var(--font-sans)",
+        } as React.CSSProperties
+      }
+      toastOptions={{ classNames: { toast: "shadow-float", success: "[&_[data-icon]]:text-brand", error: "[&_[data-icon]]:text-danger" } }}
+    />
+  );
 }
 
 /** A finished action: its server message as a success toast, or its error (unless shown inline). */

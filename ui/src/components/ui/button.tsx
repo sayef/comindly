@@ -5,17 +5,17 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-semibold transition-[background-color,color,box-shadow] duration-100 disabled:pointer-events-none disabled:opacity-45 [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/90",
-        brand: "bg-brand text-brand-foreground hover:bg-brand/90 shadow-[0_0_0_1px_color-mix(in_srgb,var(--color-brand)_40%,transparent)]",
-        outline: "border border-input bg-card hover:bg-muted hover:border-muted-foreground/30",
+        default: "bg-primary text-primary-foreground hover:bg-primary/85",
+        brand: "bg-brand text-brand-foreground hover:bg-[color-mix(in_srgb,var(--color-brand)_86%,var(--color-foreground))]",
+        outline: "bg-secondary text-foreground hover:bg-[color-mix(in_srgb,var(--color-secondary)_80%,var(--color-foreground))]",
         ghost: "text-muted-foreground hover:bg-muted hover:text-foreground",
-        secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/70",
+        secondary: "bg-secondary text-secondary-foreground hover:bg-[color-mix(in_srgb,var(--color-secondary)_80%,var(--color-foreground))]",
       },
-      size: { default: "h-9 px-4", sm: "h-8 px-3 text-xs", lg: "h-10 px-6", icon: "size-9" },
+      size: { default: "h-9 px-3.5", sm: "h-8 px-3 text-xs", lg: "h-11 px-5", icon: "size-9" },
     },
     defaultVariants: { variant: "default", size: "default" },
   },

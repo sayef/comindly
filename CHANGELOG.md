@@ -26,6 +26,10 @@ All notable changes to this project are documented here. The format follows
 - Recipe conventions show the commits they were learned from, linked to GitHub or GitLab, instead of
   a "Show code" that could not find them.
 - The index records each repository's default branch, so the Repositories page shows it without a clone.
+- A new look for the app: pine ink on a cool paper ground with the logo's green as the one accent, Atkinson
+  Hyperlegible for text and code, and pages that open with what the index found (Overview names the
+  repository most others depend on, Explorer the reach of a change). Tokens and rules are in `ui/DESIGN.md`.
+- The ledger opens on the timeline when nothing needs review, and its view is part of the address.
 - A summary is written again only when its symbol's name, signature or path changed, not whenever
   its file did.
 - Style guides are rewritten per section, and only when that section's evidence drifted.

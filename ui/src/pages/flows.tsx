@@ -1,8 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, ChevronLeft, Search, Sparkles } from "lucide-react";
 import { useMemo, useState } from "react";
+import { withCode } from "@/components/code-text";
 import { Link, useSearchParams } from "react-router";
 import { RepoDot, SymbolLink } from "@/components/symbol";
+import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -23,7 +25,7 @@ function Journey({ repos }: { repos: string[] }) {
       {repos.map((r, i) => (
         <span key={r} className="flex items-center gap-1">
           {i > 0 && <ArrowRight className="size-3 text-muted-foreground" />}
-          <span className="flex items-center gap-1 rounded-full border px-2 py-0.5">
+          <span className="flex items-center gap-1.5 rounded-sm bg-muted px-2 py-0.5">
             <RepoDot repo={r} /> {r}
           </span>
         </span>
@@ -32,17 +34,6 @@ function Journey({ repos }: { repos: string[] }) {
   );
 }
 
-function withCode(text: string) {
-  return text.split(/`([^`]+)`/).map((part, i) =>
-    i % 2 ? (
-      <code key={i} className="rounded bg-muted px-1 py-0.5 font-mono text-[0.85em]">
-        {part}
-      </code>
-    ) : (
-      part
-    ),
-  );
-}
 
 /** The flow as a tree: each step under the step that led to it. */
 function Path({ entry, steps }: { entry: Node; steps: FlowStep[] }) {
@@ -58,7 +49,7 @@ function Path({ entry, steps }: { entry: Node; steps: FlowStep[] }) {
       return (
         <li key={s.node.id} className="flex flex-col">
           <div className={cn("flex flex-wrap items-center gap-2 rounded-md px-2 py-1", contract && "bg-accent")}>
-            <span className="w-20 shrink-0 text-right font-mono text-[11px] text-muted-foreground">{s.via}</span>
+            <span className="w-20 shrink-0 text-right text-xs text-muted-foreground">{s.via}</span>
             {contract ? (
               <span className="font-mono text-xs text-accent-foreground">{s.node.name}</span>
             ) : (
@@ -73,7 +64,7 @@ function Path({ entry, steps }: { entry: Node; steps: FlowStep[] }) {
   return (
     <div className="flex flex-col gap-1 text-sm">
       <div className="flex items-center gap-2 px-2 py-1">
-        <span className="w-20 shrink-0 text-right font-mono text-[11px] text-muted-foreground">start</span>
+        <span className="w-20 shrink-0 text-right text-xs text-muted-foreground">Start</span>
         <SymbolLink node={entry} />
       </div>
       <ul className="ml-6 border-l pl-2">{render(entry.id, entry.repo, 0)}</ul>
@@ -86,7 +77,7 @@ function FlowView({ id }: { id: string }) {
   const f = flow.data;
   return (
     <div className="flex flex-col gap-5">
-      <Link to="/flows" className="flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+      <Link to="/flows" className="flex min-h-9 w-fit items-center gap-1 pt-4 text-sm font-semibold text-muted-foreground hover:text-foreground">
         <ChevronLeft className="size-4" /> All flows
       </Link>
       {!f ? (
@@ -94,7 +85,7 @@ function FlowView({ id }: { id: string }) {
       ) : (
         <>
           <div className="flex flex-col gap-2">
-            <h1 className="text-[28px] font-semibold tracking-[-0.035em]">{f.entry.name}</h1>
+            <h1 className="font-mono text-[26px] font-semibold tracking-[-0.02em] [overflow-wrap:anywhere]">{f.entry.name}</h1>
             <Journey repos={journey(f.entry, f.steps)} />
           </div>
           {f.narration && (
@@ -109,7 +100,7 @@ function FlowView({ id }: { id: string }) {
                   <p key={i}>{withCode(p)}</p>
                 ))}
                 {f.questions && f.questions.length > 0 && (
-                  <p className="text-xs text-muted-foreground">Answers: {withCode(f.questions.join(" · "))}</p>
+                  <p className="text-xs text-muted-foreground">Answers: {withCode(f.questions.join("; "))}</p>
                 )}
               </CardContent>
             </Card>
@@ -147,15 +138,15 @@ export function FlowsPage() {
     });
   const total = flows.data?.length ?? 0;
 
+  const crossing = (flows.data ?? []).filter((f) => f.repos.length > 1);
+  const furthest = crossing.reduce((m, f) => Math.max(m, f.repos.length), 0);
   return (
-    <div className="flex flex-col gap-5">
-      <div>
-        <h1 className="text-[28px] font-semibold tracking-[-0.035em]">Flows</h1>
-        <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-          Where work starts and where it travels: calls, then across HTTP routes, topics and queues into the services that handle
-          them. With LLM summaries on when indexing, flows also get a written walkthrough.
-        </p>
-      </div>
+    <div className="flex flex-col gap-6">
+      <PageHeader title="Flows">
+        {total
+          ? `${crossing.length} of ${total} entry points travel into other repositories, through calls, routes, topics and queues; the furthest reaches ${furthest}.`
+          : "Where work starts and where it travels: calls, then across HTTP routes, topics and queues into the services that handle them."}
+      </PageHeader>
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative w-full max-w-sm">
           <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
@@ -165,17 +156,17 @@ export function FlowsPage() {
           <input type="checkbox" checked={across} onChange={(e) => setAcross(e.target.checked)} />
           Only flows across repositories
         </label>
-        <span className="text-xs text-muted-foreground">
+        <span className="nums text-xs text-muted-foreground">
           {rows.length} of {total}
         </span>
       </div>
       <Card className="overflow-hidden">
         {flows.isLoading && <Skeleton className="h-40" />}
         {flows.data && rows.length === 0 && (
-          <p className="p-6 text-center text-sm text-muted-foreground">
-            {total === 0 ? "No flows in this index yet." : "No flows match."}{" "}
+          <p className="px-5 py-8 text-muted-foreground">
+            {total === 0 ? "No flows in this index yet. They appear once repositories are indexed." : "No flow matches."}{" "}
             {across && total > 0 && (
-              <button className="underline underline-offset-2" onClick={() => setAcross(false)}>
+              <button className="font-semibold text-brand hover:underline" onClick={() => setAcross(false)}>
                 Show flows within one repository too
               </button>
             )}
@@ -185,26 +176,26 @@ export function FlowsPage() {
           <Link
             key={f.entry.id}
             to={`/flows?id=${encodeURIComponent(f.entry.id)}`}
-            className="flex flex-col gap-1.5 border-b px-4 py-3 last:border-0 hover:bg-muted/40"
+            className="flex flex-col gap-2 border-b px-5 py-3.5 last:border-0 hover:bg-muted/60"
           >
             <div className="flex flex-wrap items-center gap-2">
               <RepoDot repo={f.entry.repo} />
-              <span className="font-medium">{f.entry.name}</span>
-              <span className="font-mono text-[11px] text-muted-foreground">{f.entry.location}</span>
+              <span className="font-mono font-semibold">{f.entry.name}</span>
+              <span className="font-mono text-xs text-muted-foreground">{f.entry.location}</span>
               {f.narrated && <Badge variant="brand">Walkthrough</Badge>}
-              <span className="ml-auto text-xs text-muted-foreground">{f.steps} steps</span>
+              <span className="nums ml-auto text-xs text-muted-foreground">{f.steps} steps</span>
             </div>
             <Journey repos={f.repos} />
             {f.contracts.length > 0 && (
               <div className="flex flex-wrap gap-1">
                 {f.contracts.map((c) => (
-                  <span key={c} className="rounded bg-accent px-1.5 py-0.5 font-mono text-[11px] text-accent-foreground">
+                  <span key={c} className="rounded-sm bg-accent px-1.5 py-0.5 font-mono text-xs text-accent-foreground">
                     {c}
                   </span>
                 ))}
               </div>
             )}
-            {f.summary && <p className="line-clamp-2 text-xs text-muted-foreground">{f.summary.replace(/`/g, "")}</p>}
+            {f.summary && <p className="line-clamp-2 max-w-[80ch] text-muted-foreground">{f.summary.replace(/`/g, "")}</p>}
           </Link>
         ))}
       </Card>

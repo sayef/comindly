@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api, type Me } from "@/lib/api";
 
-const field = "flex flex-col gap-1 text-xs font-medium";
+const field = "flex flex-col gap-1.5 text-sm font-semibold";
 const AFTER = "comindly:after-sign-in";
 
 /** Back where sign-in interrupted, else home. */
@@ -31,10 +31,12 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <div className="mb-6 flex items-center justify-center gap-2.5">
           <img src="/logo.svg" alt="" className="size-8 dark:hidden" />
           <img src="/logo-dark.svg" alt="" className="hidden size-8 dark:block" />
-          <span className="text-lg font-semibold tracking-[-0.03em]">comindly</span>
+          <span className="text-[17px] font-semibold tracking-[-0.01em]" translate="no">
+            comindly
+          </span>
         </div>
-        <div className="rounded-xl border bg-card/90 p-6 shadow-[0_24px_60px_-20px_rgb(0_0_0/0.35)] backdrop-blur">{children}</div>
-        <p className="eyebrow mt-5 text-center">Your team's engineering memory for coding agents</p>
+        <div className="rounded-xl bg-card p-6 shadow-float">{children}</div>
+        <p className="mt-5 text-center text-xs text-muted-foreground">Your team's engineering memory for coding agents</p>
       </div>
     </div>
   );
@@ -45,7 +47,7 @@ function Confirm({ token }: { token: string }) {
   const redeem = useMutation({ mutationFn: () => api.redeem(token), meta: { inline: true, quiet: true }, onSuccess: home });
   return (
     <Shell>
-      <h1 className="text-base font-semibold">Continue to comindly</h1>
+      <h1 className="text-[17px] font-semibold">Continue to comindly</h1>
       <p className="mt-1 text-sm text-muted-foreground">This link signs you in on this browser. It works once.</p>
       <Button variant="brand" className="mt-5 w-full" loading={redeem.isPending} onClick={() => redeem.mutate()}>
         Sign in
@@ -203,7 +205,7 @@ export function SignInPage({ me }: { me: Me }) {
   if (token && me.sign_in === "email") return <Confirm token={token} />;
   return (
     <Shell>
-      <h1 className="text-base font-semibold">Sign in</h1>
+      <h1 className="text-[17px] font-semibold">Sign in</h1>
       {me.sign_in === "email" ? <ByEmail /> : <ByCode />}
       <div className="mt-5 border-t pt-4">
         <AdminToken />

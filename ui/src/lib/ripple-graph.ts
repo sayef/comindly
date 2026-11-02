@@ -7,8 +7,8 @@ type Ripple = { origin: number; t0: number; lit: Lit[]; end: number };
 
 export type Palette = { node: Rgb; near: Rgb; far: Rgb; contract: Rgb; strength: number; lit: number; glow: boolean };
 
-export const DARK: Palette = { node: [242, 242, 242], near: [194, 241, 227], far: [139, 227, 201], contract: [139, 227, 201], strength: 0.55, lit: 0.35, glow: false };
-export const LIGHT: Palette = { node: [23, 23, 23], near: [31, 154, 116], far: [19, 121, 91], contract: [19, 121, 91], strength: 0.45, lit: 0.35, glow: false };
+export const DARK: Palette = { node: [228, 236, 232], near: [155, 230, 200], far: [92, 207, 164], contract: [92, 207, 164], strength: 0.55, lit: 0.35, glow: false };
+export const LIGHT: Palette = { node: [15, 31, 26], near: [26, 140, 104], far: [15, 107, 80], contract: [15, 107, 80], strength: 0.45, lit: 0.35, glow: false };
 
 const REPOS = ["storefront", "orders", "payments", "catalog", "shipping"];
 const LINKS = [[0, 1], [0, 2], [1, 3], [2, 4], [3, 4], [0, 4], [1, 4]];

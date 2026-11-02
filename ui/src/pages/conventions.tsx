@@ -3,6 +3,7 @@ import { ArrowDownUp, ChevronDown, ChevronRight, Code2, ExternalLink, GitCommitH
 import { Fragment, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { RepoDot } from "@/components/symbol";
+import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -10,6 +11,7 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip } from "@/components/ui/tooltip";
+import { withCode } from "@/components/code-text";
 import { api, type Convention, type ConventionChange } from "@/lib/api";
 import { cn, sentence } from "@/lib/utils";
 
@@ -17,8 +19,8 @@ const ORG = "*";
 const scopeName = (r: string) => (r === ORG ? "Org-wide" : r);
 const originName = { measured: "Measured", edited: "Edited", manual: "Team" } as const;
 const textarea =
-  "min-h-20 w-full rounded-md border bg-card px-3 py-2 text-sm shadow-xs outline-none focus-visible:ring-2 focus-visible:ring-ring";
-const select = "h-9 rounded-md border bg-card px-2 text-sm";
+  "min-h-20 w-full rounded-md border border-input bg-card px-3 py-2 text-sm outline-none transition-[border-color,box-shadow] duration-100 hover:border-muted-foreground/50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/20 max-sm:text-base";
+const select = "h-9 rounded-md border border-input bg-card px-2 text-sm transition-colors duration-100 hover:border-muted-foreground/50";
 
 function useChange() {
   const qc = useQueryClient();
@@ -70,24 +72,24 @@ function Where({ repo, at, kind }: { repo: string; at: string; kind: "follows" |
         <Badge variant={kind === "follows" ? "brand" : "warning"}>{kind === "follows" ? "Follows" : "Deviates"}</Badge>
         {r !== ORG && <RepoDot repo={r} />}
         <span className="font-mono [overflow-wrap:anywhere]">{repo === ORG ? `${r}: ${loc}` : loc}</span>
-        <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" loading={open && src.isLoading} onClick={() => setOpen(!open)}>
+        <Button size="sm" variant="ghost" className="h-7 px-2" loading={open && src.isLoading} onClick={() => setOpen(!open)}>
           {!(open && src.isLoading) && <Code2 />} {open ? "Hide code" : "Show code"}
         </Button>
       </div>
       {open && src.error && <p className="text-xs text-muted-foreground">{sentence(src.error.message)}</p>}
       {open && src.data && (
-        <pre className="overflow-x-auto rounded-md border bg-muted/40 py-2 font-mono text-[11px] leading-relaxed">
+        <pre className="overflow-x-auto rounded-md bg-muted py-2 font-mono text-xs leading-relaxed">
           {src.data.lines.map((l) => (
-            <div key={l.n} className={cn("flex gap-3 px-3", l.n === src.data.line && "bg-brand/15")}>
-              <span className="w-8 shrink-0 select-none text-right text-muted-foreground">{l.n}</span>
+            <div key={l.n} className={cn("flex gap-3 px-3", l.n === src.data.line && "bg-brand/12")}>
+              <span className="nums w-8 shrink-0 select-none text-right text-muted-foreground">{l.n}</span>
               <span className="whitespace-pre">{l.text}</span>
             </div>
           ))}
         </pre>
       )}
       {open && src.data?.link && (
-        <a className="flex items-center gap-1 self-start text-xs text-brand hover:underline" href={src.data.link} target="_blank" rel="noreferrer">
-          <ExternalLink className="size-3" /> Open at {src.data.commit?.slice(0, 8)}
+        <a className="flex items-center gap-1.5 self-start text-xs font-semibold text-brand hover:underline" href={src.data.link} target="_blank" rel="noreferrer">
+          <ExternalLink className="size-3.5" /> Open at {src.data.commit?.slice(0, 8)}
         </a>
       )}
     </li>
@@ -107,9 +109,9 @@ function Row({ c, writable, commitUrls }: { c: Convention; writable: boolean; co
   return (
     <Fragment>
       <tr className="group border-b align-top last:border-0">
-        <td className="w-8 py-2.5 pl-3">
+        <td className="w-10 py-2 pl-2">
           {where > 0 && (
-            <button className="text-muted-foreground hover:text-foreground" onClick={() => setOpen(!open)} aria-label={open ? "Hide where it comes from" : "Show where it comes from"} title="Where it comes from">
+            <button className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground" onClick={() => setOpen(!open)} aria-label={open ? "Hide where it comes from" : "Show where it comes from"} title="Where it comes from">
               {open ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
             </button>
           )}
@@ -129,7 +131,7 @@ function Row({ c, writable, commitUrls }: { c: Convention; writable: boolean; co
               </div>
             </div>
           ) : (
-            <span className="text-sm leading-snug">{c.rule}</span>
+            <span className="leading-snug">{withCode(c.rule)}</span>
           )}
         </td>
         <td className="whitespace-nowrap py-2.5 pr-4 text-xs">
@@ -138,7 +140,7 @@ function Row({ c, writable, commitUrls }: { c: Convention; writable: boolean; co
             {scopeName(c.repo)}
           </span>
         </td>
-        <td className="py-2.5 pr-4 text-xs text-muted-foreground">{c.dimension}</td>
+        <td className="py-2.5 pr-4 text-xs text-muted-foreground">{c.dimension.charAt(0).toUpperCase() + c.dimension.slice(1)}</td>
         <td className="py-2.5 pr-4">
           <Badge variant={c.origin === "manual" ? "brand" : "outline"}>{originName[c.origin]}</Badge>
         </td>
@@ -148,7 +150,7 @@ function Row({ c, writable, commitUrls }: { c: Convention; writable: boolean; co
               <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
                 <div className={cn("h-full rounded-full", pct >= 80 ? "bg-brand" : "bg-warning")} style={{ width: `${pct}%` }} />
               </div>
-              <span className="font-mono text-[11px] tabular-nums text-muted-foreground">{pct}%</span>
+              <span className="nums w-9 text-right text-xs text-muted-foreground">{pct}&nbsp;%</span>
             </div>
           )}
         </td>
@@ -214,12 +216,12 @@ function AddDialog({ open, onOpenChange, scopes, scope, dimensions }: { open: bo
   return (
     <Dialog open={open} onOpenChange={(o) => (o && setRepo(scope), onOpenChange(o))}>
       <DialogContent className="p-5">
-        <DialogTitle className="text-base font-semibold">Add a convention</DialogTitle>
+        <DialogTitle className="text-[17px] font-semibold">Add a convention</DialogTitle>
         <p className="mt-1 text-sm text-muted-foreground">Agents see it through the MCP guide, marked as set by the team.</p>
         <div className="mt-4 flex flex-col gap-3">
           <label className="flex flex-col gap-1 text-xs font-medium">
             Applies to
-            <select className="h-9 rounded-md border bg-card px-2 text-sm" value={repo} onChange={(e) => setRepo(e.target.value)}>
+            <select className={select} value={repo} onChange={(e) => setRepo(e.target.value)}>
               {scopes.map((r) => (
                 <option key={r} value={r}>
                   {scopeName(r)}
@@ -293,21 +295,25 @@ export function ConventionsPage() {
   }, [items, scope, topic, origin, query, sort]);
   const hidden = (all.data?.hidden ?? []).filter((h) => !scope || h.repo === scope);
 
+  const measured = items.filter((c) => c.origin !== "manual" && c.total > 0);
+  const firm = measured.filter((c) => c.support / c.total >= 0.8).length;
+  const loose = measured.filter((c) => c.support / c.total < 0.5).length;
   return (
-    <div className="flex flex-col gap-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-[28px] font-semibold tracking-[-0.035em]">Conventions</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Measured from the code, plus the team's own: how each repository names, structures, logs, configures and tests things.
-          </p>
-        </div>
-        {writable && (
-          <Button variant="brand" onClick={() => setAdding(true)}>
-            <Plus /> Add convention
-          </Button>
-        )}
-      </div>
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        title="Conventions"
+        actions={
+          writable && (
+            <Button variant="brand" onClick={() => setAdding(true)}>
+              <Plus /> Add convention
+            </Button>
+          )
+        }
+      >
+        {measured.length
+          ? `${firm} of ${measured.length} measured conventions hold in at least 80 % of places; ${loose} hold in fewer than half, so the code does not agree on them yet.`
+          : "Measured from the code, plus the team's own: how each repository names, structures, logs, configures and tests things."}
+      </PageHeader>
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative w-full max-w-xs">
           <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
@@ -343,7 +349,7 @@ export function ConventionsPage() {
             <option value="strength">By strength</option>
           </select>
         </label>
-        <span className="text-xs text-muted-foreground">
+        <span className="nums text-xs text-muted-foreground">
           {rows.length} of {items.length}
         </span>
       </div>
@@ -351,17 +357,21 @@ export function ConventionsPage() {
         {all.isLoading ? (
           <Skeleton className="h-64" />
         ) : rows.length === 0 ? (
-          <p className="p-6 text-center text-sm text-muted-foreground">{items.length === 0 ? "No conventions yet." : "No conventions match."}</p>
+          <p className="px-5 py-8 text-muted-foreground">
+            {items.length === 0
+              ? "No conventions yet. They are measured when repositories are indexed; you can also add the team's own."
+              : "No convention matches these filters. Clear the filter text or widen the scope."}
+          </p>
         ) : (
           <table className="w-full text-left">
             <thead className="border-b">
               <tr>
                 <th className="w-8" />
-                <th className="eyebrow h-9 pr-4 font-normal">Rule</th>
-                <th className="eyebrow h-9 pr-4 font-normal">Scope</th>
-                <th className="eyebrow h-9 pr-4 font-normal">Topic</th>
-                <th className="eyebrow h-9 pr-4 font-normal">Origin</th>
-                <th className="eyebrow h-9 pr-4 font-normal">Followed</th>
+                <th className="eyebrow h-10 pr-4">Rule</th>
+                <th className="eyebrow h-10 pr-4">Scope</th>
+                <th className="eyebrow h-10 pr-4">Topic</th>
+                <th className="eyebrow h-10 pr-4">Origin</th>
+                <th className="eyebrow h-10 pr-4">Followed</th>
                 <th />
               </tr>
             </thead>
@@ -374,8 +384,8 @@ export function ConventionsPage() {
         )}
       </Card>
       {hidden.length > 0 && (
-        <details className="rounded-xl border bg-card p-4">
-          <summary className="cursor-pointer text-sm font-medium">Hidden ({hidden.length})</summary>
+        <details className="rounded-lg bg-card p-4">
+          <summary className="cursor-pointer font-semibold">Hidden conventions ({hidden.length})</summary>
           <div className="mt-3 flex flex-col gap-2">
             {hidden.map((h) => (
               <div key={h.id} className="flex items-center gap-3 text-sm text-muted-foreground">

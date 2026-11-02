@@ -120,12 +120,12 @@ function Bar({ e }: { e: IndexEvent }) {
     <div className="mt-2.5">
       <div className="flex items-baseline justify-between gap-2 text-xs">
         <span className="text-muted-foreground">{e.step && e.step !== e.message ? e.message : "Progress"}</span>
-        <span className="nums font-mono text-muted-foreground">
+        <span className="nums text-muted-foreground">
           {fmt(e.done ?? 0)} / {fmt(e.total ?? 0)}
         </span>
       </div>
       <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
-        <div className="h-full rounded-full bg-brand transition-all duration-500" style={{ width: `${pct}%` }} />
+        <div className="h-full origin-left rounded-full bg-brand transition-transform duration-500" style={{ transform: `scaleX(${pct / 100})` }} />
       </div>
     </div>
   );
@@ -135,7 +135,7 @@ function Lines({ lines }: { lines: IndexEvent[] }) {
   const [all, setAll] = useState(false);
   const shown = all ? lines : lines.slice(0, 8);
   return (
-    <ul className="mt-2 flex flex-col gap-1 text-[13px]">
+    <ul className="mt-2 flex flex-col gap-1 text-xs">
       {shown.map((e, i) => (
         <li
           key={i}
@@ -154,7 +154,7 @@ function Lines({ lines }: { lines: IndexEvent[] }) {
             <span className="mt-[7px] size-1 shrink-0 rounded-full bg-current opacity-60" />
           )}
           <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{e.message}</span>
-          <span className="shrink-0 font-mono text-[10.5px] opacity-70">{clock(e.timestamp)}</span>
+          <span className="nums shrink-0 text-xs opacity-70">{clock(e.timestamp)}</span>
         </li>
       ))}
       {lines.length > 8 && (
@@ -183,14 +183,14 @@ function StepRow({ step, state, last }: { step: Step; state: State; last: boolea
           onClick={() => hasMore && setOpen(!expanded)}
           aria-expanded={hasMore ? expanded : undefined}
         >
-          <span className={cn("text-sm font-medium", state === "stopped" && "text-muted-foreground")}>{step.title}</span>
-          {step.warnings > 0 && <span className="rounded bg-warning/12 px-1.5 font-mono text-[10.5px] text-warning">{step.warnings} warning{step.warnings > 1 && "s"}</span>}
-          {step.errors > 0 && <span className="rounded bg-danger/12 px-1.5 font-mono text-[10.5px] text-danger">{step.errors} error{step.errors > 1 && "s"}</span>}
-          {hasMore && !step.warnings && !step.errors && <span className="font-mono text-[10.5px] text-muted-foreground">{step.lines.length}</span>}
+          <span className={cn("text-sm font-semibold", state === "stopped" && "text-muted-foreground")}>{step.title}</span>
+          {step.warnings > 0 && <span className="nums rounded-sm bg-warning/12 px-1.5 text-xs font-semibold text-warning">{step.warnings} warning{step.warnings > 1 && "s"}</span>}
+          {step.errors > 0 && <span className="nums rounded-sm bg-danger/12 px-1.5 text-xs font-semibold text-danger">{step.errors} error{step.errors > 1 && "s"}</span>}
+          {hasMore && !step.warnings && !step.errors && <span className="nums text-xs text-muted-foreground">{step.lines.length}</span>}
           {hasMore && <ChevronDown className={cn("size-3.5 text-muted-foreground transition-transform", expanded && "rotate-180")} />}
-          <span className="ml-auto flex shrink-0 items-center gap-3 font-mono text-[11px] text-muted-foreground">
+          <span className="nums ml-auto flex shrink-0 items-center gap-3 text-xs text-muted-foreground">
             {step.tokensIn > 0 && (
-              <span className="hidden items-center gap-1 sm:flex" title={`${fmt(step.tokensIn)} tokens in · ${fmt(step.tokensOut)} out`}>
+              <span className="hidden items-center gap-1 sm:flex" title={`${fmt(step.tokensIn)} tokens in, ${fmt(step.tokensOut)} out`}>
                 <Sparkles className="size-3" />
                 {step.usd < 0.01 ? "<$0.01" : `$${step.usd.toFixed(2)}`}
               </span>
@@ -209,8 +209,8 @@ function StepRow({ step, state, last }: { step: Step; state: State; last: boolea
 function Stat({ label, value, tone }: { label: string; value: string; tone?: "warning" | "danger" }) {
   return (
     <div className="flex flex-col gap-1 px-4 py-3">
-      <span className="eyebrow">{label}</span>
-      <span className={cn("nums text-[15px] font-semibold tracking-tight", tone === "warning" && "text-warning", tone === "danger" && "text-danger")}>{value}</span>
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className={cn("nums text-[17px] font-semibold", tone === "warning" && "text-warning", tone === "danger" && "text-danger")}>{value}</span>
     </div>
   );
 }
@@ -249,16 +249,16 @@ export function IndexLog({
   return (
     <div className="flex flex-col gap-4">
       {summary && (
-        <div className="grid grid-cols-2 divide-x divide-y rounded-lg border sm:grid-cols-4 sm:divide-y-0">
+        <div className="grid grid-cols-2 gap-px overflow-hidden rounded-md bg-border sm:grid-cols-4 [&>*]:bg-muted">
           <Stat label="Duration" value={from && to ? duration(new Date(to).getTime() - new Date(from).getTime()) : "—"} />
           <Stat label="Steps" value={String(list.length)} />
           <Stat label="Issues" value={errors ? `${errors} error${errors > 1 ? "s" : ""}` : warnings ? `${warnings} warning${warnings > 1 ? "s" : ""}` : "None"} tone={errors ? "danger" : warnings ? "warning" : undefined} />
-          <Stat label="LLM" value={tokens ? `${usd < 0.01 ? "<$0.01" : `$${usd.toFixed(2)}`} · ${fmt(tokens)} tok` : "Not used"} />
+          <Stat label="LLM" value={tokens ? `${usd < 0.01 ? "under $0.01" : `$${usd.toFixed(2)}`}, ${fmt(tokens)} tokens` : "Not used"} />
         </div>
       )}
 
       {plain ? (
-        <pre className="max-h-[32rem] overflow-auto rounded-lg border bg-muted/40 p-3 font-mono text-[11.5px] leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</pre>
+        <pre className="max-h-[32rem] overflow-auto overscroll-contain rounded-md bg-muted p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</pre>
       ) : (
         <ol className="flex flex-col">
           {list.map((s, i) => (

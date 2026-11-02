@@ -1,6 +1,6 @@
 @import "tailwindcss";
-@import "@fontsource-variable/geist";
-@import "@fontsource-variable/geist-mono";
+@import "@fontsource-variable/atkinson-hyperlegible-next";
+@import "@fontsource-variable/atkinson-hyperlegible-mono";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
@@ -23,77 +23,82 @@
   --color-brand-foreground: var(--brand-foreground);
   --color-warning: var(--warning);
   --color-danger: var(--danger);
+  --color-info: var(--info);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-sidebar: var(--sidebar);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  --font-sans: "Geist Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --radius-sm: 5px;
+  --radius-md: 7px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --font-sans: "Atkinson Hyperlegible Next Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Atkinson Hyperlegible Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --shadow-float: 0 1px 2px var(--shadow-ink), 0 12px 32px var(--shadow-ink-far);
 }
 
-/* Neutral ink and paper, mint as the one accent, pale mint for highlights; as on the docs site. */
+/* Pine ink on cool paper; the logo's green as the one accent. Tokens and reasons: ui/DESIGN.md. */
 :root {
-  --radius: 0.6rem;
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f4f6f4;
+  --foreground: #0f1f1a;
   --card: #ffffff;
-  --card-foreground: #171717;
+  --card-foreground: #0f1f1a;
   --popover: #ffffff;
-  --popover-foreground: #171717;
-  --primary: #171717;
+  --popover-foreground: #0f1f1a;
+  --primary: #0f1f1a;
   --primary-foreground: #ffffff;
-  --secondary: #f3f3f4;
-  --secondary-foreground: #171717;
-  --muted: #f3f3f4;
-  --muted-foreground: #646466;
-  --accent: #e7f5f0;
-  --accent-foreground: #0f604a;
-  --brand: #13795b;
+  --secondary: #eaeeeb;
+  --secondary-foreground: #0f1f1a;
+  --muted: #eaeeeb;
+  --muted-foreground: #4f605a;
+  --accent: #e2eee8;
+  --accent-foreground: #0b5640;
+  --brand: #0f6b50;
   --brand-foreground: #ffffff;
-  --warning: #a8650c;
-  --danger: #be123c;
-  --border: #e5e5e7;
-  --input: #d4d4d8;
-  --ring: #13795b;
-  --sidebar: #f8f8f9;
+  --warning: #8f5400;
+  --danger: #b42318;
+  --info: #2f5fa8;
+  --border: #dde3df;
+  --input: #c9d2cd;
+  --ring: #0f6b50;
+  --sidebar: #f4f6f4;
+  --shadow-ink: rgb(15 31 26 / 0.08);
+  --shadow-ink-far: rgb(15 31 26 / 0.14);
 }
 
 .dark {
-  --background: #0e0e0f;
-  --foreground: #ededed;
-  --card: #151517;
-  --card-foreground: #ededed;
-  --popover: #19191b;
-  --popover-foreground: #ededed;
-  --primary: #ededed;
-  --primary-foreground: #0e0e0f;
-  --secondary: #1d1d20;
-  --secondary-foreground: #ededed;
-  --muted: #1d1d20;
-  --muted-foreground: #9a9a9c;
-  --accent: #142721;
-  --accent-foreground: #a8ebd7;
-  --brand: #8be3c9;
+  --background: #0b1311;
+  --foreground: #e4ece8;
+  --card: #121c19;
+  --card-foreground: #e4ece8;
+  --popover: #18241f;
+  --popover-foreground: #e4ece8;
+  --primary: #e4ece8;
+  --primary-foreground: #0b1311;
+  --secondary: #1a2623;
+  --secondary-foreground: #e4ece8;
+  --muted: #1a2623;
+  --muted-foreground: #9fafa9;
+  --accent: #153029;
+  --accent-foreground: #9be6c8;
+  --brand: #5ccfa4;
   --brand-foreground: #04201a;
-  --warning: #f5c46b;
-  --danger: #fb7185;
-  --border: #252528;
-  --input: #333337;
-  --ring: #8be3c9;
-  --sidebar: #0a0a0b;
+  --warning: #e5ae4a;
+  --danger: #f27a7c;
+  --info: #8fb3f5;
+  --border: #22302c;
+  --input: #34443f;
+  --ring: #5ccfa4;
+  --sidebar: #0b1311;
+  --shadow-ink: rgb(0 0 0 / 0.3);
+  --shadow-ink-far: rgb(0 0 0 / 0.45);
 }
 
-/* Small uppercase mono labels: section names, table heads, stat captions. */
+/* A small label in the text face: sentence case, set with its content. */
 @utility eyebrow {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  line-height: 1.2;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  font-size: 12px;
+  line-height: 1.4;
+  font-weight: 500;
   color: var(--color-muted-foreground);
 }
 
@@ -110,35 +115,78 @@
   #root {
     height: 100%;
   }
+  html {
+    color-scheme: light;
+  }
   body {
     background: var(--color-background);
     color: var(--color-foreground);
     font-family: var(--font-sans);
     font-size: 14px;
+    line-height: 1.5;
     -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+    caret-color: var(--color-brand);
   }
   .dark {
     color-scheme: dark;
+  }
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+  a {
+    text-underline-offset: 0.18em;
+    text-decoration-thickness: 1px;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+  button,
+  a,
+  input,
+  select,
+  textarea,
+  summary {
+    touch-action: manipulation;
   }
   input[type="checkbox"],
   input[type="radio"],
   input[type="range"] {
     accent-color: var(--color-brand);
   }
+  input[type="checkbox"],
+  input[type="radio"] {
+    width: 16px;
+    height: 16px;
+  }
   select {
     background-color: var(--color-card);
+    color: var(--color-foreground);
     border-color: var(--color-input);
   }
   ::selection {
-    background: color-mix(in srgb, var(--color-brand) 30%, transparent);
+    background: color-mix(in srgb, var(--color-brand) 25%, transparent);
+  }
+  * {
+    scrollbar-color: color-mix(in srgb, var(--color-muted-foreground) 35%, transparent) transparent;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 1ms !important;
+      transition-duration: 80ms !important;
+    }
   }
 }
 
 /* The map's zoom controls and attribution in the app's colours. */
 .react-flow__controls {
-  box-shadow: none;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
+  box-shadow: var(--shadow-float);
+  border-radius: 7px;
   overflow: hidden;
 }
 .react-flow__controls-button {

@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { SymbolLink } from "@/components/symbol";
+import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -20,7 +21,7 @@ function Participants({ nodes, empty }: { nodes: ContractView["providers"]; empt
       {nodes.slice(0, 6).map((n) => (
         <SymbolLink key={n.id} node={n} />
       ))}
-      {nodes.length > 6 && <span className="text-xs text-muted-foreground">+{nodes.length - 6} more</span>}
+      {nodes.length > 6 && <span className="text-xs text-muted-foreground">and {nodes.length - 6} more</span>}
     </div>
   );
 }
@@ -50,20 +51,22 @@ export function ContractsPage() {
     });
   }, [contracts.data, kind, side, q]);
 
+  const all = contracts.data ?? [];
+  const both = all.filter((v) => v.providers.length > 0 && v.consumers.length > 0).length;
   return (
-    <div className="flex flex-col gap-5">
-      <div>
-        <h1 className="text-[28px] font-semibold tracking-[-0.035em]">Service contracts</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Routes, queues, topics, buckets and tables, with the code that provides them and the code that uses them.
-        </p>
-      </div>
+    <div className="flex flex-col gap-6">
+      <PageHeader title="Service contracts">
+        {all.length
+          ? `${both} of ${all.length} routes, queues, topics, buckets and tables have both their provider and a caller in the index; for the rest, one side lives outside it.`
+          : "Routes, queues, topics, buckets and tables, with the code that provides them and the code that uses them."}
+      </PageHeader>
       <div className="flex flex-wrap items-center gap-3">
         <Tabs value={kind} onValueChange={(v) => setKind(v as (typeof KINDS)[number])}>
           <TabsList>
             {KINDS.map((k) => (
-              <TabsTrigger key={k} value={k} className="uppercase">
-                {k} <span className="font-mono text-[10px] text-muted-foreground">{counts[k] ?? 0}</span>
+              <TabsTrigger key={k} value={k}>
+                {k === "all" ? "All" : k === "table" ? "Tables" : k.toUpperCase()}{" "}
+                <span className="nums text-xs font-normal text-muted-foreground">{counts[k] ?? 0}</span>
               </TabsTrigger>
             ))}
           </TabsList>
@@ -101,8 +104,8 @@ export function ContractsPage() {
                 <Tr key={v.contract.id}>
                   <Td>
                     <div className="flex min-w-0 items-center gap-2">
-                      <Badge variant="outline" className="font-mono uppercase">
-                        {v.contract.name.split(":")[0]}
+                      <Badge variant="outline" className="w-12 justify-center">
+                        {v.contract.name.split(":")[0] === "table" ? "Table" : v.contract.name.split(":")[0].toUpperCase()}
                       </Badge>
                       <SymbolLink node={{ ...v.contract, name: v.contract.name.split(":").slice(1).join(":") }} />
                     </div>
@@ -118,10 +121,14 @@ export function ContractsPage() {
             </tbody>
           </Table>
         )}
-        {!contracts.isLoading && rows.length === 0 && <p className="p-6 text-center text-sm text-muted-foreground">No contracts match.</p>}
+        {!contracts.isLoading && rows.length === 0 && (
+          <p className="px-5 py-8 text-muted-foreground">
+            {all.length ? "No contract matches these filters. Clear the filter text or pick All." : "No contracts yet. They appear once repositories with routes, queues or tables are indexed."}
+          </p>
+        )}
       </Card>
-      <p className="text-xs text-muted-foreground">
-        {rows.length} of {contracts.data?.length ?? 0} contracts
+      <p className="nums text-xs text-muted-foreground">
+        Showing {Math.min(rows.length, 400)} of {all.length} contracts
       </p>
     </div>
   );

@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Archive, Ban, Check, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
 import { useState } from "react";
+import { RepoDot } from "@/components/symbol";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -33,6 +34,9 @@ const PROMPT: Record<"archive" | "invalidate", [string, string]> = {
   archive: ["Archive", "What changed? It was true, but no longer applies."],
   invalidate: ["Invalidate", "Why is it wrong?"],
 };
+
+/** A date in the reader's locale, without the time. */
+const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 
 export function TrustBadge({ trust }: { trust: string }) {
   const [label, hint] = TRUST[trust] ?? [trust, ""];
@@ -76,26 +80,24 @@ export function EntryCard({ entry, writable, compact = false }: { entry: Entry; 
   const fields = Object.entries(r.fields).filter(([k]) => k !== "at");
 
   return (
-    <Card className={cn("p-4", retired && "opacity-70")}>
+    <Card className={cn("px-5 py-4", retired && "opacity-70")}>
       <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-        <Badge variant="outline" className="capitalize">
-          {r.kind}
-        </Badge>
+        <span className="mr-1 text-sm font-semibold text-foreground">{sentence(r.kind)}</span>
         <Badge variant={STATUS[entry.status] ?? "outline"}>{sentence(statusLabel(entry))}</Badge>
         <TrustBadge trust={entry.trust} />
         {challenged && (
           <Badge variant="warning" title="An agent proposed retiring this; a person decides">
-            challenged
+            Challenged
           </Badge>
         )}
         {entry.verified === true && <ShieldCheck className="size-3.5 text-brand" aria-label="signature verified" />}
         {entry.verified === false && <ShieldAlert className="size-3.5 text-danger" aria-label="signature invalid" />}
         <span className="ml-auto">
-          <span className="font-medium text-foreground">{entry.by}</span> · {when(entry).slice(0, 10)}
+          by <span className="font-semibold text-foreground">{entry.by}</span>, {day(when(entry))}
         </span>
       </div>
-      <h4 className="mt-2.5 font-medium leading-snug">{r.title}</h4>
-      {!compact && r.body && r.body !== r.title && <p className="mt-1.5 text-sm text-muted-foreground">{r.body}</p>}
+      <h4 className={cn("mt-2 leading-snug font-semibold", compact ? "text-sm" : "text-[17px]")}>{r.title}</h4>
+      {!compact && r.body && r.body !== r.title && <p className="mt-1.5 max-w-[80ch] text-muted-foreground">{r.body}</p>}
       {!compact && (r.trigger || fields.length > 0 || r.evidence.length > 0) && (
         <dl className="mt-3 grid gap-1 text-xs">
           {r.trigger && (
@@ -107,7 +109,7 @@ export function EntryCard({ entry, writable, compact = false }: { entry: Entry; 
           {fields.map(([k, v]) => (
             <div key={k} className="flex gap-2">
               <dt className="w-24 shrink-0 capitalize text-muted-foreground">{k}</dt>
-              <dd className="font-mono">{typeof v === "string" ? v : JSON.stringify(v)}</dd>
+              <dd>{typeof v === "string" ? v : JSON.stringify(v)}</dd>
             </div>
           ))}
           {r.evidence.length > 0 && (
@@ -121,25 +123,38 @@ export function EntryCard({ entry, writable, compact = false }: { entry: Entry; 
       {!compact &&
         r.snippets?.map((sn, i) => (
           <figure key={i} className="mt-3 min-w-0 text-xs">
-            <figcaption className="mb-1 font-mono text-muted-foreground">
-              {sn.path}
-              {sn.commit && ` @ ${sn.commit.slice(0, 10)}`}
+            <figcaption className="mb-1 text-muted-foreground">
+              <span className="font-mono">{sn.path}</span>
+              {sn.commit && (
+                <>
+                  {" "}at <span className="font-mono">{sn.commit.slice(0, 8)}</span>
+                </>
+              )}
             </figcaption>
-            <pre className="overflow-x-auto rounded bg-muted p-2 font-mono text-[11px]">{sn.code}</pre>
+            <pre className="overflow-x-auto rounded-md bg-muted p-3 font-mono text-xs leading-relaxed">{sn.code}</pre>
           </figure>
         ))}
-      <div className="mt-3 flex flex-wrap gap-1.5">
+      <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+        {r.anchors.length > 0 && <span>About</span>}
         {r.anchors.map((a) => (
-          <span key={a.symbol} className="max-w-full truncate rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]" title={`${a.path}:${a.line}${a.commit ? ` @ ${a.commit.slice(0, 10)}` : ""}`}>
-            {a.repo}:{a.name}
+          <span
+            key={a.symbol}
+            className="flex max-w-full min-w-0 items-center gap-1.5 rounded-sm bg-muted px-1.5 py-0.5 text-foreground"
+            title={`${a.path}:${a.line}${a.commit ? ` at ${a.commit.slice(0, 8)}` : ""}`}
+          >
+            <RepoDot repo={a.repo} />
+            <span className="truncate font-mono">{a.name}</span>
+            <span className="truncate font-mono text-muted-foreground">
+              {a.path}:{a.line}
+            </span>
           </span>
         ))}
       </div>
       {!compact && entry.history.length > 0 && (
-        <ol className="mt-3 flex flex-col gap-1 border-l pl-3 text-xs text-muted-foreground">
+        <ol className="mt-3 flex flex-col gap-1 border-l-2 pl-3 text-xs text-muted-foreground">
           {entry.history.map((h) => (
             <li key={h.id} className={cn(!h.counted && "italic")}>
-              <span className="font-medium text-foreground">{DONE[h.action] ?? h.action}</span> by {h.who} · {h.at.slice(0, 10)}
+              <span className="font-semibold text-foreground">{DONE[h.action] ?? h.action}</span> by {h.who}, {day(h.at)}
               {h.reason && <span>: {h.reason}</span>}
               {!h.counted && <span> (waiting for a person)</span>}
             </li>
@@ -150,7 +165,7 @@ export function EntryCard({ entry, writable, compact = false }: { entry: Entry; 
         <div className="mt-4 flex flex-wrap items-center gap-2">
           {asking ? (
             <>
-              <Input autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder={PROMPT[asking][1]} className="h-8 max-w-sm text-xs" />
+              <Input autoFocus value={reason} onChange={(e) => setReason(e.target.value)} placeholder={PROMPT[asking][1]} className="h-8 max-w-sm" />
               <Button size="sm" variant="outline" disabled={!reason.trim()} loading={review.isPending} onClick={() => review.mutate({ action: asking, why: reason })}>
                 {PROMPT[asking][0]}
               </Button>
@@ -162,7 +177,7 @@ export function EntryCard({ entry, writable, compact = false }: { entry: Entry; 
             <>
               {!retired && (
                 <>
-                  <Button size="sm" variant="brand" onClick={() => review.mutate({ action: "confirm" })} loading={review.isPending} title="Still true">
+                  <Button size="sm" variant="outline" onClick={() => review.mutate({ action: "confirm" })} loading={review.isPending} title="Still true">
                     <Check /> Confirm
                   </Button>
                   <Button size="sm" variant="outline" onClick={() => setAsking("archive")} title="Was true, no longer applies; kept as history">
@@ -175,7 +190,7 @@ export function EntryCard({ entry, writable, compact = false }: { entry: Entry; 
               )}
               {admin && (
                 <Button size="sm" variant="ghost" className="ml-auto text-danger hover:text-danger" onClick={() => setDeleting(true)} title="Remove permanently">
-                  <Trash2 /> Delete
+                  <Trash2 /> Delete…
                 </Button>
               )}
             </>
@@ -185,7 +200,7 @@ export function EntryCard({ entry, writable, compact = false }: { entry: Entry; 
       )}
       <Dialog open={deleting} onOpenChange={setDeleting}>
         <DialogContent className="p-5">
-          <DialogTitle className="text-base font-semibold">Delete this record permanently?</DialogTitle>
+          <DialogTitle className="text-[17px] font-semibold">Delete this record permanently?</DialogTitle>
           <p className="mt-2 text-sm text-muted-foreground">
             “{r.title}” and its review history are removed from the ledger for everyone. To keep it as history, archive or invalidate it instead.
           </p>
@@ -195,7 +210,7 @@ export function EntryCard({ entry, writable, compact = false }: { entry: Entry; 
               Cancel
             </Button>
             <Button className="bg-danger text-white hover:bg-danger/90" loading={erase.isPending} onClick={() => erase.mutate()}>
-              <Trash2 /> Delete
+              <Trash2 /> Delete record
             </Button>
           </div>
         </DialogContent>

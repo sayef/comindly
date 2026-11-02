@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, ArrowRight, BookOpen, Check, CircleDashed, Copy, KeyRound } from "lucide-react";
+import { AlertTriangle, BookOpen, Check, CheckCircle2, CircleDashed, Copy, KeyRound } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
+import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -82,7 +83,7 @@ export function Code({ children, label, shell }: { children: string; label?: str
   );
   if (!label)
     return (
-      <div className="relative rounded-lg border bg-muted/40">
+      <div className="relative rounded-md bg-muted">
         {body}
         <Button size="icon" variant="ghost" className="absolute right-1.5 top-1.5 size-7" aria-label="Copy" onClick={() => copy(children)}>
           {copied ? <Check /> : <Copy />}
@@ -90,10 +91,10 @@ export function Code({ children, label, shell }: { children: string; label?: str
       </div>
     );
   return (
-    <div className="overflow-hidden rounded-lg border bg-muted/40">
-      <div className="flex h-9 items-center justify-between gap-2 border-b pl-3.5 pr-1.5">
-        <span className="truncate font-mono text-[11px] text-muted-foreground">{label}</span>
-        <Button size="sm" variant="ghost" className="h-7 gap-1.5 px-2 text-xs" onClick={() => copy(children)}>
+    <div className="overflow-hidden rounded-md bg-muted">
+      <div className="flex h-9 items-center justify-between gap-2 border-b border-background/70 pl-3.5 pr-1.5">
+        <span className="truncate text-xs text-muted-foreground">{label}</span>
+        <Button size="sm" variant="ghost" className="h-7 gap-1.5 px-2" onClick={() => copy(children)}>
           {copied ? <Check /> : <Copy />} {copied ? "Copied" : "Copy"}
         </Button>
       </div>
@@ -124,22 +125,20 @@ function Step({
       {!last && <span aria-hidden className="absolute left-[13px] top-8 bottom-1 w-px bg-border" />}
       <span
         className={cn(
-          "relative flex size-7 shrink-0 items-center justify-center rounded-full font-mono text-xs",
-          state === "done" && "bg-brand text-background",
-          state === "todo" && "border border-brand text-brand shadow-[0_0_0_4px_color-mix(in_srgb,var(--color-brand)_12%,transparent)]",
-          state === "optional" && "border border-dashed border-muted-foreground/60 text-muted-foreground",
+          "nums relative flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold",
+          state === "done" && "bg-brand text-brand-foreground",
+          state === "todo" && "bg-card text-brand shadow-[inset_0_0_0_1.5px_var(--color-brand)]",
+          state === "optional" && "border border-dashed border-muted-foreground/60 bg-card text-muted-foreground",
         )}
       >
         {state === "done" ? <Check className="size-3.5" strokeWidth={3} /> : n}
       </span>
       <div className="min-w-0 flex-1 pt-0.5">
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <h3 className="font-medium">{title}</h3>
-          {status && (
-            <span className={cn("font-mono text-[11px]", state === "done" ? "text-brand" : "text-muted-foreground")}>{status}</span>
-          )}
+          <h3 className="font-semibold">{title}</h3>
+          {status && <span className={cn("text-xs", state === "done" ? "font-semibold text-brand" : "text-muted-foreground")}>{status}</span>}
         </div>
-        <div className="mt-3 flex flex-col gap-3 text-sm text-muted-foreground">{children}</div>
+        <div className="mt-3 flex flex-col gap-3 text-muted-foreground">{children}</div>
       </div>
     </li>
   );
@@ -156,7 +155,7 @@ function connect(agent: Agent, index: string) {
   switch (agent) {
     case "claude":
       return {
-        label: "Terminal · once, for every project",
+        label: "Terminal, once for every project",
         shell: true,
         code: `claude mcp add --scope user comindly -- comindly ${args.join(" ")}`,
       };
@@ -173,7 +172,7 @@ function connect(agent: Agent, index: string) {
 
 function AgentPicker({ agent, setAgent, connected }: { agent: Agent; setAgent: (a: Agent) => void; connected: string[] }) {
   return (
-    <div role="tablist" className="flex max-w-full flex-wrap gap-1.5">
+    <div role="tablist" className="flex max-w-full flex-wrap gap-0.5 self-start rounded-lg bg-secondary p-0.5">
       {AGENTS.map((a) => (
         <button
           key={a}
@@ -181,11 +180,11 @@ function AgentPicker({ agent, setAgent, connected }: { agent: Agent; setAgent: (
           aria-selected={agent === a}
           onClick={() => setAgent(a)}
           className={cn(
-            "flex h-8 items-center gap-1.5 rounded-md border px-3 text-[13px] transition-colors",
-            agent === a ? "border-input bg-accent text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
+            "flex h-8 items-center gap-1.5 rounded-md px-3 text-xs font-semibold transition-colors duration-100",
+            agent === a ? "bg-card text-foreground shadow-[0_1px_2px_var(--shadow-ink)]" : "text-muted-foreground hover:text-foreground",
           )}
         >
-          {connected.includes(a) && <span className="size-1.5 rounded-full bg-brand" aria-label="connected" />}
+          {connected.includes(a) && <Check className="size-3.5 text-brand" aria-label="connected" />}
           {AGENT_NAME[a]}
         </button>
       ))}
@@ -202,11 +201,11 @@ function FirstQuestion() {
         <button
           key={q}
           onClick={() => copy(q)}
-          className="group flex items-center justify-between gap-3 rounded-lg border bg-card px-3.5 py-2.5 text-left text-[13px] text-foreground transition-colors hover:border-input"
+          className="group flex min-h-11 items-center justify-between gap-3 rounded-md bg-muted px-3.5 py-2.5 text-left text-foreground transition-colors duration-100 hover:bg-[color-mix(in_srgb,var(--color-muted)_85%,var(--color-foreground))]"
         >
           <span>“{q}”</span>
-          <span className="shrink-0 font-mono text-[11px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
-            {copied === q ? "copied" : "copy"}
+          <span className="shrink-0 text-xs font-semibold text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+            {copied === q ? "Copied" : "Copy"}
           </span>
         </button>
       ))}
@@ -228,10 +227,10 @@ function Health({ s, server }: { s: Setup | undefined; server: boolean }) {
       ) : (
         <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-warning" />
       )}
-      <span className={cn("min-w-0 text-[13px] [overflow-wrap:anywhere]", !c.ok && "text-muted-foreground")}>
+      <span className={cn("min-w-0 text-xs [overflow-wrap:anywhere]", !c.ok && "text-muted-foreground")}>
         {sentence(c.message)
           .split("`")
-          .map((part, i) => (i % 2 ? <code key={i} className="font-mono text-[12px] text-foreground">{part}</code> : part))}
+          .map((part, i) => (i % 2 ? <code key={i} className="font-mono text-xs text-foreground">{part}</code> : part))}
       </span>
     </li>
   );
@@ -239,17 +238,12 @@ function Health({ s, server }: { s: Setup | undefined; server: boolean }) {
     <Card className="overflow-hidden lg:sticky lg:top-6">
       <div className="border-b px-5 py-4">
         <div className="eyebrow">{server ? "This server" : "This machine"}</div>
-        <div className="mt-2 flex items-center gap-2.5">
-          <span
-            className={cn(
-              "size-2 rounded-full",
-              problems ? "bg-warning" : "bg-brand shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-brand)_18%,transparent)]",
-            )}
-          />
-          <span className="font-medium">{problems ? `${problems} thing${problems > 1 ? "s" : ""} to fix` : "Ready"}</span>
-          <span className="ml-auto font-mono text-[11px] text-muted-foreground">v{s.version}</span>
+        <div className="mt-1 flex items-center gap-2">
+          {problems ? <AlertTriangle className="size-4 text-warning" /> : <CheckCircle2 className="size-4 text-brand" />}
+          <span className="text-[17px] font-semibold">{problems ? `${problems} thing${problems > 1 ? "s" : ""} to fix` : "Ready"}</span>
+          <span className="nums ml-auto text-xs text-muted-foreground">Version {s.version}</span>
         </div>
-        <div className="mt-1.5 truncate font-mono text-[11px] text-muted-foreground" title={s.index}>
+        <div className="mt-1.5 truncate font-mono text-xs text-muted-foreground" title={s.index}>
           {s.index}
         </div>
       </div>
@@ -258,7 +252,7 @@ function Health({ s, server }: { s: Setup | undefined; server: boolean }) {
         {extras.length > 0 && (
           <>
             <div className="eyebrow mb-1 mt-3">
-              Extras · {extras.filter((c) => c.ok).length} of {extras.length}
+              Extras, {extras.filter((c) => c.ok).length} of {extras.length} set up
             </div>
             <ul>{extras.map(row)}</ul>
           </>
@@ -281,7 +275,7 @@ function LocalSteps({ s }: { s: Setup | undefined }) {
   const hooks = s?.checks.some((c) => c.ok && c.message.toLowerCase().includes("hooks configured"));
   return (
     <ol>
-      <Step n={1} title="Install comindly" state="done" status={s ? `v${s.version} running here` : undefined}>
+      <Step n={1} title="Install comindly" state="done" status={s ? `Version ${s.version} runs here` : undefined}>
         <p>For a teammate or another machine, prebuilt for macOS and Linux:</p>
         <Code label="Terminal" shell>
           {"curl -LsSf https://raw.githubusercontent.com/sayef/comindly/main/scripts/install.sh | sh"}
@@ -291,7 +285,7 @@ function LocalSteps({ s }: { s: Setup | undefined }) {
         n={2}
         title="Connect your agent"
         state={connected.length ? "done" : "todo"}
-        status={connected.length ? `connected: ${connected.map((a) => AGENT_NAME[a as Agent] ?? a).join(", ")}` : "not connected yet"}
+        status={connected.length ? `Connected: ${connected.map((a) => AGENT_NAME[a as Agent] ?? a).join(", ")}` : "Not connected yet"}
       >
         <AgentPicker agent={agent} setAgent={setAgent} connected={connected} />
         <Code label={how.label} shell={how.shell}>
@@ -309,7 +303,7 @@ function LocalSteps({ s }: { s: Setup | undefined }) {
         n={3}
         title="Bring team records into every session"
         state={hooks ? "done" : "optional"}
-        status={hooks ? "hooks on" : "optional"}
+        status={hooks ? "Hooks on" : "Optional"}
       >
         <p>
           Hooks show the agent what the team recorded without being asked: about the repository when a session starts, and about a file just
@@ -339,7 +333,7 @@ function ServerSteps() {
         <div>
           <Button asChild>
             <Link to="/settings/access">
-              <KeyRound /> Your access <ArrowRight />
+              <KeyRound /> Open Your access
             </Link>
           </Button>
         </div>
@@ -363,23 +357,23 @@ function Questions({ s }: { s: Setup | undefined }) {
   return (
     <section className="flex flex-col gap-4">
       <div>
-        <h2 className="text-lg font-semibold tracking-tight">What your agent can answer</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Ask in plain words; the agent picks the tool. Click a question to copy it.</p>
+        <h2 className="text-[17px] font-semibold">What your agent can answer</h2>
+        <p className="mt-1 text-muted-foreground">Ask in plain words; the agent picks the tool. Click a question to copy it.</p>
       </div>
       <div className="grid gap-4 md:grid-cols-2">
         {ASK.map((g) => (
           <Card key={g.title} className="p-2">
-            <div className="eyebrow px-3 pb-1 pt-2">{g.title}</div>
+            <h3 className="px-3 pb-1 pt-2 font-semibold">{g.title}</h3>
             {g.items.map(([tool, q]) => (
               <button
                 key={tool}
                 onClick={() => copy(q)}
                 title={about.get(tool)}
-                className="group flex w-full items-start justify-between gap-3 rounded-md px-3 py-2.5 text-left transition-colors hover:bg-accent"
+                className="group flex w-full items-start justify-between gap-3 rounded-md px-3 py-2.5 text-left transition-colors duration-100 hover:bg-muted"
               >
-                <span className="text-[13px]">{q}</span>
-                <span className="mt-0.5 shrink-0 font-mono text-[11px] text-muted-foreground group-hover:text-foreground">
-                  {copied === q ? "copied" : tool}
+                <span>{q}</span>
+                <span className="mt-0.5 shrink-0 font-mono text-xs text-muted-foreground group-hover:text-foreground">
+                  {copied === q ? <span className="font-sans font-semibold text-brand">Copied</span> : tool}
                 </span>
               </button>
             ))}
@@ -405,8 +399,8 @@ function Terminal() {
   return (
     <section className="flex flex-col gap-4">
       <div>
-        <h2 className="text-lg font-semibold tracking-tight">Without an agent</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <h2 className="text-[17px] font-semibold">Without an agent</h2>
+        <p className="mt-1 text-muted-foreground">
           The same answers in a terminal. They use the index in your settings; add <code className="font-mono">--index-dir</code> for
           another.
         </p>
@@ -416,13 +410,13 @@ function Terminal() {
           <button
             key={cmd}
             onClick={() => copy(cmd)}
-            className="group grid w-full gap-1 px-4 py-3 text-left transition-colors hover:bg-accent/60 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-4"
+            className="group grid w-full gap-1 px-4 py-3 text-left transition-colors duration-100 hover:bg-muted sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-4"
           >
             <code className="min-w-0 truncate font-mono text-xs">
               <span className="select-none text-muted-foreground">$ </span>
               {cmd}
             </code>
-            <span className="text-xs text-muted-foreground">{copied === cmd ? <span className="text-brand">Copied</span> : what}</span>
+            <span className="text-xs text-muted-foreground">{copied === cmd ? <span className="font-semibold text-brand">Copied</span> : what}</span>
           </button>
         ))}
       </Card>
@@ -437,22 +431,20 @@ export function SetupPage() {
   const s = setup.data;
 
   return (
-    <div className="flex flex-col gap-10">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <div className="eyebrow">Get started</div>
-          <h1 className="mt-2 text-[28px] font-semibold tracking-[-0.035em]">Give your agent the whole codebase</h1>
-          <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-            comindly answers your coding agent's questions across every repository: what calls what, which services talk through which
-            routes and queues, what a change can break, and what the team recorded about the code.
-          </p>
-        </div>
-        <Button variant="outline" asChild>
-          <a href={DOCS} target="_blank" rel="noreferrer">
-            <BookOpen /> Documentation
-          </a>
-        </Button>
-      </div>
+    <div className="flex flex-col gap-8">
+      <PageHeader
+        title="Give your agent the whole codebase"
+        actions={
+          <Button variant="outline" asChild>
+            <a href={DOCS} target="_blank" rel="noreferrer">
+              <BookOpen /> Documentation
+            </a>
+          </Button>
+        }
+      >
+        comindly answers your coding agent's questions across every repository: what calls what, which services talk through which
+        routes and queues, what a change can break, and what the team recorded about the code.
+      </PageHeader>
 
       <div className={cn("grid grid-cols-1 items-start gap-6", admin && "lg:grid-cols-[minmax(0,1fr)_340px]")}>
         <Card className="min-w-0 p-4 sm:p-6">{me.data?.mode === "server" ? <ServerSteps /> : <LocalSteps s={s} />}</Card>

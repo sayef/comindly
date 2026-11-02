@@ -52,10 +52,10 @@ function SymbolNode({ data }: NodeProps<Node<Data>>) {
   return (
     <div
       className={cn(
-        "flex h-10 max-w-[260px] cursor-pointer items-center gap-2 rounded-lg border border-input bg-popover px-3 text-[13px] transition-[opacity,border-color] hover:border-muted-foreground/50",
-        data.large && "text-sm font-medium",
-        data.focus && "border-brand font-medium shadow-[0_0_0_4px_color-mix(in_srgb,var(--color-brand)_14%,transparent)]",
-        data.more && "cursor-default border-dashed text-muted-foreground",
+        "flex h-10 max-w-[260px] cursor-pointer items-center gap-2 rounded-md bg-card px-3 text-xs shadow-[0_1px_2px_var(--shadow-ink)] transition-[opacity,background-color] duration-100 hover:bg-muted",
+        data.large && "text-sm font-semibold",
+        data.focus && "bg-accent font-semibold outline-2 outline-brand",
+        data.more && "cursor-default border border-dashed border-input bg-transparent text-muted-foreground shadow-none",
         data.dim && "opacity-25",
       )}
     >
@@ -63,7 +63,7 @@ function SymbolNode({ data }: NodeProps<Node<Data>>) {
       {!data.more && <span className="size-2 shrink-0 rounded-[2px]" style={{ background: color(data.repo) }} />}
       <div className="min-w-0">
         <div className={cn("truncate", data.repo === CONTRACTS && "font-mono")}>{data.label}</div>
-        {data.showRepo && <div className="truncate text-[10px] font-normal text-muted-foreground">{data.repo}</div>}
+        {data.showRepo && <div className="truncate text-xs font-normal text-muted-foreground">{data.repo}</div>}
       </div>
       <Handle type="source" position={data.large ? Position.Bottom : Position.Right} className="!pointer-events-none !opacity-0" />
     </div>

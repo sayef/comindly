@@ -14,7 +14,7 @@ function iconFor(n: { repo: string; kind: string }) {
   return FunctionSquare;
 }
 
-const heading = "px-2 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground";
+const heading = "px-3 pb-1 pt-2 text-xs font-semibold text-muted-foreground";
 const item = "flex cursor-pointer items-center gap-3 rounded-md px-3 py-2 text-sm data-[selected=true]:bg-muted";
 
 export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
@@ -48,7 +48,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
             value={q}
             onValueChange={setQ}
             placeholder="Search by name, or describe what you are looking for…"
-            className="h-12 border-b bg-transparent px-4 text-sm outline-none placeholder:text-muted-foreground"
+            className="h-12 border-b bg-transparent px-4 text-sm outline-none placeholder:text-muted-foreground max-sm:text-base"
           />
           <Command.List className="max-h-[65vh] overflow-y-auto p-2">
             {debounced.length <= 1 && (
@@ -57,7 +57,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
               </div>
             )}
             {debounced.length > 1 && !names.isFetching && !code.isFetching && (
-              <Command.Empty className="px-3 py-8 text-center text-sm text-muted-foreground">No matches.</Command.Empty>
+              <Command.Empty className="px-3 py-8 text-center text-sm text-muted-foreground">Nothing in the index matches. Try part of a name or path.</Command.Empty>
             )}
             {(names.data?.length ?? 0) > 0 && (
               <Command.Group>
@@ -68,12 +68,12 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
                     <Command.Item key={n.id} value={`name:${n.id}`} onSelect={() => go(n.id)} className={item}>
                       <Icon className="size-4 shrink-0 text-muted-foreground" />
                       <div className="min-w-0 flex-1">
-                        <div className="truncate font-medium">{n.name}</div>
+                        <div className="truncate font-mono font-semibold">{n.name}</div>
                         <div className="truncate font-mono text-xs text-muted-foreground">
-                          {n.repo === CONTRACTS ? "contract" : `${n.repo} · ${n.location}`}
+                          {n.repo === CONTRACTS ? "Contract" : `${n.repo}/${n.location}`}
                         </div>
                       </div>
-                      <span className="text-xs text-muted-foreground">{n.kind}</span>
+                      <span className="text-xs text-muted-foreground">{n.kind.charAt(0).toUpperCase() + n.kind.slice(1)}</span>
                     </Command.Item>
                   );
                 })}
@@ -94,7 +94,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
                       <div className="min-w-0 flex-1">
                         <div className="truncate font-medium">{h.name}</div>
                         <div className="truncate text-xs text-muted-foreground">
-                          {h.summary ?? <span className="font-mono">{`${h.repo} · ${h.location}`}</span>}
+                          {h.summary ?? <span className="font-mono">{`${h.repo}/${h.location}`}</span>}
                         </div>
                       </div>
                       <span className="shrink-0 text-xs text-muted-foreground">{h.repo}</span>

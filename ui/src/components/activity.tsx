@@ -84,14 +84,14 @@ export function Activity() {
 }
 
 function Pill({ children }: { children: React.ReactNode }) {
-  return <div className="flex h-8 max-w-sm items-center gap-2 rounded-full border bg-card px-3 text-xs shadow-sm">{children}</div>;
+  return <div className="flex h-8 max-w-sm items-center gap-2 rounded-md bg-card px-3 text-xs shadow-[0_1px_2px_var(--shadow-ink)]">{children}</div>;
 }
 
 function Stop({ label, pending, onClick }: { label: string; pending: boolean; onClick: () => void }) {
   return (
     <button
       className={cn(
-        "-mr-1 flex items-center gap-1 rounded-full px-1.5 py-0.5 text-muted-foreground hover:bg-muted hover:text-foreground",
+        "-mr-1 flex size-6 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground",
         pending && "opacity-50",
       )}
       disabled={pending}

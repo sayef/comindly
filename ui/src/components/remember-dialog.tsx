@@ -18,8 +18,8 @@ const KINDS = [
 ] as const;
 type Kind = (typeof KINDS)[number][0];
 
-const area = "min-h-20 w-full rounded-md border bg-card px-3 py-2 text-sm shadow-xs outline-none focus-visible:ring-2 focus-visible:ring-ring";
-const label = "flex flex-col gap-1 text-xs font-medium";
+const area = "min-h-20 w-full rounded-md border border-input bg-card px-3 py-2 text-sm outline-none transition-[border-color,box-shadow] duration-100 hover:border-muted-foreground/50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/20 max-sm:text-base";
+const label = "flex flex-col gap-1.5 text-sm font-semibold";
 
 /** Pick the symbols a record is about, by name. */
 function SymbolPicker({ value, onChange }: { value: Node[]; onChange: (v: Node[]) => void }) {
@@ -36,7 +36,7 @@ function SymbolPicker({ value, onChange }: { value: Node[]; onChange: (v: Node[]
       {value.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {value.map((n) => (
-            <span key={n.id} className="flex items-center gap-1 rounded-md border bg-muted px-2 py-0.5 text-xs">
+            <span key={n.id} className="flex items-center gap-1 rounded-sm bg-muted px-2 py-0.5 text-xs">
               <RepoDot repo={n.repo} /> {n.name}
               <button aria-label="Remove" onClick={() => onChange(value.filter((x) => x.id !== n.id))}>
                 <X className="size-3" />
@@ -47,7 +47,7 @@ function SymbolPicker({ value, onChange }: { value: Node[]; onChange: (v: Node[]
       )}
       <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search a function, class or file…" />
       {debounced.length > 1 && (found.data?.length ?? 0) > 0 && (
-        <div className="max-h-40 overflow-y-auto rounded-md border">
+        <div className="max-h-40 overflow-y-auto overscroll-contain rounded-md bg-muted/50">
           {found.data!
             .filter((n) => !chosen.has(n.id))
             .slice(0, 8)
@@ -58,7 +58,7 @@ function SymbolPicker({ value, onChange }: { value: Node[]; onChange: (v: Node[]
                 onClick={() => (onChange([...value, n]), setQ(""))}
               >
                 <RepoDot repo={n.repo} />
-                <span className="font-medium">{n.name}</span>
+                <span className="font-mono font-semibold">{n.name}</span>
                 <span className="truncate font-mono text-muted-foreground">{n.location}</span>
               </button>
             ))}
@@ -109,7 +109,7 @@ export function RememberDialog({ open, onOpenChange, about = [] }: { open: boole
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="top-[8%] max-h-[84vh] overflow-y-auto p-5">
-        <DialogTitle className="text-base font-semibold">Add to the ledger</DialogTitle>
+        <DialogTitle className="text-[17px] font-semibold">Add to the ledger</DialogTitle>
         <p className="mt-1 text-sm text-muted-foreground">
           A short fact a future engineer or agent should know before changing this code. It carries your name (or a pseudonymous id) and is shown to agents.
         </p>
@@ -120,13 +120,14 @@ export function RememberDialog({ open, onOpenChange, about = [] }: { open: boole
                 key={k}
                 title={hint}
                 onClick={() => setKind(k)}
+                aria-pressed={kind === k}
                 className={cn(
-                  "rounded-md border px-2.5 py-2 text-left text-xs transition-colors",
-                  kind === k ? "border-brand bg-accent text-accent-foreground" : "hover:bg-muted",
+                  "rounded-md px-2.5 py-2 text-left text-xs transition-colors duration-100",
+                  kind === k ? "bg-accent text-accent-foreground outline-2 outline-brand" : "bg-muted hover:bg-[color-mix(in_srgb,var(--color-muted)_85%,var(--color-foreground))]",
                 )}
               >
-                <div className="font-medium">{name}</div>
-                <div className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">{hint}</div>
+                <div className="text-sm font-semibold">{name}</div>
+                <div className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{hint}</div>
               </button>
             ))}
           </div>

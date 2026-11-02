@@ -1,3 +1,4 @@
+import { ChevronRight, Minus, RefreshCcw } from "lucide-react";
 import { useMemo } from "react";
 import { RepoDot } from "@/components/symbol";
 import type { OrgMap } from "@/lib/api";
@@ -173,7 +174,7 @@ export function TreeView({
 
   return (
     <div className="overflow-auto px-5">
-      <div className="relative mx-auto my-5" style={{ width, height }}>
+      <div className="relative my-5" style={{ width, height }}>
         <svg className="pointer-events-none absolute inset-0 overflow-visible" width={width} height={height} aria-hidden="true">
           <defs>
             <marker id="loop-tip" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="8" markerHeight="8" orient="auto">
@@ -200,38 +201,45 @@ export function TreeView({
             disabled={b.kind === "seen"}
             title={b.kind === "seen" ? `${b.repo} is shown elsewhere in this tree` : undefined}
             className={cn(
-              "absolute flex flex-col justify-center gap-1 rounded-lg border bg-popover px-3 text-left transition-colors",
-              b.kind === "seen" ? "border-dashed border-input text-muted-foreground" : "border-input hover:border-muted-foreground/60",
-              b.loopTo && b.kind !== "seen" && "border-warning/70",
-              lit.has(b.key) && "border-brand shadow-[0_0_0_4px_color-mix(in_srgb,var(--color-brand)_14%,transparent)]",
+              "absolute flex flex-col justify-center gap-0.5 rounded-md px-3 text-left transition-colors duration-100",
+              b.kind === "seen"
+                ? "border border-dashed border-input text-muted-foreground"
+                : "bg-muted hover:bg-[color-mix(in_srgb,var(--color-muted)_85%,var(--color-foreground))]",
+              b.loopTo && b.kind !== "seen" && "shadow-[inset_0_0_0_1.5px_var(--color-warning)]",
+              lit.has(b.key) && "bg-accent outline-2 outline-brand",
             )}
             style={{ left: x(b), top: b.y, width: W, height: H }}
           >
-            <span className="flex w-full items-center gap-2 text-[13px]">
+            <span className="flex w-full items-center gap-2 text-sm">
               <RepoDot repo={b.repo} className={b.kind === "seen" ? "opacity-50" : undefined} />
-              <span className={cn("min-w-0 flex-1 truncate", (b.col === 0 || lit.has(b.key)) && "font-medium")}>{b.repo}</span>
+              <span className={cn("min-w-0 flex-1 truncate", (b.col === 0 || lit.has(b.key)) && "font-semibold")}>{b.repo}</span>
               {b.loopTo && b.kind !== "seen" && (
                 <span
-                  className="font-mono text-[11px] text-warning"
+                  className="flex items-center gap-1 text-xs font-semibold text-warning"
                   title={`${b.repo} ${dir === "uses" ? "uses" : "is used by"} ${b.loopTo} too: a cycle`}
                 >
-                  ↺ {b.loopTo}
+                  <RefreshCcw className="size-3" /> {b.loopTo}
                 </span>
               )}
               {b.kind === "closed" && (
-                <span className="font-mono text-[11px] text-muted-foreground" title={`Opens to ${b.more} more`}>
-                  {b.more} ›
+                <span className="nums flex items-center text-xs text-muted-foreground" title={`Opens to ${b.more} more`}>
+                  {b.more}
+                  <ChevronRight className="size-3.5" />
                 </span>
               )}
-              {b.kind === "open" && <span className="font-mono text-[11px] text-muted-foreground">−</span>}
+              {b.kind === "open" && <Minus className="size-3.5 text-muted-foreground" aria-label="Open" />}
             </span>
-            <span
-              className={cn(
-                "truncate font-mono text-[10.5px]",
-                b.kind !== "seen" && b.contract ? "text-accent-foreground" : "text-muted-foreground",
+            <span className="flex min-w-0 items-baseline gap-1.5 text-xs text-muted-foreground">
+              {b.col === 0 ? (
+                <span className="nums">{(org.symbols.get(b.repo) ?? 0).toLocaleString()} symbols</span>
+              ) : (
+                <>
+                  <span className={cn("min-w-0 truncate", b.contract && "font-mono", b.kind !== "seen" && b.contract && "text-accent-foreground")}>
+                    {b.via}
+                  </span>
+                  {b.kind === "seen" && <span className="shrink-0">shown elsewhere</span>}
+                </>
               )}
-            >
-              {b.col === 0 ? `${org.symbols.get(b.repo) ?? 0} symbols` : b.kind === "seen" ? `${b.via} · shown elsewhere` : b.via}
             </span>
           </button>
         ))}
