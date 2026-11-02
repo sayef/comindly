@@ -12,10 +12,18 @@ All notable changes to this project are documented here. The format follows
   changed code only.
 - Ledger records store the indexed commit of each anchor and up to three snippets of the code that
   shaped them (`remember --snippet path:START-END`, MCP `snippets`).
+- `auto_index_minutes` sets how often automatic re-indexing checks the remotes (default 5), also on the
+  Repositories page.
+- The index stores the contents of the indexed files, once per distinct content, so code is shown
+  from the index: on a server it no longer needs a checkout on disk, also right after a restart.
+- Code shown on the Conventions page links to the file at the indexed commit on GitHub or GitLab.
 
 ### Changed
 
 - `comindly server` logs to stdout.
+- Recipe conventions show the commits they were learned from, linked to GitHub or GitLab, instead of
+  a "Show code" that could not find them.
+- The index records each repository's default branch, so the Repositories page shows it without a clone.
 - A summary is written again only when its symbol's name, signature or path changed, not whenever
   its file did.
 - Style guides are rewritten per section, and only when that section's evidence drifted.

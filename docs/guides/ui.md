@@ -46,7 +46,8 @@ new one.
   flows also get a written walkthrough.
 - **Conventions**: every measured and team convention in one table, filtered by scope (org-wide or a
   repository), topic, origin and text, and sorted by scope, topic or how widely it is followed. Expand a
-  row to see where it comes from: the places that follow it and those that deviate, each with its code.
+  row to see where it comes from: the places that follow it and those that deviate, each with its code
+  as indexed and a link to it on GitHub or GitLab. Recipes, learned from commit history, list commits.
   Add your own, edit or hide measured ones (hidden ones can be restored). `/conventions?repo=<name>`
   opens one repository.
 - **Packages**: internal packages, who publishes each, and the version every consumer pins, marked
@@ -64,9 +65,10 @@ new one.
   repository's remote URL, so one indexed elsewhere shows **No folder here** with **Locate** and **Add**.
   comindly indexes all repositories together so cross-repo links stay complete, so **Index now** waits
   until every indexed repository has a folder here, unless you choose to drop the missing ones. With
-  **Re-index automatically** on (`auto_index`), the app checks every freshness interval whether a default
-  branch moved on the remote and re-indexes when one did, with the LLM steps for new or changed code
-  only if **With LLM steps** is on (`auto_index_llm`); both are among the index's shared settings.
+  **Re-index automatically** on (`auto_index`), the app checks every few minutes (`auto_index_minutes`,
+  default 5) whether a default branch moved on the remote and re-indexes when one did, with the LLM steps
+  for new or changed code only if **With LLM steps** is on (`auto_index_llm`); all three are among the
+  index's shared settings.
 - **Settings**: the index location (with a connection test), the index's shared settings (LLM
   endpoint and model, embedding model, LLM steps, limits and prices), your own API key, your name on
   ledger records, and how often to check for a new index version. Changing the index location switches

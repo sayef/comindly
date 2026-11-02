@@ -34,7 +34,9 @@ Secret Manager mounts), so rotating one is a change in your secret store and a r
 
 Members, sessions, personal tokens, stored secrets, the repositories the server indexes and the record
 of each indexing job live next to the index, in `_server` at the index location, so a container keeps
-nothing it needs on its own disk. The index's shared settings (models, LLM steps, limits) live with the
+nothing it needs on its own disk. Its clones are only a working copy for indexing: the index stores the
+contents of the files it indexed, so code is shown from there, and a restarted container clones again
+on its next index run. Anyone who can read the bucket can therefore read that code. The index's shared settings (models, LLM steps, limits) live with the
 index itself. A server keeps no configuration file. Token values are never
 stored, only their hashes; saved git and LLM keys are encrypted with `COMINDLY_SECRET_KEY`. Email
 addresses, roles and token names are readable to anyone who can read the bucket, like the index.

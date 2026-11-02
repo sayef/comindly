@@ -60,3 +60,5 @@ assets/png/
 
 # MkDocs Material plugin caches (the privacy plugin keeps downloaded fonts here)
 .cache/
+
+.design-kit/

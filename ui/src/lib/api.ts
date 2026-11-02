@@ -36,6 +36,8 @@ export interface SourceLines {
   path: string;
   line: number;
   lines: { n: number; text: string }[];
+  commit: string | null;
+  link: string | null;
 }
 
 export interface ContractView {
@@ -216,6 +218,7 @@ export interface TeamSettings {
   scip?: "auto" | "require" | "off";
   auto_index?: boolean;
   auto_index_llm?: boolean;
+  auto_index_minutes?: number;
   repos?: string[];
 }
 
@@ -496,7 +499,7 @@ export const api = {
   versions: () => get<string[]>("/api/v1/versions"),
   contracts: () => get<ContractView[]>("/api/v1/contracts"),
   ledger: () => get<Entry[]>("/api/v1/ledger"),
-  conventions: () => get<{ conventions: Convention[]; hidden: HiddenConvention[] }>("/api/v1/conventions"),
+  conventions: () => get<{ conventions: Convention[]; hidden: HiddenConvention[]; commit_urls: Record<string, string> }>("/api/v1/conventions"),
   changeConvention: (c: ConventionChange) => post("/api/v1/conventions", c),
   find: (q: string) => get<Node[]>(`/api/v1/find?q=${encodeURIComponent(q)}`),
   search: (q: string) => get<SearchHit[]>(`/api/v1/search?q=${encodeURIComponent(q)}`),
@@ -522,7 +525,7 @@ export const api = {
   cancelJob: (id: string) => post(`/api/v1/jobs/${id}/cancel`, {}),
   jobs: () => get<{ jobs: JobRow[] }>("/api/v1/jobs").then((r) => r.jobs),
   job: (id: string) => get<JobDetail>(`/api/v1/jobs/${encodeURIComponent(id)}`),
-  indexWatch: () => get<{ enabled: boolean; last: { checked: string | null; result: string } }>("/api/v1/index/watch"),
+  indexWatch: () => get<{ enabled: boolean; minutes: number; last: { checked: string | null; result: string } }>("/api/v1/index/watch"),
   team: () => get<Team>("/api/v1/team"),
   saveTeam: (settings: TeamSettings, version: number | null) => post("/api/v1/team", { settings, version }),
   saveKey: (key: string) => post<{ ok: boolean; message: string }>("/api/v1/team/key", { key }),

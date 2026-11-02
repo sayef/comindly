@@ -29,6 +29,8 @@ pub struct RepoEntry {
 pub struct Source {
     pub name: String,
     pub path: PathBuf,
+    /// The default branch checked out, when comindly made the checkout.
+    pub branch: Option<String>,
 }
 
 impl Source {
@@ -42,7 +44,11 @@ impl Source {
                 .and_then(|c| c.file_name().map(|n| n.to_string_lossy().into_owned()))
                 .unwrap_or_else(|| "repo".to_string()),
         };
-        Source { name, path }
+        Source {
+            name,
+            path,
+            branch: None,
+        }
     }
 }
 
@@ -115,7 +121,11 @@ pub fn checkout<'a>(
                     "could not fetch, indexing the last fetched state: {why}"
                 ));
             }
-            out.push(Source::at(c.dir));
+            let branch = c.target.strip_prefix("origin/").map(str::to_string);
+            out.push(Source {
+                branch,
+                ..Source::at(c.dir)
+            });
         }
         Ok(out)
     })
@@ -200,6 +210,7 @@ pub fn link<'a>(
         crate::index::write_recipes(&dst, &recipes)
             .await
             .map_err(explain)?;
+        store_sources(ctx, &dst, roots.clone(), false).await?;
         r.done(format!(
             "org graph: symbols v{sv}, edges v{ev} (latest pointer)"
         ));
@@ -208,17 +219,21 @@ pub fn link<'a>(
             .context("read-back failed")?;
         r.note(format!("read back: {sc} symbols, {ec} edges"));
 
-        let paths: Vec<(String, PathBuf)> = roots.clone();
+        let paths: Vec<(String, PathBuf, Option<String>)> = sources
+            .iter()
+            .map(|s| (s.name.clone(), s.path.clone(), s.branch.clone()))
+            .collect();
         let heads = blocking(move || {
             paths
-                .iter()
-                .filter_map(|(name, p)| {
-                    crate::git::head_commit(p)
+                .into_iter()
+                .filter_map(|(name, p, branch)| {
+                    crate::git::head_commit(&p)
                         .ok()
                         .map(|commit| crate::index::IndexedRepo {
-                            name: name.clone(),
+                            name,
                             commit,
-                            remote: crate::worktree::remote_url(p),
+                            remote: crate::worktree::remote_url(&p),
+                            branch: branch.or_else(|| crate::worktree::current_branch(&p)),
                         })
                 })
                 .collect::<Vec<_>>()
@@ -346,6 +361,7 @@ pub fn index_repo<'a>(
         crate::index::write_recipes(&dst, &recipes)
             .await
             .map_err(explain)?;
+        store_sources(ctx, &dst, roots.clone(), true).await?;
         r.done(format!("graph: symbols v{sv}, edges v{ev}"));
         let p = source.path.clone();
         if let Ok(head) = blocking(move || crate::git::head_commit(&p)).await? {
@@ -458,6 +474,13 @@ async fn index_changes(ctx: &IndexContext, source: &Source, base: &str) -> Resul
     crate::index::write_facts(&dst, &facts)
         .await
         .map_err(explain)?;
+    store_sources(
+        ctx,
+        &dst,
+        vec![(source.name.clone(), source.path.clone())],
+        true,
+    )
+    .await?;
     let _ = crate::index::write_repo_meta(&dst, &source.name, &head).await;
     r.done(format!(
         "reparsed {parsed} files → symbols {before}→{}, edges {}",
@@ -1248,6 +1271,29 @@ async fn scan_packages(
         ));
     }
     Ok(rows)
+}
+
+/// Store the indexed files' contents, so code is shown from the index rather than a checkout.
+async fn store_sources(
+    ctx: &IndexContext,
+    dst: &str,
+    roots: Vec<(String, PathBuf)>,
+    merge: bool,
+) -> Result<()> {
+    let files = blocking(move || {
+        roots
+            .iter()
+            .map(|(name, root)| crate::sources::collect(name, root))
+            .collect::<Result<Vec<_>>>()
+    })
+    .await??
+    .concat();
+    let (n, new) = crate::index::write_sources(dst, &files, merge)
+        .await
+        .map_err(|e| anyhow::anyhow!(crate::storage::explain(&format!("{e:#}"))))?;
+    ctx.report
+        .done(format!("file contents: {n} files ({new} new or changed)"));
+    Ok(())
 }
 
 /// Change recipes from each repository's recent history.

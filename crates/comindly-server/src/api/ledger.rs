@@ -21,6 +21,8 @@ pub struct RepoQuery {
 pub struct Conventions {
     pub conventions: Vec<ShownConvention>,
     pub hidden: Vec<Manual>,
+    /// Per repository, its commit page on GitHub or GitLab without the commit (append it).
+    pub commit_urls: BTreeMap<String, String>,
 }
 
 /// A convention with the handle edits use.

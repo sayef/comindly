@@ -554,6 +554,7 @@ pub async fn write_repo_commits(uri: &str, repos: &[IndexedRepo]) -> Result<()> 
         Field::new("repo", DataType::Utf8, false),
         Field::new("commit", DataType::Utf8, false),
         Field::new("remote", DataType::Utf8, true),
+        Field::new("branch", DataType::Utf8, true),
     ]));
     let batch = RecordBatch::try_new(
         schema,
@@ -567,6 +568,9 @@ pub async fn write_repo_commits(uri: &str, repos: &[IndexedRepo]) -> Result<()> 
             Arc::new(StringArray::from_iter(
                 repos.iter().map(|r| r.remote.clone()),
             )) as ArrayRef,
+            Arc::new(StringArray::from_iter(
+                repos.iter().map(|r| r.branch.clone()),
+            )) as ArrayRef,
         ],
     )
     .context("build repo_commits batch")?;
@@ -575,12 +579,13 @@ pub async fn write_repo_commits(uri: &str, repos: &[IndexedRepo]) -> Result<()> 
     Ok(())
 }
 
-/// A repository in the index: its name, the commit indexed and where it is cloned from.
+/// A repository in the index: its name, the commit and branch indexed and where it is cloned from.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct IndexedRepo {
     pub name: String,
     pub commit: String,
     pub remote: Option<String>,
+    pub branch: Option<String>,
 }
 
 /// The repositories recorded in the index (indexes made before remotes were stored have none).
@@ -595,11 +600,15 @@ pub async fn read_indexed_repos(uri: &str) -> Result<Vec<IndexedRepo>> {
         let repo = str_col(&b, "repo")?;
         let commit = str_col(&b, "commit")?;
         let remote = str_col(&b, "remote").ok();
+        let branch = str_col(&b, "branch").ok();
         for i in 0..b.num_rows() {
             out.push(IndexedRepo {
                 name: repo.value(i).to_string(),
                 commit: commit.value(i).to_string(),
                 remote: remote
+                    .filter(|r| r.is_valid(i))
+                    .map(|r| r.value(i).to_string()),
+                branch: branch
                     .filter(|r| r.is_valid(i))
                     .map(|r| r.value(i).to_string()),
             });
@@ -1222,6 +1231,159 @@ pub fn read_facts_blocking(uri: &str) -> Result<Option<Vec<FileFacts>>> {
     crate::rt::block_on(read_facts(uri))
 }
 
+// ---- file contents of the indexed commits -----------------------------------------------
+
+/// Store `files`: contents go into `source_blobs` once per hash (append-only, so unchanged files
+/// cost nothing), and `source_files` maps each path to its hash. With `merge`, rows of
+/// repositories `files` does not cover are kept. Returns the files and the new contents written.
+pub async fn write_sources(
+    uri: &str,
+    files: &[crate::sources::SourceFile],
+    merge: bool,
+) -> Result<(usize, usize)> {
+    use std::collections::HashSet;
+    let db = crate::storage::connect(uri).execute().await?;
+    let blobs = db.open_table("source_blobs").execute().await.ok();
+    let mut have: HashSet<String> = HashSet::new();
+    if let Some(t) = &blobs {
+        let mut st = t
+            .query()
+            .select(Select::columns(&["hash"]))
+            .execute()
+            .await?;
+        while let Some(b) = st.try_next().await? {
+            let h = str_col(&b, "hash")?;
+            have.extend((0..b.num_rows()).map(|i| h.value(i).to_string()));
+        }
+    }
+    let mut fresh: Vec<&crate::sources::SourceFile> = Vec::new();
+    for f in files {
+        if have.insert(f.hash.clone()) {
+            fresh.push(f);
+        }
+    }
+    if !fresh.is_empty() {
+        let batch = RecordBatch::try_new(
+            Arc::new(Schema::new(vec![
+                Field::new("hash", DataType::Utf8, false),
+                Field::new("content", DataType::Utf8, false),
+            ])),
+            vec![
+                Arc::new(StringArray::from_iter_values(fresh.iter().map(|f| &f.hash))) as ArrayRef,
+                Arc::new(StringArray::from_iter_values(
+                    fresh.iter().map(|f| &f.content),
+                )) as ArrayRef,
+            ],
+        )?;
+        let tbl = match blobs {
+            Some(t) => {
+                t.add(batch).mode(AddDataMode::Append).execute().await?;
+                t
+            }
+            None => db.create_table("source_blobs", batch).execute().await?,
+        };
+        tbl.create_index(&["hash"], Index::BTree(Default::default()))
+            .replace(true)
+            .execute()
+            .await
+            .context("index source_blobs")?;
+    }
+
+    let covered: HashSet<&str> = files.iter().map(|f| f.repo.as_str()).collect();
+    let mut rows: Vec<(String, String, String)> = if merge {
+        read_source_files(uri)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|(r, _, _)| !covered.contains(r.as_str()))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    rows.extend(
+        files
+            .iter()
+            .map(|f| (f.repo.clone(), f.path.clone(), f.hash.clone())),
+    );
+    let batch = RecordBatch::try_new(
+        Arc::new(Schema::new(vec![
+            Field::new("repo", DataType::Utf8, false),
+            Field::new("path", DataType::Utf8, false),
+            Field::new("hash", DataType::Utf8, false),
+        ])),
+        vec![
+            Arc::new(StringArray::from_iter_values(rows.iter().map(|r| &r.0))) as ArrayRef,
+            Arc::new(StringArray::from_iter_values(rows.iter().map(|r| &r.1))) as ArrayRef,
+            Arc::new(StringArray::from_iter_values(rows.iter().map(|r| &r.2))) as ArrayRef,
+        ],
+    )?;
+    write_versioned(&db, "source_files", batch).await?;
+    Ok((files.len(), fresh.len()))
+}
+
+/// Every stored `(repo, path, hash)`.
+pub async fn read_source_files(uri: &str) -> Result<Vec<(String, String, String)>> {
+    let db = crate::storage::connect(uri).execute().await?;
+    let tbl = db.open_table("source_files").execute().await?;
+    let mut out = Vec::new();
+    let mut st = tbl.query().execute().await?;
+    while let Some(b) = st.try_next().await? {
+        let (r, p, h) = (
+            str_col(&b, "repo")?,
+            str_col(&b, "path")?,
+            str_col(&b, "hash")?,
+        );
+        for i in 0..b.num_rows() {
+            out.push((
+                r.value(i).to_string(),
+                p.value(i).to_string(),
+                h.value(i).to_string(),
+            ));
+        }
+    }
+    Ok(out)
+}
+
+/// The stored contents of `path` in `repo`, if the index holds them.
+pub async fn read_source(uri: &str, repo: &str, path: &str) -> Result<Option<String>> {
+    let quote = |s: &str| format!("'{}'", s.replace('\'', "''"));
+    let db = crate::storage::connect(uri).execute().await?;
+    let Ok(files) = db.open_table("source_files").execute().await else {
+        return Ok(None);
+    };
+    let mut st = files
+        .query()
+        .only_if(format!("repo = {} AND path = {}", quote(repo), quote(path)))
+        .select(Select::columns(&["hash"]))
+        .limit(1)
+        .execute()
+        .await?;
+    let Some(hash) = first_str(&mut st, "hash").await? else {
+        return Ok(None);
+    };
+    let blobs = db.open_table("source_blobs").execute().await?;
+    let mut st = blobs
+        .query()
+        .only_if(format!("hash = {}", quote(&hash)))
+        .select(Select::columns(&["content"]))
+        .limit(1)
+        .execute()
+        .await?;
+    first_str(&mut st, "content").await
+}
+
+async fn first_str(
+    st: &mut lancedb::arrow::SendableRecordBatchStream,
+    col: &str,
+) -> Result<Option<String>> {
+    while let Some(b) = st.try_next().await? {
+        if b.num_rows() > 0 {
+            return Ok(Some(str_col(&b, col)?.value(0).to_string()));
+        }
+    }
+    Ok(None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1249,11 +1411,61 @@ mod tests {
             name: "orders".into(),
             commit: "def".into(),
             remote: Some("https://example.com/orders.git".into()),
+            branch: Some("main".into()),
         };
         write_repo_commits(uri, std::slice::from_ref(&next))
             .await
             .unwrap();
         assert_eq!(read_indexed_repos(uri).await.unwrap(), vec![next]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn sources_store_each_content_once_and_merge_by_repo() {
+        use crate::sources::SourceFile;
+        let dir = std::env::temp_dir().join(format!("comindly-sources-idx-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let uri = dir.to_str().unwrap();
+        let file = |repo: &str, path: &str, content: &str| SourceFile {
+            repo: repo.into(),
+            path: path.into(),
+            hash: blake3::hash(content.as_bytes()).to_hex()[..32].to_string(),
+            content: content.into(),
+        };
+        let a = file("orders", "src/it's.py", "x = 1\n");
+        let b = file("billing", "lib/b.py", "x = 1\n");
+        assert_eq!(
+            write_sources(uri, &[a.clone(), b], false).await.unwrap(),
+            (2, 1)
+        );
+        assert_eq!(
+            read_source(uri, "orders", "src/it's.py")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("x = 1\n")
+        );
+
+        let changed = file("orders", "src/it's.py", "x = 2\n");
+        assert_eq!(write_sources(uri, &[changed], true).await.unwrap(), (1, 1));
+        assert_eq!(
+            read_source(uri, "orders", "src/it's.py")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("x = 2\n")
+        );
+        assert_eq!(
+            read_source(uri, "billing", "lib/b.py")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("x = 1\n")
+        );
+        assert_eq!(
+            read_source(uri, "billing", "missing.py").await.unwrap(),
+            None
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }

@@ -1035,9 +1035,25 @@ async fn conventions(Cur(s): Cur, Query(q): Query<api::RepoQuery>) -> Json<api::
         .filter(|m| m.hidden && mine(&m.repo))
         .cloned()
         .collect();
+    let repos = match graph_uri(&s) {
+        Some(u) => crate::index::read_indexed_repos(&u)
+            .await
+            .unwrap_or_default(),
+        None => Vec::new(),
+    };
+    let commit_urls = repos
+        .into_iter()
+        .filter_map(|r| {
+            Some((
+                r.name,
+                crate::hosting::commit_link(r.remote.as_deref()?, "")?,
+            ))
+        })
+        .collect();
     Json(api::Conventions {
         conventions,
         hidden,
+        commit_urls,
     })
 }
 

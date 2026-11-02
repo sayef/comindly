@@ -56,13 +56,13 @@ Everyone using an index runs with the same models and steps, so these are stored
 ```bash
 comindly team                                    # show them
 comindly team set llm_model=gpt-6-luna enrich=true max_flows=50
-comindly team set scip=require auto_index=true
+comindly team set scip=require auto_index=true auto_index_minutes=15
 comindly team set llm_base_url=                  # an empty value removes a setting
 ```
 
 Keys: `name`, `llm_model`, `llm_base_url`, `embed_model`, `embed`, `enrich`, `flows`, `guide`,
 `max_enrich`, `max_flows`, `llm_concurrency`, `llm_price_in`, `llm_price_out`, `format` (`md` or `json`),
-`scip` (`auto`, `require` or `off`), `auto_index` and `auto_index_llm`. Where one is unset, comindly's default applies.
+`scip` (`auto`, `require` or `off`), `auto_index`, `auto_index_llm` and `auto_index_minutes`. Where one is unset, comindly's default applies.
 See [Team setup](team-setup.md#team-settings).
 
 ## Environment

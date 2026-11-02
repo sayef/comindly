@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDownUp, ChevronDown, ChevronRight, Code2, Pencil, Plus, RotateCcw, Search, Trash2 } from "lucide-react";
+import { ArrowDownUp, ChevronDown, ChevronRight, Code2, ExternalLink, GitCommitHorizontal, Pencil, Plus, RotateCcw, Search, Trash2 } from "lucide-react";
 import { Fragment, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { RepoDot } from "@/components/symbol";
@@ -36,6 +36,29 @@ function place(repo: string, at: string): [string, string] {
   return i > 0 ? [at.slice(0, i), at.slice(i + 1)] : [repo, at];
 }
 
+/** A commit a recipe was learned from (`sha subject`), linked to its host when known. */
+function Commit({ repo, at, kind, urls }: { repo: string; at: string; kind: "follows" | "deviates"; urls: Record<string, string> }) {
+  const [r, ref] = place(repo, at);
+  const i = ref.indexOf(" ");
+  const [sha, subject] = i > 0 ? [ref.slice(0, i), ref.slice(i + 1)] : [ref, ""];
+  const url = urls[r];
+  return (
+    <li className="flex flex-wrap items-center gap-2 text-xs">
+      <Badge variant={kind === "follows" ? "brand" : "warning"}>{kind === "follows" ? "Follows" : "Deviates"}</Badge>
+      {r !== ORG && <RepoDot repo={r} />}
+      <GitCommitHorizontal className="size-3.5 text-muted-foreground" />
+      {url ? (
+        <a className="font-mono text-brand hover:underline" href={url + sha} target="_blank" rel="noreferrer">
+          {sha}
+        </a>
+      ) : (
+        <span className="font-mono">{sha}</span>
+      )}
+      <span className="[overflow-wrap:anywhere]">{repo === ORG ? `${r}: ${subject}` : subject}</span>
+    </li>
+  );
+}
+
 /** One code location, with its lines on demand. */
 function Where({ repo, at, kind }: { repo: string; at: string; kind: "follows" | "deviates" }) {
   const [open, setOpen] = useState(false);
@@ -62,17 +85,23 @@ function Where({ repo, at, kind }: { repo: string; at: string; kind: "follows" |
           ))}
         </pre>
       )}
+      {open && src.data?.link && (
+        <a className="flex items-center gap-1 self-start text-xs text-brand hover:underline" href={src.data.link} target="_blank" rel="noreferrer">
+          <ExternalLink className="size-3" /> Open at {src.data.commit?.slice(0, 8)}
+        </a>
+      )}
     </li>
   );
 }
 
-function Row({ c, writable }: { c: Convention; writable: boolean }) {
+function Row({ c, writable, commitUrls }: { c: Convention; writable: boolean; commitUrls: Record<string, string> }) {
   const change = useChange();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(c.rule);
   const pct = c.total ? Math.round((c.support / c.total) * 100) : 0;
   const where = c.exemplars.length + c.counterexamples.length;
+  const recipe = c.dimension === "recipes";
   const busy = (action: string) => change.isPending && change.variables?.action === action;
 
   return (
@@ -152,15 +181,18 @@ function Row({ c, writable }: { c: Convention; writable: boolean }) {
           <td />
           <td colSpan={6} className="py-3 pr-4">
             <p className="mb-2 text-xs text-muted-foreground">
-              {c.origin === "manual" ? "Set by the team." : `Measured from the code: ${c.support} of ${c.total} follow it.`} Where it comes from:
+              {c.origin === "manual"
+                ? "Set by the team."
+                : `Measured from ${recipe ? "commit history" : "the code"}: ${c.support} of ${c.total} follow it.`}{" "}
+              Where it comes from:
             </p>
             <ul className="flex flex-col gap-2">
-              {c.exemplars.map((x) => (
-                <Where key={`f-${x}`} repo={c.repo} at={x} kind="follows" />
-              ))}
-              {c.counterexamples.map((x) => (
-                <Where key={`d-${x}`} repo={c.repo} at={x} kind="deviates" />
-              ))}
+              {c.exemplars.map((x) =>
+                recipe ? <Commit key={`f-${x}`} repo={c.repo} at={x} kind="follows" urls={commitUrls} /> : <Where key={`f-${x}`} repo={c.repo} at={x} kind="follows" />,
+              )}
+              {c.counterexamples.map((x) =>
+                recipe ? <Commit key={`d-${x}`} repo={c.repo} at={x} kind="deviates" urls={commitUrls} /> : <Where key={`d-${x}`} repo={c.repo} at={x} kind="deviates" />,
+              )}
             </ul>
           </td>
         </tr>
@@ -335,7 +367,7 @@ export function ConventionsPage() {
             </thead>
             <tbody>
               {rows.map((c) => (
-                <Row key={`${c.id}-${c.rule}`} c={c} writable={writable} />
+                <Row key={`${c.id}-${c.rule}`} c={c} writable={writable} commitUrls={all.data?.commit_urls ?? {}} />
               ))}
             </tbody>
           </table>

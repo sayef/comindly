@@ -35,6 +35,7 @@ pub mod rt;
 pub mod scip;
 pub mod search;
 pub mod signing;
+pub mod sources;
 pub mod storage;
 pub mod styleguide;
 pub mod team;

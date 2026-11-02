@@ -1,8 +1,6 @@
 //! Flows across repositories, and the source lines behind a `path:line`.
 
-use std::path::Path;
-
-use axum::extract::{Query, State};
+use axum::extract::Query;
 use axum::http::StatusCode;
 use axum::Json;
 
@@ -72,42 +70,38 @@ pub(super) async fn one(Cur(s): Cur, Query(q): Query<api::FlowQuery>) -> Reply<a
     }))
 }
 
-/// The lines around `path:line` in this machine's copy of `repo` (comindly's checkout of its default branch when there is one).
+/// The lines around `path:line`, from the file contents stored in the index.
 pub(super) async fn source(
-    State(app): State<super::Shared>,
+    Cur(s): Cur,
     Query(q): Query<api::SourceQuery>,
 ) -> Reply<api::SourceLines> {
-    let repos = app.repos();
-    let run = || -> anyhow::Result<api::SourceLines> {
+    let run = async {
         let (path, line) = q.at.rsplit_once(':').unwrap_or((q.at.as_str(), "1"));
         let line: usize = line.parse().unwrap_or(1).max(1);
-        let entry = repos
-            .iter()
-            .find(|r| crate::worktree::name(Path::new(&r.path)) == q.repo)
-            .ok_or_else(|| anyhow::anyhow!("{} has no folder on this machine", q.repo))?;
-        let repo = Path::new(&entry.path);
-        let root = crate::worktree::checkout_dir(&crate::config::cache_dir(), repo)
-            .unwrap_or_else(|| repo.to_path_buf());
-        let root = std::fs::canonicalize(&root)?;
-        let file = std::fs::canonicalize(root.join(path))?;
-        anyhow::ensure!(file.starts_with(&root), "{path} is outside the repository");
-        let text = std::fs::read_to_string(&file)?;
-        let from = line.saturating_sub(q.around + 1);
-        let lines = text
-            .lines()
-            .enumerate()
-            .skip(from)
-            .take(q.around * 2 + 1)
-            .map(|(n, l)| api::SourceLine {
-                n: n + 1,
-                text: l.to_string(),
-            })
-            .collect();
-        Ok(api::SourceLines {
+        let uri = super::graph_uri(&s).ok_or_else(|| anyhow::anyhow!("no index"))?;
+        let text = crate::index::read_source(&uri, &q.repo, path)
+            .await?
+            .ok_or_else(|| {
+                anyhow::anyhow!("{path} is not stored in this index; index again to show its code")
+            })?;
+        let repo = crate::index::read_indexed_repos(&uri)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .find(|r| r.name == q.repo);
+        let link = repo
+            .as_ref()
+            .and_then(|r| crate::hosting::file_link(r.remote.as_deref()?, &r.commit, path, line));
+        anyhow::Ok(api::SourceLines {
             path: path.to_string(),
             line,
-            lines,
+            lines: crate::sources::around(&text, line, q.around)
+                .into_iter()
+                .map(|(n, text)| api::SourceLine { n, text })
+                .collect(),
+            commit: repo.map(|r| r.commit),
+            link,
         })
     };
-    run().map(Json).map_err(super::bad)
+    run.await.map(Json).map_err(super::bad)
 }

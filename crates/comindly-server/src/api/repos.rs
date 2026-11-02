@@ -169,6 +169,8 @@ pub struct QueuedJob {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexWatch {
     pub enabled: bool,
+    /// Minutes between checks.
+    pub minutes: u64,
     pub last: WatchResult,
 }
 

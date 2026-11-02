@@ -232,13 +232,15 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
     }
   }, [j, seen, qc]);
   const watch = useQuery({ queryKey: ["index-watch"], queryFn: api.indexWatch, refetchInterval: 30_000 });
-  const settings = useQuery({ queryKey: ["settings"], queryFn: api.settings });
   const team = useQuery({ queryKey: ["team"], queryFn: api.team });
+  const [minutes, setMinutes] = useState<string | null>(null);
   const auto = useMutation({
-    mutationFn: (s: Pick<TeamSettings, "auto_index" | "auto_index_llm">) =>
+    mutationFn: (s: Pick<TeamSettings, "auto_index" | "auto_index_llm" | "auto_index_minutes">) =>
       api.saveTeam({ ...team.data!.settings, ...s }, team.data!.version),
-    onSuccess: () => (qc.invalidateQueries({ queryKey: ["team"] }), qc.invalidateQueries({ queryKey: ["index-watch"] })),
+    onSuccess: () => (setMinutes(null), qc.invalidateQueries({ queryKey: ["team"] }), qc.invalidateQueries({ queryKey: ["index-watch"] })),
   });
+  const every = minutes ?? String(team.data?.settings.auto_index_minutes ?? watch.data?.minutes ?? 5);
+  const everyValid = /^\d+$/.test(every) && Number(every) >= 1 && Number(every) <= 1440;
 
   return (
     <Card>
@@ -287,8 +289,28 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
             disabled={!team.data || auto.isPending}
             onChange={(e) => auto.mutate({ auto_index: e.target.checked })}
           />
-          Re-index automatically when a default branch moves (checked every {settings.data?.cache_ttl_secs ?? 300} s)
+          Re-index automatically when a default branch moves
         </label>
+        <div className="ml-6 flex flex-wrap items-center gap-2 text-sm">
+          Check every
+          <Input
+            type="number"
+            min={1}
+            max={1440}
+            className="h-8 w-20"
+            value={every}
+            disabled={!team.data || auto.isPending || !team.data.settings.auto_index}
+            onChange={(e) => setMinutes(e.target.value)}
+            aria-label="Minutes between checks"
+          />
+          minutes
+          {minutes !== null && (
+            <Button size="sm" variant="outline" disabled={!everyValid} loading={auto.isPending} onClick={() => auto.mutate({ auto_index_minutes: Number(every) })}>
+              Save
+            </Button>
+          )}
+          {minutes !== null && !everyValid && <span className="text-xs text-warning">Between 1 and 1440 minutes</span>}
+        </div>
         <label className="ml-6 flex items-center gap-2 text-sm">
           <input
             type="checkbox"
@@ -298,6 +320,7 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
           />
           With LLM steps: summaries, style guides and walkthroughs for new or changed code only
         </label>
+        <Message error={auto.error} />
         {watch.data?.enabled && watch.data.last.checked && (
           <p className="text-xs text-muted-foreground">
             Last check {new Date(watch.data.last.checked).toLocaleTimeString()}: {watch.data.last.result}
@@ -607,7 +630,7 @@ export function RepositoriesPage() {
               <div className="flex items-center gap-2">
                 <RepoDot repo={r.name} />
                 <span className="font-medium">{r.name}</span>
-                {r.managed && !r.cloned && <Badge variant="outline">Cloned when indexing</Badge>}
+                {r.managed && !r.cloned && !r.indexed_commit && <Badge variant="outline">Cloned when indexing</Badge>}
                 {!r.managed && !r.exists && <Badge variant="danger">Folder missing</Badge>}
                 {r.symbols == null ? (
                   <Badge variant="outline">Not indexed yet</Badge>

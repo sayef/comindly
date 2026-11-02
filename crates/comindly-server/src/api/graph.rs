@@ -230,6 +230,10 @@ pub struct SourceLines {
     pub path: String,
     pub line: usize,
     pub lines: Vec<SourceLine>,
+    /// The indexed commit the lines come from.
+    pub commit: Option<String>,
+    /// The lines on the repository's host, when it is GitHub or GitLab.
+    pub link: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
