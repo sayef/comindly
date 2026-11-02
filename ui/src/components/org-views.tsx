@@ -174,7 +174,7 @@ export function TreeView({
 
   return (
     <div className="overflow-auto px-5">
-      <div className="relative my-5" style={{ width, height }}>
+      <div className="relative mx-auto my-5" style={{ width, height }}>
         <svg className="pointer-events-none absolute inset-0 overflow-visible" width={width} height={height} aria-hidden="true">
           <defs>
             <marker id="loop-tip" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="8" markerHeight="8" orient="auto">

@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { KeyRound } from "lucide-react";
+import { KeyRound, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Outcome } from "@/components/notice";
 import { useAccess } from "@/lib/me";
@@ -32,7 +33,7 @@ export function ApiKey() {
     onSuccess: () => (setKey(""), qc.invalidateQueries({ queryKey: ["team"] }), qc.invalidateQueries({ queryKey: ["settings"] })),
   });
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2 border-t pt-3">
       <p className="flex items-center gap-2 text-sm font-semibold">
         <KeyRound className="size-4" /> Your API key
         <Badge variant={source === "none" ? "outline" : "brand"}>{sources[source]}</Badge>
@@ -79,10 +80,12 @@ export function TeamSection() {
 
   if (!t) return null;
   return (
-    <section className="flex flex-col gap-4 rounded-lg bg-card p-5">
-      <div className="flex max-w-[80ch] flex-col gap-1">
-        <h2 className="text-[17px] font-semibold">Team</h2>
-        <p className="text-muted-foreground">
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Users className="size-4" /> Team
+        </CardTitle>
+        <CardDescription>
           {server
             ? "Stored with the index and used by everyone on it: the same LLM and embedding model for all, with the key from Integrations. Empty fields use comindly's default, shown as the placeholder. Only admins change them."
             : "Stored with the index and used by everyone on it: the same LLM and embedding model for all; each person brings their own API key. Empty fields use comindly's default, shown as the placeholder. Changing them needs write access to the index."}
@@ -93,9 +96,9 @@ export function TeamSection() {
               {t.changed_at ? `, ${new Date(t.changed_at).toLocaleString()}` : ""}.
             </span>
           )}
-        </p>
-      </div>
-      <div className="flex flex-col gap-4">
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
         <fieldset disabled={!admin} className="contents">
           <div className="grid gap-3 sm:grid-cols-2">
             <label className={field}>
@@ -210,7 +213,7 @@ export function TeamSection() {
           )}
           <Outcome error={save.error} message={save.data?.message} />
         </fieldset>
-      </div>
-    </section>
+      </CardContent>
+    </Card>
   );
 }

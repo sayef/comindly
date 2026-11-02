@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Notice } from "@/components/notice";
@@ -20,16 +21,15 @@ function useSave() {
   });
 }
 
-/** A settings group: what it is on the left, its fields on the right. */
 export function Section({ title, description, children }: { title: string; description?: string; children: React.ReactNode }) {
   return (
-    <section className="grid gap-x-10 gap-y-4 rounded-lg bg-card p-5 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-      <div className="flex flex-col gap-1">
-        <h2 className="text-[17px] font-semibold">{title}</h2>
-        {description && <p className="text-muted-foreground">{description}</p>}
-      </div>
-      <div className="flex min-w-0 flex-col gap-3">{children}</div>
-    </section>
+    <Card>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+        {description && <CardDescription>{description}</CardDescription>}
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">{children}</CardContent>
+    </Card>
   );
 }
 
@@ -59,7 +59,7 @@ export function SettingsPage() {
   const result = (m: typeof saveIndex) => (m.error ? <Notice ok={false} message={m.error.message} /> : null);
 
   return (
-    <div className="flex max-w-5xl flex-col gap-4">
+    <div className="flex max-w-3xl flex-col gap-5">
       <PageHeader title="Settings">
         {server ? (
           <>
@@ -161,7 +161,7 @@ export function SettingsShell() {
     `flex h-8 items-center rounded-md px-3 text-sm font-semibold transition-colors duration-100 ${isActive ? "bg-card text-foreground shadow-[0_1px_2px_var(--shadow-ink)]" : "text-muted-foreground hover:text-foreground"}`;
   return (
     <div className="flex flex-col gap-2">
-      <nav className="mt-4 flex w-fit max-w-full flex-wrap gap-0.5 rounded-lg bg-secondary p-0.5" aria-label="Settings">
+      <nav className="mb-4 flex w-fit max-w-full flex-wrap gap-0.5 rounded-lg bg-secondary p-0.5" aria-label="Settings">
         <NavLink to="/settings" end className={tab}>
           General
         </NavLink>

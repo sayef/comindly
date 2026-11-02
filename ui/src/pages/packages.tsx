@@ -51,13 +51,11 @@ export function PackagesPage() {
   }, [rows.data, only]);
   const skewed = (rows.data ?? []).filter((p) => p.skewed).length;
 
-  const names = new Set((rows.data ?? []).map((p) => `${p.ecosystem}:${p.name}`)).size;
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-5">
       <PageHeader title="Internal packages">
-        {names
-          ? `${skewed ? `${skewed} ${skewed === 1 ? "consumer pins" : "consumers pin"}` : "No consumer pins"} a different version than the publisher's source, across ${names} ${names === 1 ? "library" : "libraries"} the indexed repositories publish to each other.`
-          : "Libraries one repository publishes and others depend on, with the version each consumer pins."}
+        Libraries one repository publishes and others depend on, with the version each consumer pins. A pin that differs from the
+        published version is skew: the consumer runs code the publisher has moved on from.
       </PageHeader>
       <Tabs value={only} onValueChange={(v) => setOnly(v as "all" | "skew")}>
         <TabsList>
@@ -69,7 +67,7 @@ export function PackagesPage() {
       </Tabs>
       {rows.isLoading && <Skeleton className="h-48 rounded-lg" />}
       {!rows.isLoading && groups.length === 0 && (
-        <p className="rounded-lg bg-card px-5 py-8 text-muted-foreground">
+        <p className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">
           {only === "skew" ? "Every consumer pins its publisher's version." : "No internal packages found in the indexed manifests."}
         </p>
       )}

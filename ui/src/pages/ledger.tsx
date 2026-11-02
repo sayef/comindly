@@ -31,7 +31,7 @@ export function LedgerPage() {
 
   let month = "";
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-5">
       <PageHeader
         title="Ledger"
         actions={
@@ -43,7 +43,6 @@ export function LedgerPage() {
         }
       >
         What the code does not say: failed attempts, decisions and constraints, anchored to the symbols they are about.
-        {ledger.data?.length ? ` ${ledger.data.length} recorded, ${pending ? `${pending} waiting for review` : "none waiting for review"}.` : ""}
       </PageHeader>
       <RememberDialog open={adding} onOpenChange={setAdding} />
       <div className="flex flex-wrap items-center gap-3">
@@ -64,7 +63,7 @@ export function LedgerPage() {
       </div>
       {ledger.isLoading && [0, 1, 2].map((i) => <Skeleton key={i} className="h-32 rounded-lg" />)}
       {ledger.data && rows.length === 0 && (
-        <div className="rounded-lg bg-card px-5 py-8 text-muted-foreground">
+        <div className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">
           {ledger.data.length === 0 ? (
             <>
               No records yet. Use <span className="font-medium text-foreground">Add record</span>, or{" "}

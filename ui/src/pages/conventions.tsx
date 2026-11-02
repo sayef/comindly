@@ -295,11 +295,8 @@ export function ConventionsPage() {
   }, [items, scope, topic, origin, query, sort]);
   const hidden = (all.data?.hidden ?? []).filter((h) => !scope || h.repo === scope);
 
-  const measured = items.filter((c) => c.origin !== "manual" && c.total > 0);
-  const firm = measured.filter((c) => c.support / c.total >= 0.8).length;
-  const loose = measured.filter((c) => c.support / c.total < 0.5).length;
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-5">
       <PageHeader
         title="Conventions"
         actions={
@@ -310,9 +307,7 @@ export function ConventionsPage() {
           )
         }
       >
-        {measured.length
-          ? `${firm} of ${measured.length} measured conventions hold in at least 80 % of places; ${loose} hold in fewer than half, so the code does not agree on them yet.`
-          : "Measured from the code, plus the team's own: how each repository names, structures, logs, configures and tests things."}
+        Measured from the code, plus the team's own: how each repository names, structures, logs, configures and tests things.
       </PageHeader>
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative w-full max-w-xs">
@@ -384,7 +379,7 @@ export function ConventionsPage() {
         )}
       </Card>
       {hidden.length > 0 && (
-        <details className="rounded-lg bg-card p-4">
+        <details className="rounded-lg border bg-card p-4">
           <summary className="cursor-pointer font-semibold">Hidden conventions ({hidden.length})</summary>
           <div className="mt-3 flex flex-col gap-2">
             {hidden.map((h) => (

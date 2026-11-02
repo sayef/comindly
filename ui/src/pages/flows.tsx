@@ -77,7 +77,7 @@ function FlowView({ id }: { id: string }) {
   const f = flow.data;
   return (
     <div className="flex flex-col gap-5">
-      <Link to="/flows" className="flex min-h-9 w-fit items-center gap-1 pt-4 text-sm font-semibold text-muted-foreground hover:text-foreground">
+      <Link to="/flows" className="-mt-2 flex min-h-9 w-fit items-center gap-1 text-sm font-semibold text-muted-foreground hover:text-foreground">
         <ChevronLeft className="size-4" /> All flows
       </Link>
       {!f ? (
@@ -138,14 +138,11 @@ export function FlowsPage() {
     });
   const total = flows.data?.length ?? 0;
 
-  const crossing = (flows.data ?? []).filter((f) => f.repos.length > 1);
-  const furthest = crossing.reduce((m, f) => Math.max(m, f.repos.length), 0);
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-5">
       <PageHeader title="Flows">
-        {total
-          ? `${crossing.length} of ${total} entry points travel into other repositories, through calls, routes, topics and queues; the furthest reaches ${furthest}.`
-          : "Where work starts and where it travels: calls, then across HTTP routes, topics and queues into the services that handle them."}
+        Where work starts and where it travels: calls, then across HTTP routes, topics and queues into the services that handle them.
+        With LLM summaries on when indexing, flows also get a written walkthrough.
       </PageHeader>
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative w-full max-w-sm">

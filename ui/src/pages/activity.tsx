@@ -86,8 +86,8 @@ function Tile({
       onClick={onClick}
       aria-pressed={on}
       className={cn(
-        "flex min-w-0 flex-col gap-1.5 rounded-lg bg-card px-4 py-3.5 text-left transition-colors duration-100 hover:bg-[color-mix(in_srgb,var(--color-card)_92%,var(--color-foreground))]",
-        on && "bg-accent outline-2 outline-brand hover:bg-accent",
+        "flex min-w-0 flex-col gap-1.5 rounded-lg border bg-card px-4 py-3.5 text-left transition-colors duration-100 hover:border-input",
+        on && "border-brand/60 bg-accent hover:border-brand/60",
       )}
     >
       <span className="flex items-center justify-between gap-2">
@@ -129,7 +129,7 @@ export function ActivityPage() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-5">
       <PageHeader title="Activity">
         What comindly works on in the background: what waits in the queue, what runs now and how each run went, step by step.
       </PageHeader>

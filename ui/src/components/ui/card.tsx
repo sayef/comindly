@@ -2,13 +2,13 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 
 export function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("rounded-lg bg-card text-card-foreground", className)} {...props} />;
+  return <div className={cn("rounded-lg border bg-card text-card-foreground", className)} {...props} />;
 }
 export function CardHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("flex flex-col gap-1 px-5 pt-4 pb-1", className)} {...props} />;
+  return <div className={cn("flex flex-col gap-1 border-b px-5 py-3.5", className)} {...props} />;
 }
 export function CardTitle({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) {
-  return <h3 className={cn("text-[17px] font-semibold leading-snug", className)} {...props} />;
+  return <h3 className={cn("text-sm font-semibold", className)} {...props} />;
 }
 export function CardDescription({ className, ...props }: React.HTMLAttributes<HTMLParagraphElement>) {
   return <p className={cn("text-xs text-muted-foreground", className)} {...props} />;

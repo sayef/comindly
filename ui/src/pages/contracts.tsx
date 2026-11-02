@@ -52,13 +52,10 @@ export function ContractsPage() {
   }, [contracts.data, kind, side, q]);
 
   const all = contracts.data ?? [];
-  const both = all.filter((v) => v.providers.length > 0 && v.consumers.length > 0).length;
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-5">
       <PageHeader title="Service contracts">
-        {all.length
-          ? `${both} of ${all.length} routes, queues, topics, buckets and tables have both their provider and a caller in the index; for the rest, one side lives outside it.`
-          : "Routes, queues, topics, buckets and tables, with the code that provides them and the code that uses them."}
+        Routes, queues, topics, buckets and tables, with the code that provides them and the code that uses them.
       </PageHeader>
       <div className="flex flex-wrap items-center gap-3">
         <Tabs value={kind} onValueChange={(v) => setKind(v as (typeof KINDS)[number])}>

@@ -80,9 +80,9 @@ export function EntryCard({ entry, writable, compact = false }: { entry: Entry; 
   const fields = Object.entries(r.fields).filter(([k]) => k !== "at");
 
   return (
-    <Card className={cn("px-5 py-4", retired && "opacity-70")}>
+    <Card className={cn("p-4", retired && "opacity-70")}>
       <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-        <span className="mr-1 text-sm font-semibold text-foreground">{sentence(r.kind)}</span>
+        <Badge variant="outline">{sentence(r.kind)}</Badge>
         <Badge variant={STATUS[entry.status] ?? "outline"}>{sentence(statusLabel(entry))}</Badge>
         <TrustBadge trust={entry.trust} />
         {challenged && (
@@ -96,8 +96,8 @@ export function EntryCard({ entry, writable, compact = false }: { entry: Entry; 
           by <span className="font-semibold text-foreground">{entry.by}</span>, {day(when(entry))}
         </span>
       </div>
-      <h4 className={cn("mt-2 leading-snug font-semibold", compact ? "text-sm" : "text-[17px]")}>{r.title}</h4>
-      {!compact && r.body && r.body !== r.title && <p className="mt-1.5 max-w-[80ch] text-muted-foreground">{r.body}</p>}
+      <h4 className="mt-2.5 leading-snug font-semibold">{r.title}</h4>
+      {!compact && r.body && r.body !== r.title && <p className="mt-1.5 text-sm text-muted-foreground">{r.body}</p>}
       {!compact && (r.trigger || fields.length > 0 || r.evidence.length > 0) && (
         <dl className="mt-3 grid gap-1 text-xs">
           {r.trigger && (

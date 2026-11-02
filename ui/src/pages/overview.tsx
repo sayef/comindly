@@ -5,6 +5,7 @@ import { Link, useNavigate } from "react-router";
 import { type Direction, TreeView, useOrg } from "@/components/org-views";
 import { Backdrop } from "@/components/backdrop";
 import { RepoDot } from "@/components/symbol";
+import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -28,20 +29,21 @@ function remembered(key: string, fallback: string) {
   }
 }
 
-function Figure({ value, label }: { value: string; label: string }) {
+function Stat({ label, value, hint }: { label: string; value: string; hint: string }) {
   return (
-    <div className="flex flex-col-reverse">
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="nums text-[17px] font-semibold">{value}</dd>
+    <div className="flex flex-col gap-1 bg-card px-5 py-4">
+      <dt className="text-xs font-semibold text-muted-foreground">{label}</dt>
+      <dd className="nums text-[26px] leading-tight font-semibold tracking-[-0.02em]">{value}</dd>
+      <dd className="text-xs text-muted-foreground">{hint}</dd>
     </div>
   );
 }
 
 function Panel({ title, to, link, children }: { title: string; to: string; link: string; children: React.ReactNode }) {
   return (
-    <section className="overflow-hidden rounded-lg bg-card">
-      <div className="flex items-baseline justify-between gap-3 px-5 pt-4 pb-2">
-        <h2 className="text-[17px] font-semibold">{title}</h2>
+    <section className="overflow-hidden rounded-lg border bg-card">
+      <div className="flex items-center justify-between gap-3 border-b px-5 py-3.5">
+        <h2 className="text-sm font-semibold">{title}</h2>
         <Link to={to} className="-my-1 flex min-h-7 items-center px-1 text-xs font-semibold text-brand hover:underline">
           {link}
         </Link>
@@ -273,40 +275,29 @@ export function OverviewPage() {
   const needs = (ledger.data ?? []).filter((e) => attention(e) < 3).sort((a, b) => attention(a) - attention(b));
 
   const said = finding(org);
-  const cycleNote =
-    org.cycles.length === 0
-      ? "None of them depend on each other in a circle."
-      : `${org.cycles.length === 1 ? "One group" : `${org.cycles.length} groups`} depend on each other in a circle, so none in ${org.cycles.length === 1 ? "it" : "them"} can release alone.`;
 
   return (
-    <div className="flex flex-col gap-8">
-      <header className="flex flex-col gap-5 pt-6 pb-2">
-        <div className="flex max-w-[60rem] flex-col gap-3">
-          <h1 className="text-[34px] leading-[1.15] font-medium tracking-[-0.02em] max-sm:text-[26px]">
-            {said ?? "How the team's repositories depend on each other"}
-          </h1>
-          <p className="max-w-[68ch] text-[17px] leading-normal text-muted-foreground">
-            {said ? `${cycleNote} ` : ""}
-            The map below follows every dependency in code and through service contracts; open a repository to see what it reaches.
-          </p>
-        </div>
-        {o ? (
-          <dl className="flex flex-wrap gap-x-10 gap-y-3">
-            <Figure value={o.repos.length.toLocaleString()} label="repositories" />
-            <Figure value={o.symbols.toLocaleString()} label="symbols" />
-            <Figure value={o.cross_repo_edges.toLocaleString()} label={`links across repositories, of ${o.edges.toLocaleString()}`} />
-            <Figure value={o.contracts.toLocaleString()} label={`contracts, ${o.linked_contracts} with both sides indexed`} />
-            <Figure value={totalRecords.toLocaleString()} label={needs.length ? `ledger records, ${needs.length} to review` : "ledger records"} />
-          </dl>
-        ) : (
-          <Skeleton className="h-12 max-w-3xl" />
-        )}
-      </header>
+    <div className="flex flex-col gap-5">
+      <PageHeader title="Overview">How the team's repositories depend on each other, in code and through service contracts.</PageHeader>
+
+      {o ? (
+        <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border bg-border lg:grid-cols-4">
+          <Stat label="Repositories" value={o.repos.length.toLocaleString()} hint={`${o.symbols.toLocaleString()} symbols indexed`} />
+          <Stat label="Links across repositories" value={o.cross_repo_edges.toLocaleString()} hint={`of ${o.edges.toLocaleString()} dependencies`} />
+          <Stat label="Contracts" value={o.contracts.toLocaleString()} hint={`${o.linked_contracts} with both sides indexed`} />
+          <Stat label="Ledger records" value={totalRecords.toLocaleString()} hint={needs.length ? `${needs.length} need review` : "none need review"} />
+        </dl>
+      ) : (
+        <Skeleton className="h-[106px] rounded-lg" />
+      )}
 
       <div className="flex flex-col gap-6">
         <Card className="min-w-0 overflow-hidden">
           <div className="flex flex-wrap items-center gap-3 border-b px-5 py-3">
-            <h2 className="flex-1 text-[17px] font-semibold">Org map</h2>
+            <div className="flex min-w-0 flex-1 flex-col">
+              <h2 className="text-sm font-semibold">Org map</h2>
+              {said && <p className="text-xs text-muted-foreground">{said}</p>}
+            </div>
             {org.cycles.length > 0 && (
               <div className="relative">
                 <button
@@ -415,12 +406,12 @@ export function OverviewPage() {
         <div className="grid min-w-0 gap-6 lg:grid-cols-2">
           <Panel title="Needs attention" to="/ledger" link="Ledger">
             {needs.length === 0 ? (
-              <p className="px-5 pt-1 pb-5 text-muted-foreground">
+              <p className="px-5 py-4 text-sm text-muted-foreground">
                 Nothing to review. Records that go stale or get disputed show up here.
               </p>
             ) : (
               needs.slice(0, 4).map((e) => (
-                <Link key={e.record.id} to="/ledger" className="flex flex-col gap-1 border-t px-5 py-3 hover:bg-muted/60">
+                <Link key={e.record.id} to="/ledger" className="flex flex-col gap-1 border-b px-5 py-3 last:border-0 hover:bg-muted/60">
                   <span className="flex items-center gap-2 text-xs text-muted-foreground">
                     <Badge variant={isChallenged(e) ? "warning" : ["stale", "orphaned"].includes(e.status) ? "danger" : "default"}>
                       {isChallenged(e) ? "Disputed" : ["stale", "orphaned"].includes(e.status) ? sentenceCase(e.status) : "Unconfirmed"}
@@ -440,7 +431,7 @@ export function OverviewPage() {
                 <Link
                   key={f.entry.id}
                   to={`/flows?id=${encodeURIComponent(f.entry.id)}`}
-                  className="flex items-center gap-3 border-t px-5 py-3 hover:bg-muted/60"
+                  className="flex items-center gap-3 border-b px-5 py-3 last:border-0 hover:bg-muted/60"
                 >
                   <span className="flex min-w-0 flex-1 items-center gap-2">
                     <RepoDot repo={f.entry.repo} />
@@ -454,7 +445,7 @@ export function OverviewPage() {
                 </Link>
               );
             })}
-            {flows.data?.length === 0 && <p className="px-5 pt-1 pb-5 text-muted-foreground">No flows yet. They appear once repositories are indexed.</p>}
+            {flows.data?.length === 0 && <p className="px-5 py-4 text-sm text-muted-foreground">No flows yet. They appear once repositories are indexed.</p>}
           </Panel>
         </div>
       </div>

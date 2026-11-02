@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import {
   BookText,
+  ChevronsUpDown,
   Boxes,
   Compass,
   History,
@@ -39,7 +40,7 @@ const NAV: { to: string; label: string; icon: LucideIcon }[] = [
 const navItem = (isActive: boolean) =>
   cn(
     "group flex min-h-9 items-center gap-2.5 rounded-md px-2.5 text-sm text-muted-foreground transition-colors duration-100 hover:bg-muted hover:text-foreground",
-    isActive && "bg-card font-semibold text-foreground shadow-[0_1px_2px_var(--shadow-ink)] hover:bg-card",
+    isActive && "bg-accent font-semibold text-accent-foreground hover:bg-accent hover:text-accent-foreground",
   );
 
 function Logo({ className }: { className?: string }) {
@@ -56,7 +57,7 @@ function NavItem({ to, label, icon: Icon, count, busy }: { to: string; label: st
     <NavLink to={to} end={to === "/"} className={({ isActive }) => navItem(isActive)}>
       {({ isActive }) => (
         <>
-          <Icon className={cn("size-4 shrink-0", isActive && "text-brand")} strokeWidth={1.75} />
+          <Icon className={cn("size-4 shrink-0", isActive ? "text-brand" : "opacity-80")} strokeWidth={1.75} />
           <span className="flex-1">{label}</span>
           {!!count && <Badge variant="warning">{count}</Badge>}
           {!!busy && <Badge variant="brand">{busy}</Badge>}
@@ -126,19 +127,25 @@ export function Layout() {
       >
         Skip to content
       </a>
-      <aside className="hidden w-[232px] shrink-0 flex-col gap-6 bg-sidebar px-3 py-4 md:flex">
-        <div className="flex flex-col gap-3 px-2 pt-1">
-          <Link to="/" className="flex items-center gap-2.5 self-start rounded-md">
-            <Logo className="size-6" />
-            <span className="text-[17px] font-semibold tracking-[-0.01em]" translate="no">
-              comindly
-            </span>
-          </Link>
-          <Link to="/settings" className="group flex min-w-0 flex-col self-start rounded-sm" title="Team settings">
+      <aside className="hidden w-[248px] shrink-0 flex-col gap-5 border-r bg-sidebar px-3.5 py-4 md:flex">
+        <Link to="/" className="flex items-center gap-2.5 self-start rounded-md px-2 pt-1">
+          <Logo className="size-6" />
+          <span className="text-[17px] font-semibold tracking-[-0.01em]" translate="no">
+            comindly
+          </span>
+        </Link>
+
+        <Link
+          to="/settings"
+          className="flex min-h-11 items-center justify-between gap-2 rounded-lg border bg-card px-2.5 py-1.5 transition-colors duration-100 hover:border-input"
+          title="Team settings"
+        >
+          <span className="flex min-w-0 flex-col">
             <span className="eyebrow">Team</span>
-            <span className="truncate text-sm font-semibold group-hover:text-brand">{teamName ?? "No team yet"}</span>
-          </Link>
-        </div>
+            <span className="truncate text-sm font-semibold">{teamName ?? "No team yet"}</span>
+          </span>
+          <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
+        </Link>
 
         <nav className="flex flex-col gap-0.5" aria-label="Main">
           {NAV.map((n) => (
@@ -153,7 +160,7 @@ export function Layout() {
           ))}
         </nav>
 
-        <div className="mt-auto flex flex-col gap-0.5">
+        <div className="mt-auto flex flex-col gap-0.5 border-t pt-3">
           <NavLink to="/settings" className={({ isActive }) => navItem(isActive)}>
             {({ isActive }) => (
               <>
@@ -185,19 +192,22 @@ export function Layout() {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="mx-auto grid h-[60px] w-full max-w-[1320px] shrink-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 px-4 md:grid-cols-[minmax(0,560px)_1fr] md:px-8">
-          <Link to="/" className="md:hidden" aria-label="Overview">
-            <Logo className="size-6" />
-          </Link>
+        <header className="grid h-[60px] shrink-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 border-b px-4 md:grid-cols-[minmax(0,1fr)_minmax(0,560px)_minmax(0,1fr)] md:px-7">
+          <div>
+            <Link to="/" className="md:hidden" aria-label="Overview">
+              <Logo className="size-6" />
+            </Link>
+          </div>
           <button
             onClick={() => setPalette(true)}
-            className="flex h-10 w-full min-w-0 items-center gap-2.5 rounded-lg bg-card px-3 text-sm text-muted-foreground shadow-[0_1px_2px_var(--shadow-ink)] transition-colors duration-100 hover:text-foreground"
+            className="flex h-10 w-full min-w-0 items-center gap-2.5 rounded-lg border bg-card px-3 text-sm text-muted-foreground transition-colors duration-100 hover:border-input hover:text-foreground"
           >
             <Search className="size-4 shrink-0" />
             <span className="flex-1 truncate text-left">Search symbols, files and contracts</span>
             <kbd className="hidden rounded-sm bg-muted px-1.5 py-0.5 text-xs font-semibold sm:inline">⌘&nbsp;K</kbd>
           </button>
-          <div className="flex shrink-0 items-center justify-end gap-3">
+          {/* Equal side columns keep the search centred whatever shows up here. */}
+          <div className="flex min-w-0 items-center justify-end gap-3 overflow-hidden">
             <Activity />
             {overview.data && !overview.data.writable && <Badge variant="outline">Read-only</Badge>}
             {version > 0 && (
@@ -210,7 +220,7 @@ export function Layout() {
             </Button>
           </div>
         </header>
-        <nav data-pages className="flex gap-1 overflow-x-auto px-4 pb-2 md:hidden" aria-label="Main">
+        <nav data-pages className="flex gap-1 overflow-x-auto border-b px-4 py-2 md:hidden" aria-label="Main">
           {[...NAV, { to: "/settings", label: "Settings" }].map(({ to, label }) => (
             <NavLink
               key={to}
@@ -219,7 +229,7 @@ export function Layout() {
               className={({ isActive }) =>
                 cn(
                   "flex min-h-11 items-center rounded-md px-3 text-sm whitespace-nowrap",
-                  isActive ? "bg-card font-semibold text-foreground" : "text-muted-foreground",
+                  isActive ? "bg-accent font-semibold text-accent-foreground" : "text-muted-foreground",
                 )
               }
             >
@@ -228,7 +238,7 @@ export function Layout() {
           ))}
         </nav>
         <main id="main" tabIndex={-1} className="relative min-h-0 flex-1 overflow-y-auto focus-visible:outline-none">
-          <div className="mx-auto w-full min-w-0 max-w-[1320px] px-4 pt-4 pb-16 md:px-8">
+          <div className="mx-auto w-full min-w-0 max-w-[1400px] px-4 py-7 md:px-7">
             <Outlet />
           </div>
         </main>

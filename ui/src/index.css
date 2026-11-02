@@ -61,7 +61,7 @@
   --border: #dde3df;
   --input: #c9d2cd;
   --ring: #0f6b50;
-  --sidebar: #f4f6f4;
+  --sidebar: #edf1ee;
   --shadow-ink: rgb(15 31 26 / 0.08);
   --shadow-ink-far: rgb(15 31 26 / 0.14);
 }
@@ -89,7 +89,7 @@
   --border: #22302c;
   --input: #34443f;
   --ring: #5ccfa4;
-  --sidebar: #0b1311;
+  --sidebar: #08100e;
   --shadow-ink: rgb(0 0 0 / 0.3);
   --shadow-ink-far: rgb(0 0 0 / 0.45);
 }
