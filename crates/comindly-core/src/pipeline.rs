@@ -1240,14 +1240,24 @@ async fn stale_ids(
             .collect::<HashMap<_, _>>()
     })
     .await?;
-    Ok(symbols
+    Ok(stale_of(&changed, symbols))
+}
+
+/// Symbols in files that changed, by repository; a repository without a known base is all stale.
+/// Symbols of no indexed repository (contracts) are never stale: new ones have no stored vector anyway.
+fn stale_of(
+    changed: &HashMap<String, Option<HashSet<String>>>,
+    symbols: &[Symbol],
+) -> HashSet<String> {
+    symbols
         .iter()
-        .filter(|s| match changed.get(&s.id.package) {
+        .filter(|s| match changed.get(&s.repo.0) {
             Some(Some(files)) => files.contains(&s.file_path),
-            _ => true,
+            Some(None) => true,
+            None => false,
         })
         .map(|s| s.id.render())
-        .collect())
+        .collect()
 }
 
 /// Manifests and lockfiles of each repository.
@@ -1416,6 +1426,52 @@ fn short(sha: &str) -> String {
 mod tests {
     use super::*;
     use crate::styleguide::Section;
+
+    fn at(repo: &str, file: &str, name: &str) -> Symbol {
+        use crate::model::{GlobalSymbolId, Language, Position, Range, RepoId};
+        Symbol {
+            id: GlobalSymbolId {
+                scheme: "t".into(),
+                package_manager: ".".into(),
+                package: repo.into(),
+                version: ".".into(),
+                descriptor: format!("{file}/{name}"),
+            },
+            name: name.into(),
+            kind: SymbolKind::Function,
+            language: Language::Python,
+            repo: RepoId(repo.into()),
+            file_path: file.into(),
+            range: Range {
+                start: Position { line: 1, column: 0 },
+                end: Position { line: 2, column: 0 },
+            },
+            signature: None,
+            docstring: None,
+            fingerprint: None,
+        }
+    }
+
+    #[test]
+    fn only_changed_files_are_stale_and_contracts_never() {
+        let changed: HashMap<String, Option<HashSet<String>>> = [
+            (
+                "orders".to_string(),
+                Some(HashSet::from(["a.py".to_string()])),
+            ),
+            ("billing".to_string(), None),
+        ]
+        .into();
+        let symbols = [
+            at("orders", "a.py", "edited"),
+            at("orders", "b.py", "untouched"),
+            at("billing", "c.py", "no_base"),
+            at(crate::resolve::CONTRACTS, "", "http:GET /orders"),
+        ];
+        let mut stale: Vec<String> = stale_of(&changed, &symbols).into_iter().collect();
+        stale.sort();
+        assert_eq!(stale, vec![symbols[2].id.render(), symbols[0].id.render()]);
+    }
 
     fn sec(evidence: &str) -> Section {
         Section {

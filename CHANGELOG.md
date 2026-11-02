@@ -21,6 +21,8 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 
 - `comindly server` logs to stdout.
+- Re-indexing no longer re-embeds every service contract when nothing changed: changed files are
+  looked up by repository, not by package.
 - Recipe conventions show the commits they were learned from, linked to GitHub or GitLab, instead of
   a "Show code" that could not find them.
 - The index records each repository's default branch, so the Repositories page shows it without a clone.
