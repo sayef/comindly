@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { type Direction, TreeView, useOrg } from "@/components/org-views";
 import { Backdrop } from "@/components/backdrop";
+import { OrgNetwork } from "@/components/org-network";
 import { RepoDot } from "@/components/symbol";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -16,9 +17,11 @@ import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { Outcome } from "@/components/notice";
 import { api, attention, isChallenged, type OrgMap } from "@/lib/api";
 import { useAccess } from "@/lib/me";
-import { cn } from "@/lib/utils";
+import { cn, repoHue } from "@/lib/utils";
 
 const sentenceCase = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+const short = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : String(n));
+const share = (a: number, b: number) => (b ? `${((a / b) * 100).toFixed(a / b < 0.1 ? 1 : 0)} %` : "0 %");
 
 /** A per-browser preference, or `fallback` when storage is unavailable. */
 function remembered(key: string, fallback: string) {
@@ -29,15 +32,45 @@ function remembered(key: string, fallback: string) {
   }
 }
 
-function Stat({ label, value, hint }: { label: string; value: string; hint: string }) {
-  return (
-    <div className="flex flex-col gap-1 bg-card px-5 py-4">
-      <dt className="text-xs font-semibold text-muted-foreground">{label}</dt>
-      <dd className="nums text-[26px] leading-tight font-semibold tracking-[-0.02em]">{value}</dd>
-      <dd className="text-xs text-muted-foreground">{hint}</dd>
-    </div>
+type Part = { key: string; value: number; color: string; label: string };
+
+/** A figure, the bar that breaks it down, and what the bar shows; links to where the figure comes from. */
+function Stat({ label, value, parts, total, hint, to }: { label: string; value: string; parts: Part[]; total?: number; hint: string; to?: string }) {
+  const sum = total ?? parts.reduce((n, p) => n + p.value, 0);
+  const body = (
+    <>
+      <div className="text-xs font-semibold text-muted-foreground">{label}</div>
+      <div className="nums text-[26px] leading-tight font-semibold tracking-[-0.02em]">{value}</div>
+      <div className="mt-1 flex h-1.5 gap-px overflow-hidden rounded-full bg-muted" aria-hidden="true">
+        {sum > 0 &&
+          parts
+            .filter((p) => p.value > 0)
+            .map((p) => (
+              <span
+                key={p.key}
+                title={`${p.label}: ${p.value.toLocaleString()}`}
+                className="h-full min-w-[3px]"
+                style={{ width: `${(p.value / sum) * 100}%`, background: p.color }}
+              />
+            ))}
+      </div>
+      <div className="truncate text-xs text-muted-foreground" title={hint}>
+        {hint}
+      </div>
+    </>
+  );
+  const box = "flex min-w-0 flex-col gap-1 bg-card px-5 py-4";
+  return to ? (
+    <Link to={to} className={`${box} transition-colors duration-100 hover:bg-muted/60`}>
+      {body}
+    </Link>
+  ) : (
+    <div className={box}>{body}</div>
   );
 }
+
+const KIND_NAME: Record<string, string> = { http: "HTTP", sqs: "SQS", sns: "SNS", s3: "S3", table: "tables" };
+const KIND_TONE: Record<string, number> = { http: 100, table: 70, sqs: 50, sns: 38, s3: 28 };
 
 function Panel({ title, to, link, children }: { title: string; to: string; link: string; children: React.ReactNode }) {
   return (
@@ -160,6 +193,15 @@ export function OverviewPage() {
   const [dir, setDir] = useState<Direction>(() => (remembered("comindly.org.dir", "uses") === "usedBy" ? "usedBy" : "uses"));
   const [open, setOpen] = useState<Set<string> | null>(null);
   const [showCycles, setShowCycles] = useState(false);
+  const [mode, setMode] = useState<"network" | "tree">(() => (remembered("comindly.org.view", "network") === "tree" ? "tree" : "network"));
+  useEffect(() => {
+    try {
+      localStorage.setItem("comindly.org.view", mode);
+    } catch {
+      // storage may be unavailable
+    }
+  }, [mode]);
+  const contracts = useQuery({ queryKey: ["contracts"], queryFn: api.contracts });
   useEffect(() => {
     try {
       localStorage.setItem("comindly.org.start", start);
@@ -275,18 +317,70 @@ export function OverviewPage() {
   const needs = (ledger.data ?? []).filter((e) => attention(e) < 3).sort((a, b) => attention(a) - attention(b));
 
   const said = finding(org);
+  const bySize = (o?.repos ?? []).slice().sort((a, b) => b.symbols - a.symbols);
+  const kinds = Object.entries(
+    (contracts.data ?? []).reduce<Record<string, number>>((m, v) => {
+      const k = v.contract.name.split(":")[0];
+      m[k] = (m[k] ?? 0) + 1;
+      return m;
+    }, {}),
+  ).sort((a, b) => b[1] - a[1]);
 
   return (
     <div className="flex flex-col gap-5">
       <PageHeader title="Overview">How the team's repositories depend on each other, in code and through service contracts.</PageHeader>
 
       {o ? (
-        <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border bg-border lg:grid-cols-4">
-          <Stat label="Repositories" value={o.repos.length.toLocaleString()} hint={`${o.symbols.toLocaleString()} symbols indexed`} />
-          <Stat label="Links across repositories" value={o.cross_repo_edges.toLocaleString()} hint={`of ${o.edges.toLocaleString()} dependencies`} />
-          <Stat label="Contracts" value={o.contracts.toLocaleString()} hint={`${o.linked_contracts} with both sides indexed`} />
-          <Stat label="Ledger records" value={totalRecords.toLocaleString()} hint={needs.length ? `${needs.length} need review` : "none need review"} />
-        </dl>
+        <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border bg-border lg:grid-cols-4">
+          <Stat
+            label="Repositories"
+            value={o.repos.length.toLocaleString()}
+            to="/settings/repositories"
+            parts={bySize.map((r) => ({ key: r.repo, value: r.symbols, label: r.repo, color: `hsl(${repoHue(r.repo)} 62% 58%)` }))}
+            hint={`${o.symbols.toLocaleString()} symbols; ${bySize
+              .slice(0, 2)
+              .map((r) => `${r.repo} ${short(r.symbols)}`)
+              .join(", ")}${bySize.length > 2 ? ` and ${bySize.length - 2} more` : ""}`}
+          />
+          <Stat
+            label="Links across repositories"
+            value={o.cross_repo_edges.toLocaleString()}
+            parts={[{ key: "cross", value: o.cross_repo_edges, label: "Across repositories", color: "var(--color-brand)" }]}
+            total={o.edges}
+            hint={`${share(o.cross_repo_edges, o.edges)} of ${o.edges.toLocaleString()} dependencies cross a repository`}
+          />
+          <Stat
+            label="Contracts"
+            value={o.contracts.toLocaleString()}
+            to="/contracts"
+            parts={kinds.map(([k, n]) => ({
+              key: k,
+              value: n,
+              label: KIND_NAME[k] ?? k,
+              color: `color-mix(in srgb, var(--color-brand) ${KIND_TONE[k] ?? 30}%, var(--color-muted))`,
+            }))}
+            hint={kinds.length ? kinds.map(([k, n]) => `${KIND_NAME[k] ?? k} ${n}`).join(", ") : `${o.linked_contracts} with both sides indexed`}
+          />
+          <Stat
+            label="Ledger records"
+            value={totalRecords.toLocaleString()}
+            to="/ledger"
+            parts={Object.entries(o.ledger).map(([k, n]) => ({
+              key: k,
+              value: n,
+              label: k,
+              color: k === "stale" ? "var(--color-warning)" : k === "orphaned" ? "var(--color-danger)" : k === "active" || k === "moved" ? "var(--color-brand)" : "var(--color-input)",
+            }))}
+            hint={
+              totalRecords === 0
+                ? "none yet"
+                : Object.entries(o.ledger)
+                    .filter(([, n]) => n > 0)
+                    .map(([k, n]) => `${n} ${k}`)
+                    .join(", ") + (needs.length ? `; ${needs.length} to review` : "")
+            }
+          />
+        </div>
       ) : (
         <Skeleton className="h-[106px] rounded-lg" />
       )}
@@ -314,7 +408,7 @@ export function OverviewPage() {
                     {org.cycles.map((c) => (
                       <button
                         key={c.join()}
-                        onClick={() => (setStart(c[0]), setDir("uses"), setOpen(new Set([c[0]])), setSelected(null), setShowCycles(false))}
+                        onClick={() => (setMode("tree"), setStart(c[0]), setDir("uses"), setOpen(new Set([c[0]])), setSelected(null), setShowCycles(false))}
                         className="rounded-md px-2 py-1.5 text-left font-mono text-xs hover:bg-muted"
                       >
                         {c.join(", ")}
@@ -324,6 +418,25 @@ export function OverviewPage() {
                 )}
               </div>
             )}
+            <div className="flex h-8 rounded-lg bg-secondary p-0.5" role="group" aria-label="View">
+              {(
+                [
+                  ["network", "Network"],
+                  ["tree", "Tree"],
+                ] as const
+              ).map(([m, label]) => (
+                <button
+                  key={m}
+                  aria-pressed={mode === m}
+                  onClick={() => setMode(m)}
+                  className={`rounded-md px-2.5 text-xs font-semibold transition-colors duration-100 ${mode === m ? "bg-card text-foreground shadow-[0_1px_2px_var(--shadow-ink)]" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {mode === "tree" && (
+            <>
             <label className="flex items-center gap-2 text-xs text-muted-foreground">
               Start from
               <select
@@ -360,17 +473,22 @@ export function OverviewPage() {
                 </button>
               ))}
             </div>
+            </>
+            )}
           </div>
           {!map ? (
             <Skeleton className="h-[420px] rounded-none" />
+          ) : mode === "network" && org.repos.length > 1 ? (
+            <OrgNetwork org={org} />
           ) : roots.length === 0 ? (
             <p className="px-5 py-8 text-sm text-muted-foreground">No links between the indexed repositories yet.</p>
           ) : (
             <TreeView org={org} roots={roots} dir={dir} open={openKeys} onToggle={toggle} selected={selected} />
           )}
           <div className="border-t px-5 py-3 text-xs text-muted-foreground">
-            Click a box to open or close it; each line names the contract it goes through. A dashed box is shown elsewhere in the tree; an
-            amber line loops back where repositories depend on each other in a circle.
+            {mode === "network"
+              ? "Circle size is the number of symbols; an arrow points from a repository to what it uses, thicker for more links. Green goes through a contract, dashed amber is a cycle. Hover to see neighbours, click for details, drag to rearrange; pinch or Ctrl-scroll to zoom."
+              : "Click a box to open or close it; each line names the contract it goes through. A dashed box is shown elsewhere in the tree; an amber line loops back where repositories depend on each other in a circle."}
           </div>
           {versions.data && versions.data.length > 1 && (
             <div className="border-t px-5 py-3.5">
