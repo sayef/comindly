@@ -6,6 +6,13 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 /** Stable hue per repository, so a repo keeps its colour on every graph. */
+/** Muted tones that sit with the pine theme; a repository always gets the same one. */
+const REPO_TONES = ["#5f9e8a", "#6b8fb0", "#9a8f5e", "#b08d6a", "#7f8f9e", "#6fa36b", "#a07a6a", "#5d8f9a"];
+
+export function repoColor(repo: string): string {
+  return REPO_TONES[repoHue(repo) % REPO_TONES.length];
+}
+
 export function repoHue(repo: string): number {
   let h = 0;
   for (const c of repo) h = (h * 31 + c.charCodeAt(0)) % 360;

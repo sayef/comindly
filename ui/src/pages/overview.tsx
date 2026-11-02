@@ -17,7 +17,7 @@ import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { Outcome } from "@/components/notice";
 import { api, attention, isChallenged, type OrgMap } from "@/lib/api";
 import { useAccess } from "@/lib/me";
-import { cn, repoHue } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
 const sentenceCase = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 const short = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : String(n));
@@ -336,7 +336,12 @@ export function OverviewPage() {
             label="Repositories"
             value={o.repos.length.toLocaleString()}
             to="/settings/repositories"
-            parts={bySize.map((r) => ({ key: r.repo, value: r.symbols, label: r.repo, color: `hsl(${repoHue(r.repo)} 62% 58%)` }))}
+            parts={bySize.map((r, i) => ({
+              key: r.repo,
+              value: r.symbols,
+              label: r.repo,
+              color: `color-mix(in srgb, var(--color-brand) ${Math.max(18, 100 - i * 14)}%, var(--color-muted))`,
+            }))}
             hint={`${o.symbols.toLocaleString()} symbols; ${bySize
               .slice(0, 2)
               .map((r) => `${r.repo} ${short(r.symbols)}`)
@@ -421,7 +426,7 @@ export function OverviewPage() {
             <div className="flex h-8 rounded-lg bg-secondary p-0.5" role="group" aria-label="View">
               {(
                 [
-                  ["network", "Network"],
+                  ["network", "Graph"],
                   ["tree", "Tree"],
                 ] as const
               ).map(([m, label]) => (
@@ -487,7 +492,7 @@ export function OverviewPage() {
           )}
           <div className="border-t px-5 py-3 text-xs text-muted-foreground">
             {mode === "network"
-              ? "Circle size is the number of symbols; an arrow points from a repository to what it uses, thicker for more links. Green goes through a contract, dashed amber is a cycle. Hover to see neighbours, click for details, drag to rearrange; pinch or Ctrl-scroll to zoom."
+              ? "Each arrow points from a repository to what it uses, thicker for more links; green goes through a contract, dashed amber is a cycle. Hover a repository to see its neighbours, click it for details; drag to pan, pinch or Ctrl-scroll to zoom."
               : "Click a box to open or close it; each line names the contract it goes through. A dashed box is shown elsewhere in the tree; an amber line loops back where repositories depend on each other in a circle."}
           </div>
           {versions.data && versions.data.length > 1 && (

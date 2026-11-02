@@ -14,7 +14,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import { useMemo, useState } from "react";
 import { useTheme } from "@/components/theme";
-import { CONTRACTS, cn, repoHue } from "@/lib/utils";
+import { CONTRACTS, cn, repoColor } from "@/lib/utils";
 
 export interface GraphNode {
   id: string;
@@ -45,7 +45,7 @@ type Data = { label: string; repo: string; focus: boolean; dim: boolean; more: b
 const PER_SIDE = 12;
 const HEIGHT = 44;
 
-const color = (repo: string) => (repo === CONTRACTS ? "var(--color-brand)" : `hsl(${repoHue(repo)} 62% 62%)`);
+const color = (repo: string) => (repo === CONTRACTS ? "var(--color-brand)" : repoColor(repo));
 const isContract = (kind: string) => kind === "contract" || kind === "counterpart";
 
 function SymbolNode({ data }: NodeProps<Node<Data>>) {
