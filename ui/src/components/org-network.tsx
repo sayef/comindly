@@ -165,7 +165,7 @@ export function OrgNetwork({ org }: { org: Org }) {
         <svg width={width} height={height} className="block" role="img" aria-label="Repositories and the dependencies between them">
           <defs>
             {(["code", "contract", "cycle", "lit"] as const).map((k) => (
-              <marker key={k} id={`tip-${k}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto">
+              <marker key={k} id={`tip-${k}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto">
                 <path
                   d="M0,1 L9,5 L0,9 z"
                   fill={k === "contract" ? "var(--color-brand)" : k === "cycle" ? "var(--color-warning)" : k === "lit" ? "var(--color-foreground)" : "var(--color-input)"}
@@ -188,7 +188,7 @@ export function OrgNetwork({ org }: { org: Org }) {
                     d={curve(l.points)}
                     fill="none"
                     stroke={stroke}
-                    strokeWidth={1.25 + 3 * Math.sqrt(l.weight / most)}
+                    strokeWidth={1 + 1.25 * Math.sqrt(l.weight / most)}
                     strokeOpacity={focus && !lit ? 0.12 : lit || kind === "code" ? 1 : 0.75}
                     strokeDasharray={kind === "cycle" ? "6 4" : undefined}
                     strokeLinecap="round"
