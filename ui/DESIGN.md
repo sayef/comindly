@@ -42,8 +42,9 @@ colors:            # light            dark
   focus:           accent
 ```
 
-Repositories keep their deterministic hue (a square swatch), so a repository reads the same on
-every page; it is identity, not decoration.
+Repositories get one of eight muted tones (sage, slate blue, olive, sand, stone, moss, clay, teal),
+always the same one, shown only as a small square beside the name in lists. Never as fills, never a
+rainbow. Graphs stay neutral: grey for code, green for contracts, amber for cycles.
 
 ## Typography
 
@@ -78,7 +79,9 @@ spacing: { base: 4px, component: [4, 8, 12, 16, 24], section: [32, 48] }
 - Buttons: flat fill; primary in accent, the rest a quiet step fill or ghost; spinner beside the label.
 - Tables sit on a surface; rows divide with a tinted 1px line, hover with the step tone.
 - Badges are words in a chip; colour only with a word, never alone.
-- Navigation: a plain rail; the current page in ink on the step tone with an accent mark.
+- Navigation: a bordered rail with icons; the current page on the accent tint.
+- Org map: a layered left-to-right graph (dagre) of neutral boxes and even, thin arrows; detail on hover
+  (contracts behind an arrow) and on click (what a repository uses and what uses it).
 - Icons: lucide, one stroke weight. No arrows glued to link text, no middle-dot meta strings.
 
 ## Motion

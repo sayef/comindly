@@ -26,9 +26,14 @@ All notable changes to this project are documented here. The format follows
 - Recipe conventions show the commits they were learned from, linked to GitHub or GitLab, instead of
   a "Show code" that could not find them.
 - The index records each repository's default branch, so the Repositories page shows it without a clone.
-- A new look for the app: pine ink on a cool paper ground with the logo's green as the one accent, Atkinson
-  Hyperlegible for text and code, and pages that open with what the index found (Overview names the
-  repository most others depend on, Explorer the reach of a change). Tokens and rules are in `ui/DESIGN.md`.
+- A new theme for the app on its existing layout: pine ink on a cool paper ground with the logo's green as
+  the one accent, muted repository colours, and Atkinson Hyperlegible for text and code. Tokens and rules
+  are in `ui/DESIGN.md`.
+- The org map is a layered graph of every repository, left to right from where work starts to the shared
+  code it reaches; hovering an arrow lists the contracts and code references behind it, and clicking a
+  repository shows what it uses and what uses it. The previous tree is one click away.
+- Overview's figures each show their breakdown: symbols per repository, contracts by type and ledger
+  records by status.
 - The ledger opens on the timeline when nothing needs review, and its view is part of the address.
 - A summary is written again only when its symbol's name, signature or path changed, not whenever
   its file did.
