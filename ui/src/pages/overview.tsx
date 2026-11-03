@@ -17,11 +17,9 @@ import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { Outcome } from "@/components/notice";
 import { api, attention, isChallenged, type OrgMap } from "@/lib/api";
 import { useAccess } from "@/lib/me";
-import { cn } from "@/lib/utils";
+import { cn, compact, percent } from "@/lib/utils";
 
 const sentenceCase = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-const short = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : String(n));
-const share = (a: number, b: number) => (b ? `${((a / b) * 100).toFixed(a / b < 0.1 ? 1 : 0)} %` : "0 %");
 
 /** A per-browser preference, or `fallback` when storage is unavailable. */
 function remembered(key: string, fallback: string) {
@@ -35,13 +33,16 @@ function remembered(key: string, fallback: string) {
 type Part = { key: string; value: number; color: string; label: string };
 
 /** A figure, the bar that breaks it down, and what the bar shows; links to where the figure comes from. */
+/** The bar shows only when it says something: a share of a total, or more than one part. */
 function Stat({ label, value, parts, total, hint, to }: { label: string; value: string; parts: Part[]; total?: number; hint: string; to?: string }) {
   const sum = total ?? parts.reduce((n, p) => n + p.value, 0);
+  const shown = parts.filter((p) => p.value > 0);
+  const bar = total != null ? sum > 0 : shown.length > 1;
   const body = (
     <>
       <div className="text-xs font-semibold text-muted-foreground">{label}</div>
-      <div className="nums text-[26px] leading-tight font-semibold tracking-[-0.02em]">{value}</div>
-      <div className="mt-1 flex h-1.5 gap-px overflow-hidden rounded-full bg-muted" aria-hidden="true">
+      <div className="nums text-[22px] leading-tight font-semibold tracking-[-0.02em]">{value}</div>
+      <div className={cn("mt-1 flex h-1.5 gap-px overflow-hidden rounded-full bg-muted", !bar && "invisible")} aria-hidden="true">
         {sum > 0 &&
           parts
             .filter((p) => p.value > 0)
@@ -54,7 +55,7 @@ function Stat({ label, value, parts, total, hint, to }: { label: string; value: 
               />
             ))}
       </div>
-      <div className="truncate text-xs text-muted-foreground" title={hint}>
+      <div className="text-xs text-pretty text-muted-foreground">
         {hint}
       </div>
     </>
@@ -86,6 +87,23 @@ function Panel({ title, to, link, children }: { title: string; to: string; link:
   );
 }
 
+/** The focus graph's key: each kind of arrow drawn as it appears, then how to move around. */
+function MapKey() {
+  const line = (stroke: string, dash?: string) => (
+    <svg width="28" height="8" aria-hidden="true" className="shrink-0">
+      <line x1="1" y1="4" x2="27" y2="4" stroke={stroke} strokeWidth="1.5" strokeDasharray={dash} />
+    </svg>
+  );
+  return (
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5">
+      <span className="flex items-center gap-1.5">{line("var(--color-brand)")}Through a contract</span>
+      <span className="flex items-center gap-1.5">{line("color-mix(in srgb, var(--color-muted-foreground) 70%, transparent)")}Imports and calls</span>
+      <span className="flex items-center gap-1.5">{line("var(--color-warning)", "5 3")}Cycle</span>
+      <span>Hover or tab to an arrow for its contracts.</span>
+    </div>
+  );
+}
+
 /** What the org map says first: the repository most others depend on, and any cycles. */
 function finding(org: ReturnType<typeof useOrg>): string | null {
   if (org.repos.length < 2) return null;
@@ -102,6 +120,15 @@ function linkDiff(then: OrgMap, now: OrgMap) {
   return { added: [...b].filter((k) => !a.has(k)), gone: [...a].filter((k) => !b.has(k)) };
 }
 
+/** A first-run card whose button submits on Enter too. */
+function FormCard({ onSubmit, children }: { onSubmit: () => void; children: React.ReactNode }) {
+  return (
+    <form onSubmit={(e) => (e.preventDefault(), onSubmit())} className="flex flex-col rounded-lg border bg-card p-4 text-left text-card-foreground">
+      {children}
+    </form>
+  );
+}
+
 /** Where a team's index lives: a folder or a bucket location. */
 function Location({ index, setIndex }: { index: string; setIndex: (v: string) => void }) {
   return (
@@ -109,6 +136,9 @@ function Location({ index, setIndex }: { index: string; setIndex: (v: string) =>
       value={index}
       onChange={(e) => setIndex(e.target.value)}
       placeholder="s3://, gs://, az:// or a folder"
+      aria-label="Index location"
+      spellCheck={false}
+      autoComplete="off"
       className="font-mono text-xs"
     />
   );
@@ -120,7 +150,7 @@ function JoinTeam() {
   const [index, setIndex] = useState("");
   const join = useMutation({ mutationFn: () => api.join(index), meta: { inline: true }, onSuccess: () => qc.invalidateQueries() });
   return (
-    <Card className="flex flex-col p-4 text-left">
+    <FormCard onSubmit={() => index.trim() && join.mutate()}>
       <h2 className="font-semibold">Join a team</h2>
       <p className="mt-1 text-xs text-muted-foreground">
         Where your team's index lives. Bucket access uses the credentials this machine already has.
@@ -128,13 +158,13 @@ function JoinTeam() {
       <div className="mt-3 flex flex-1 flex-col gap-2">
         <Location index={index} setIndex={setIndex} />
         <div className="mt-auto">
-          <Button variant="brand" disabled={!index.trim()} loading={join.isPending} onClick={() => join.mutate()}>
+          <Button type="submit" variant="brand" disabled={!index.trim()} loading={join.isPending}>
             Join
           </Button>
         </div>
         <Outcome error={join.error} />
       </div>
-    </Card>
+    </FormCard>
   );
 }
 
@@ -151,7 +181,7 @@ function CreateTeam({ at }: { at?: string }) {
     onSuccess: () => (qc.invalidateQueries(), navigate("/settings/repositories")),
   });
   return (
-    <Card className="flex flex-col p-4 text-left">
+    <FormCard onSubmit={() => name.trim() && index.trim() && create.mutate()}>
       <h2 className="font-semibold">Create a team</h2>
       <p className="mt-1 text-xs text-muted-foreground">
         {at
@@ -159,16 +189,16 @@ function CreateTeam({ at }: { at?: string }) {
           : "Pick an empty folder or bucket location everyone can reach. You add repositories next; colleagues join with the same location."}
       </p>
       <div className="mt-3 flex flex-1 flex-col gap-2">
-        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Team name, e.g. Platform" />
+        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Team name, e.g. Platform" aria-label="Team name" autoComplete="off" />
         {!at && <Location index={index} setIndex={setIndex} />}
         <div className="mt-auto">
-          <Button variant="brand" disabled={!name.trim() || !index.trim()} loading={create.isPending} onClick={() => create.mutate()}>
+          <Button type="submit" variant="brand" disabled={!name.trim() || !index.trim()} loading={create.isPending}>
             Create team
           </Button>
         </div>
         <Outcome error={create.error} />
       </div>
-    </Card>
+    </FormCard>
   );
 }
 
@@ -342,17 +372,14 @@ export function OverviewPage() {
               label: r.repo,
               color: `color-mix(in srgb, var(--color-brand) ${Math.max(18, 100 - i * 14)}%, var(--color-muted))`,
             }))}
-            hint={`${o.symbols.toLocaleString()} symbols; ${bySize
-              .slice(0, 2)
-              .map((r) => `${r.repo} ${short(r.symbols)}`)
-              .join(", ")}${bySize.length > 2 ? ` and ${bySize.length - 2} more` : ""}`}
+            hint={`${compact(o.symbols)} symbols${bySize.length > 1 ? `, most in ${bySize[0].repo} and ${bySize[1].repo}` : ""}`}
           />
           <Stat
             label="Links across repositories"
             value={o.cross_repo_edges.toLocaleString()}
             parts={[{ key: "cross", value: o.cross_repo_edges, label: "Across repositories", color: "var(--color-brand)" }]}
             total={o.edges}
-            hint={`${share(o.cross_repo_edges, o.edges)} of ${o.edges.toLocaleString()} dependencies cross a repository`}
+            hint={`${percent(o.cross_repo_edges, o.edges)} of ${o.edges.toLocaleString()} dependencies cross a repository`}
           />
           <Stat
             label="Contracts"
@@ -378,11 +405,13 @@ export function OverviewPage() {
             }))}
             hint={
               totalRecords === 0
-                ? "none yet"
-                : Object.entries(o.ledger)
-                    .filter(([, n]) => n > 0)
-                    .map(([k, n]) => `${n} ${k}`)
-                    .join(", ") + (needs.length ? `; ${needs.length} to review` : "")
+                ? "None yet"
+                : needs.length === 0 && totalRecords === (o.ledger.active ?? 0)
+                  ? "All active, none to review"
+                  : Object.entries(o.ledger)
+                      .filter(([, n]) => n > 0)
+                      .map(([k, n]) => `${n} ${k}`)
+                      .join(", ") + (needs.length ? `; ${needs.length} to review` : "")
             }
           />
         </div>
@@ -391,22 +420,44 @@ export function OverviewPage() {
       )}
 
       <div className="flex flex-col gap-6">
+        {needs.length > 0 && (
+          <Panel title={`Needs attention (${needs.length})`} to="/ledger" link="Ledger">
+            {needs.slice(0, 4).map((e) => (
+              <Link key={e.record.id} to="/ledger" className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-5 py-2.5 last:border-0 hover:bg-muted/60">
+                <Badge variant={isChallenged(e) ? "warning" : ["stale", "orphaned"].includes(e.status) ? "danger" : "default"}>
+                  {isChallenged(e) ? "Disputed" : ["stale", "orphaned"].includes(e.status) ? sentenceCase(e.status) : "Unconfirmed"}
+                </Badge>
+                <span className="min-w-0 flex-1">{e.record.title}</span>
+                <span className="text-xs text-muted-foreground">
+                  {sentenceCase(e.record.kind)}
+                  {e.record.anchors[0] ? ` in ${e.record.anchors[0].repo}` : ""}
+                </span>
+              </Link>
+            ))}
+          </Panel>
+        )}
         <Card className="min-w-0 overflow-hidden">
           <div className="flex flex-wrap items-center gap-3 border-b px-5 py-3">
             <div className="flex min-w-0 flex-1 flex-col">
               <h2 className="text-sm font-semibold">Org map</h2>
               {said && <p className="text-xs text-muted-foreground">{said}</p>}
+              {mode === "network" && <p className="text-xs text-muted-foreground">Above: what uses the repository. Below: what it uses.</p>}
             </div>
             {org.cycles.length > 0 && (
               <div className="relative">
                 <button
                   onClick={() => setShowCycles((v) => !v)}
+                  aria-expanded={showCycles}
+                  aria-haspopup="true"
                   className="flex h-8 items-center gap-1.5 rounded-md bg-warning/12 px-2.5 text-xs font-semibold text-warning"
                 >
                   <RefreshCcw className="size-3.5" /> {org.cycles.length} {org.cycles.length === 1 ? "cycle" : "cycles"}
                 </button>
                 {showCycles && (
-                  <div className="absolute right-0 z-20 mt-1 flex w-72 flex-col gap-0.5 rounded-lg bg-popover p-1.5 shadow-float">
+                  <div
+                    onKeyDown={(e) => e.key === "Escape" && setShowCycles(false)}
+                    onBlur={(e) => !e.currentTarget.parentElement?.contains(e.relatedTarget) && setShowCycles(false)}
+                    className="absolute right-0 z-20 mt-1 flex w-72 flex-col gap-0.5 rounded-lg bg-popover p-1.5 shadow-float">
                     <p className="px-2 py-1.5 text-xs text-muted-foreground">
                       These repositories depend on each other in a circle, so none of them can change or release on its own.
                     </p>
@@ -423,7 +474,7 @@ export function OverviewPage() {
                 )}
               </div>
             )}
-            <div className="flex h-8 rounded-lg bg-secondary p-0.5" role="group" aria-label="View">
+            <div className="flex h-8 rounded-lg bg-secondary p-0.5 pointer-coarse:h-11" role="group" aria-label="View">
               {(
                 [
                   ["network", "Graph"],
@@ -461,7 +512,7 @@ export function OverviewPage() {
                 ))}
               </select>
             </label>
-            <div className="flex h-8 rounded-lg bg-secondary p-0.5" role="group" aria-label="Direction">
+            <div className="flex h-8 rounded-lg bg-secondary p-0.5 pointer-coarse:h-11" role="group" aria-label="Direction">
               {(
                 [
                   ["uses", "What it uses"],
@@ -492,7 +543,7 @@ export function OverviewPage() {
           )}
           <div className="border-t px-5 py-3 text-xs text-muted-foreground">
             {mode === "network"
-              ? "Pick a repository on the left (the number is how many depend on it) or click a box to move there. Above are the repositories that use it, below the ones it uses. Green arrows go through a contract, dashed amber is a cycle; hover an arrow to see the contracts behind it."
+              ? <MapKey />
               : "Click a box to open or close it; each line names the contract it goes through. A dashed box is shown elsewhere in the tree; an amber line loops back where repositories depend on each other in a circle."}
           </div>
           {versions.data && versions.data.length > 1 && (
@@ -500,11 +551,11 @@ export function OverviewPage() {
               <div className="flex items-center justify-between">
                 <span className="eyebrow">Index version</span>
                 <span className="nums text-xs text-muted-foreground">
-                  {(versions.data[at ?? last] ?? "").slice(0, 16).replace("T", " ")}
+                  {versions.data[at ?? last] ? new Date(versions.data[at ?? last]).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : ""}
                   {(at ?? last) === last ? ", the latest" : `, ${(at ?? last) + 1} of ${last + 1}`}
                 </span>
               </div>
-              <Slider className="mt-3" min={0} max={last} step={1} value={[at ?? last]} onValueChange={([v]) => setAt(v)} />
+              <Slider className="mt-3" aria-label="Index version" min={0} max={last} step={1} value={[at ?? last]} onValueChange={([v]) => setAt(v)} />
               {diff && (
                 <div className="mt-3 flex flex-wrap gap-1.5 text-xs">
                   {diff.added.length + diff.gone.length === 0 && (
@@ -526,27 +577,7 @@ export function OverviewPage() {
           )}
         </Card>
 
-        <div className="grid min-w-0 gap-6 lg:grid-cols-2">
-          <Panel title="Needs attention" to="/ledger" link="Ledger">
-            {needs.length === 0 ? (
-              <p className="px-5 py-4 text-sm text-muted-foreground">
-                Nothing to review. Records that go stale or get disputed show up here.
-              </p>
-            ) : (
-              needs.slice(0, 4).map((e) => (
-                <Link key={e.record.id} to="/ledger" className="flex flex-col gap-1 border-b px-5 py-3 last:border-0 hover:bg-muted/60">
-                  <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Badge variant={isChallenged(e) ? "warning" : ["stale", "orphaned"].includes(e.status) ? "danger" : "default"}>
-                      {isChallenged(e) ? "Disputed" : ["stale", "orphaned"].includes(e.status) ? sentenceCase(e.status) : "Unconfirmed"}
-                    </Badge>
-                    {sentenceCase(e.record.kind)}
-                    {e.record.anchors[0] ? ` in ${e.record.anchors[0].repo}` : ""}
-                  </span>
-                  <span>{e.record.title}</span>
-                </Link>
-              ))
-            )}
-          </Panel>
+        <div className="grid min-w-0 gap-6">
           <Panel title="Flows that reach furthest" to="/flows" link="Flows">
             {(flows.data ?? []).slice(0, 4).map((f) => {
               const most = Math.max(...(flows.data ?? []).map((x) => x.repos.length), 1);
@@ -556,13 +587,16 @@ export function OverviewPage() {
                   to={`/flows?id=${encodeURIComponent(f.entry.id)}`}
                   className="flex items-center gap-3 border-b px-5 py-3 last:border-0 hover:bg-muted/60"
                 >
-                  <span className="flex min-w-0 flex-1 items-center gap-2">
+                  <span className="flex min-w-0 flex-1 items-center gap-2 max-sm:flex-wrap">
                     <RepoDot repo={f.entry.repo} />
-                    <span className="truncate font-mono text-xs">{f.entry.name}</span>
-                    <span className="truncate text-xs text-muted-foreground">{f.entry.repo}</span>
+                    <span className="truncate font-mono text-xs max-sm:max-w-[calc(100%-1.25rem)]">{f.entry.name}</span>
+                    <span className="truncate text-xs text-muted-foreground max-sm:basis-full max-sm:pl-4">
+                      {f.entry.repo}
+                      <span className="sm:hidden">, {f.repos.length} repositories</span>
+                    </span>
                   </span>
-                  <span className="nums text-xs text-muted-foreground">{f.repos.length} repositories</span>
-                  <span className="h-1 w-16 overflow-hidden rounded-full bg-muted">
+                  <span className="nums text-xs text-muted-foreground max-sm:hidden">{f.repos.length} repositories</span>
+                  <span className="h-1 w-16 overflow-hidden rounded-full bg-muted max-sm:hidden">
                     <span className="block h-1 bg-brand" style={{ width: `${(f.repos.length / most) * 100}%` }} />
                   </span>
                 </Link>
@@ -573,7 +607,7 @@ export function OverviewPage() {
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid items-start gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>
             <CardTitle>Repositories</CardTitle>

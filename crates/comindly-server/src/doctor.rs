@@ -32,11 +32,10 @@ pub fn run(
     match crate::index::graph_versions_blocking(&graph) {
         Ok(v) if !v.is_empty() => {
             let (_, _, at) = v.last().cloned().unwrap_or_default();
-            let msg = format!(
-                "index readable: {} version(s), latest {}",
-                v.len(),
-                at.get(..16).unwrap_or(&at)
-            );
+            let latest = chrono::DateTime::parse_from_rfc3339(&at)
+                .map(|t| t.to_utc().format("%-d %b %Y, %H:%M UTC").to_string())
+                .unwrap_or(at);
+            let msg = format!("index readable: {}, latest {latest}", plural(v.len(), "version"));
             check(true, false, &msg, "");
         }
         _ => check(
@@ -50,7 +49,7 @@ pub fn run(
         Ok(r) => check(
             true,
             false,
-            &format!("ledger readable: {} record(s)", r.len()),
+            &format!("ledger readable: {}", plural(r.len(), "record")),
             "",
         ),
         Err(e) => check(false, false, "", &format!("ledger not readable: {e:#}")),
@@ -94,8 +93,8 @@ pub fn run(
     check(
         crate::config::local_allowed_signers().is_some(),
         true,
-        "signatures are verified against allowed_signers",
-        "no allowed_signers: signatures are not checked (optional)",
+        "signatures are verified against `allowed_signers`",
+        "no `allowed_signers`: signatures are not checked (optional)",
     );
     let indexers: Vec<&str> = [
         "scip-python",
@@ -150,4 +149,9 @@ pub fn agents() -> Vec<&'static str> {
         out.push("codex");
     }
     out
+}
+
+/// `n` with the noun, plural unless one: "1 version", "3 versions".
+pub(crate) fn plural(n: usize, noun: &str) -> String {
+    format!("{n} {noun}{}", if n == 1 { "" } else { "s" })
 }

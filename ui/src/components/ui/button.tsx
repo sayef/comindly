@@ -15,7 +15,12 @@ const buttonVariants = cva(
         ghost: "text-muted-foreground hover:bg-muted hover:text-foreground",
         secondary: "bg-secondary text-secondary-foreground hover:bg-[color-mix(in_srgb,var(--color-secondary)_80%,var(--color-foreground))]",
       },
-      size: { default: "h-9 px-3.5", sm: "h-8 px-3 text-xs", lg: "h-11 px-5", icon: "size-9" },
+      size: {
+        default: "h-9 px-3.5 pointer-coarse:h-11",
+        sm: "h-8 px-3 text-xs pointer-coarse:h-11",
+        lg: "h-11 px-5",
+        icon: "size-9 pointer-coarse:size-11",
+      },
     },
     defaultVariants: { variant: "default", size: "default" },
   },

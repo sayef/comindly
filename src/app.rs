@@ -275,14 +275,14 @@ const STYLE: &str = "body{margin:0;height:100vh;display:grid;place-items:center;
 color:#1f2733;background:#f7f8fa}main{max-width:36rem;padding:0 1.5rem}h1{font-size:18px}\
 pre{white-space:pre-wrap;background:#eef1f5;padding:.75rem;border-radius:8px;font-size:12px}\
 code{background:#eef1f5;padding:.1rem .3rem;border-radius:4px}p{color:#5b6574;line-height:1.5}\
-.dot{width:10px;height:10px;border-radius:50%;background:#3fa45b;margin:0 auto 14px;animation:p 1s ease-in-out infinite alternate}\
+.dot{width:10px;height:10px;border-radius:50%;background:#2f5f9e;margin:0 auto 14px;animation:p 1s ease-in-out infinite alternate}\
 @keyframes p{from{opacity:.25}to{opacity:1}}\
 @media (prefers-color-scheme:dark){body{color:#e6e9ef;background:#151a22}pre,code{background:#232a35}p{color:#9aa4b2}}";
 
 const LOADING: &str = concat!(
     r#"<!doctype html><html><head><meta charset="utf-8"><style>"#,
     "body{margin:0;height:100vh;display:grid;place-items:center;font:14px -apple-system,system-ui,sans-serif;\
-color:#5b6574;background:#f7f8fa}.dot{width:10px;height:10px;border-radius:50%;background:#3fa45b;\
+color:#5b6574;background:#f7f8fa}.dot{width:10px;height:10px;border-radius:50%;background:#2f5f9e;\
 margin:0 auto 14px;animation:p 1s ease-in-out infinite alternate}@keyframes p{from{opacity:.25}to{opacity:1}}\
 @media (prefers-color-scheme:dark){body{color:#9aa4b2;background:#151a22}}",
     r#"</style></head><body><div><div class="dot"></div>Loading the index…</div></body></html>"#

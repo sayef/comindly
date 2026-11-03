@@ -1,6 +1,6 @@
 import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Clock, Loader2, X } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { shortStatus } from "@/components/index-log";
@@ -36,7 +36,13 @@ export function Activity() {
         <span className="font-medium">Queued</span>
         {j.queued!.length > 1 && <span className="text-muted-foreground">+{j.queued!.length - 1}</span>}
       </Link>
-      <Stop label="Cancel the queued indexing" pending={dequeue.isPending} onClick={() => dequeue.mutate(next.id)} />
+      <Stop
+        label="Cancel the queued indexing"
+        question="Take it off the queue?"
+        confirm="Remove"
+        pending={dequeue.isPending}
+        onClick={() => dequeue.mutate(next.id)}
+      />
     </Pill>
   );
   const was = useRef<{ id?: string; running: boolean } | undefined>(undefined);
@@ -67,7 +73,13 @@ export function Activity() {
             <span className="font-medium">Indexing</span>
             <span className="hidden max-w-44 truncate text-muted-foreground 2xl:inline">{step}</span>
           </Link>
-          <Stop label="Cancel indexing" pending={stopIndex.isPending} onClick={() => stopIndex.mutate()} />
+          <Stop
+            label="Stop indexing"
+            question="Stop indexing? The run so far is discarded."
+            confirm="Stop"
+            pending={stopIndex.isPending}
+            onClick={() => stopIndex.mutate()}
+          />
         </Pill>
         {queued}
       </div>
@@ -87,7 +99,24 @@ function Pill({ children }: { children: React.ReactNode }) {
   return <div className="flex h-8 max-w-sm items-center gap-2 rounded-md bg-card px-3 text-xs shadow-[0_1px_2px_var(--shadow-ink)]">{children}</div>;
 }
 
-function Stop({ label, pending, onClick }: { label: string; pending: boolean; onClick: () => void }) {
+function Stop({ label, question, confirm, pending, onClick }: { label: string; question: string; confirm: string; pending: boolean; onClick: () => void }) {
+  const [asking, setAsking] = useState(false);
+  const yes = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (asking) yes.current?.focus();
+  }, [asking]);
+  if (asking)
+    return (
+      <span role="group" aria-label={question} className="flex items-center gap-1.5" onKeyDown={(e) => e.key === "Escape" && setAsking(false)}>
+        <span className="whitespace-nowrap text-muted-foreground">{question}</span>
+        <button className="rounded-sm px-1.5 py-0.5 font-medium hover:bg-muted" onClick={() => setAsking(false)}>
+          Keep
+        </button>
+        <button ref={yes} className="rounded-sm px-1.5 py-0.5 font-semibold text-danger hover:bg-danger/10" onClick={() => (setAsking(false), onClick())}>
+          {confirm}
+        </button>
+      </span>
+    );
   return (
     <button
       className={cn(
@@ -95,7 +124,7 @@ function Stop({ label, pending, onClick }: { label: string; pending: boolean; on
         pending && "opacity-50",
       )}
       disabled={pending}
-      onClick={onClick}
+      onClick={() => setAsking(true)}
       aria-label={label}
       title={label}
     >

@@ -17,7 +17,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState<Theme>(initial);
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
-    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme === "dark" ? "#0b1311" : "#f4f6f4");
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme === "dark" ? "#0e0f10" : "#f4f5f6");
     try {
       localStorage.setItem("comindly.theme", theme);
     } catch {

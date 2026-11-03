@@ -352,7 +352,7 @@ fn org_baseline(per_repo: &[Convention]) -> Vec<Convention> {
                 dimension: cs[0].dimension.clone(),
                 key: key.to_string(),
                 rule: format!(
-                    "{} — in {} of {} repos ({})",
+                    "{}: in {} of {} measured repos ({})",
                     cs[0].generic,
                     cs.len(),
                     repos.len(),
@@ -1233,7 +1233,7 @@ mod tests {
         assert_eq!(org.len(), 1);
         assert!(org[0]
             .rule
-            .starts_with("Functions are snake_case — in 2 of 2 repos"));
+            .starts_with("Functions are snake_case: in 2 of 2 measured repos"));
     }
 
     #[test]

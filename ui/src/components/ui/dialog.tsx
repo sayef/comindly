@@ -14,6 +14,7 @@ export function DialogContent({ className, children, ...props }: React.Component
           "fixed left-1/2 top-[15%] z-50 w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 overflow-hidden overscroll-contain rounded-xl bg-popover shadow-float",
           className,
         )}
+        aria-describedby={undefined}
         {...props}
       >
         {children}

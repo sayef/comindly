@@ -2,9 +2,9 @@ import { RefreshCcw } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Org } from "@/components/org-views";
 import { RepoDot } from "@/components/symbol";
-import { cn } from "@/lib/utils";
+import { cn, compact } from "@/lib/utils";
 
-const W = 168;
+const BOX = 168;
 const H = 50;
 const GAP = 16;
 const ROW = 104;
@@ -27,7 +27,6 @@ interface Box {
   line: number;
 }
 
-const short = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : String(n));
 
 type P = { x: number; y: number };
 
@@ -47,9 +46,13 @@ function curve(p: P[]) {
   return `${d} C${(2 * y.x + z.x) / 3},${(2 * y.y + z.y) / 3} ${(y.x + 2 * z.x) / 3},${(y.y + 2 * z.y) / 3} ${z.x},${z.y}`;
 }
 
+/** Full-size boxes, narrowed on a phone so two still fit side by side. */
+const boxWidth = (width: number) => Math.min(BOX, Math.floor((width - 32 - GAP) / 2));
+
 /** Boxes in lines away from the focus; every other line sits half a box over, so its arrows pass
  * through the gaps of the line in front. `y(line)` places each line. */
 function rows(ids: string[], per: number, width: number, y: (line: number) => number): Box[] {
+  const W = boxWidth(width);
   const cell = W + GAP;
   const x0 = (width - (per * W + (per - 1) * GAP)) / 2;
   const out: Box[] = [];
@@ -168,6 +171,7 @@ export function OrgNetwork({ org }: { org: Org }) {
 
   const up = links.filter((l) => l.to === current).sort((a, b) => b.weight - a.weight);
   const down = links.filter((l) => l.from === current).sort((a, b) => b.weight - a.weight);
+  const W = boxWidth(width);
   const per = Math.max(1, Math.floor((width - 32 + GAP) / (W + GAP)));
   const upLines = lines(up.length, per);
   const top = 28 + (upLines ? 22 : 0);
@@ -186,7 +190,8 @@ export function OrgNetwork({ org }: { org: Org }) {
   );
   const me: Box = { id: current, x: (width - W) / 2, y: focusY, line: 0 };
   const downLines = lines(down.length, per);
-  const height = focusY + H + (downLines ? downLines * ROW + 22 : 0) + 28;
+  const alone = !up.length && !down.length;
+  const height = focusY + H + (downLines ? downLines * ROW + 22 : 0) + (alone ? 52 : 28);
 
   // Arrivals and departures spread along the focus box's edges, in the order the other boxes sit.
   const spread = (n: number, i: number) => (n === 1 ? 0 : ((i / (n - 1)) * 2 - 1) * (W / 2 - 18));
@@ -231,10 +236,16 @@ export function OrgNetwork({ org }: { org: Org }) {
           fill="none"
           stroke="transparent"
           strokeWidth={14}
-          className="cursor-help"
+          tabIndex={0}
+          role="button"
+          aria-label={`${l.from} uses ${l.to}${l.contract ? `, through ${l.via.length} ${l.via.length === 1 ? "contract" : "contracts"}` : ""}${l.cycle ? ", in a cycle" : ""}`}
+          className="cursor-help outline-none focus-visible:stroke-ring/40"
           onPointerEnter={(e) => show(l, e)}
           onPointerMove={(e) => show(l, e)}
           onPointerLeave={() => setTip(null)}
+          /* Keyboard users get the same card, placed at the middle of the arrow. */
+          onFocus={() => setTip({ l, ...pts[Math.floor(pts.length / 2)] })}
+          onBlur={() => setTip(null)}
         />
       </g>
     );
@@ -265,14 +276,29 @@ export function OrgNetwork({ org }: { org: Org }) {
         <title>{b.id}</title>
       </text>
       <text x={12} y={38} className="nums fill-muted-foreground text-xs">
-        {short(org.symbols.get(b.id) ?? 0)} symbols
+        {compact(org.symbols.get(b.id) ?? 0)} symbols
       </text>
     </g>
   );
 
   return (
     <div className="grid min-h-[360px] md:grid-cols-[240px_minmax(0,1fr)]">
-      <nav aria-label="Repositories" className="flex max-h-48 flex-col overflow-y-auto overscroll-contain border-b p-2 md:max-h-none md:border-r md:border-b-0">
+      {/* On phones a select keeps the graph on the first screen; the ranked list needs the width. */}
+      <label className="flex items-center gap-2 border-b px-4 py-2.5 text-xs text-muted-foreground md:hidden">
+        Repository
+        <select
+          value={current}
+          onChange={(e) => (setFocus(e.target.value), setTip(null))}
+          className="h-9 min-w-0 flex-1 rounded-md border border-input bg-card px-2 text-sm text-foreground"
+        >
+          {ranked.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.id} ({r.usedBy} use it)
+            </option>
+          ))}
+        </select>
+      </label>
+      <nav aria-label="Repositories" className="hidden flex-col overflow-y-auto overscroll-contain border-r p-2 md:flex">
         {ranked.map((r) => (
           <button
             key={r.id}
@@ -286,14 +312,14 @@ export function OrgNetwork({ org }: { org: Org }) {
             <RepoDot repo={r.id} />
             <span className="min-w-0 flex-1 truncate">{r.id}</span>
             {inCycle.has(r.id) && <RefreshCcw className="size-3 text-warning" aria-label="in a cycle" />}
-            <span className="nums text-xs font-normal text-muted-foreground" title={`Used by ${r.usedBy}, uses ${r.uses}`}>
-              {r.usedBy || "–"}
+            <span className={cn("nums text-xs font-normal text-muted-foreground", !r.usedBy && "opacity-45")} title={`Used by ${r.usedBy}, uses ${r.uses}`}>
+              {r.usedBy}
             </span>
           </button>
         ))}
       </nav>
-      <div ref={box} className="relative min-w-0" style={{ height }}>
-        <svg width={width} height={height} className="block" role="img" aria-label={`${current}: what uses it and what it uses`}>
+      <div ref={box} className="relative min-w-0 md:self-center" style={{ height }}>
+        <svg width={width} height={height} className="block" role="group" aria-label={`${current}: what uses it and what it uses`}>
           <defs>
             {(["code", "contract", "cycle"] as const).map((k) => (
               <marker key={k} id={`tip-${k}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto">
@@ -323,7 +349,7 @@ export function OrgNetwork({ org }: { org: Org }) {
           {upBoxes.map((b) => node(b))}
           {downBoxes.map((b) => node(b))}
           {node(me, true)}
-          {!up.length && !down.length && (
+          {alone && (
             <text x={width / 2} y={me.y + H + 32} textAnchor="middle" className="fill-muted-foreground text-xs">
               No links to other repositories in the index.
             </text>

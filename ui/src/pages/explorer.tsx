@@ -9,7 +9,7 @@ import { RememberDialog } from "@/components/remember-dialog";
 import { RepoDot, SymbolLink } from "@/components/symbol";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, type Node } from "@/lib/api";
 import { toast } from "sonner";
@@ -20,10 +20,10 @@ function NodeList({ title, icon: Icon, nodes }: { title: string; icon: typeof La
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="flex items-center gap-2">
+        <h2 className="flex items-center gap-2 text-sm font-semibold">
           <Icon className="size-4" /> {title}
           <span className="nums text-xs font-normal text-muted-foreground">{nodes.length}</span>
-        </CardTitle>
+        </h2>
       </CardHeader>
       <CardContent className="flex max-h-72 flex-col gap-1.5 overflow-y-auto">
         {nodes.map((n) => (
@@ -120,10 +120,10 @@ export function ExplorerPage() {
           <RememberDialog open={adding} onOpenChange={setAdding} about={[f]} />
         </div>
         <Card className="flex items-center gap-4 px-4 py-3">
-          <Radar className="size-5 text-warning" />
-          <div>
+          <Radar className="size-5 shrink-0 text-muted-foreground" />
+          <div className="shrink-0" title="Blast radius: everything that depends on this">
             <div className="nums text-[26px] leading-tight font-semibold">{ripple.total}</div>
-            <div className="text-xs text-muted-foreground">Dependents (blast radius)</div>
+            <div className="text-xs whitespace-nowrap text-muted-foreground">Dependents</div>
           </div>
           <div className="flex max-w-xs flex-wrap gap-1">
             {Object.entries(ripple.repos).map(([r, n]) => (
@@ -142,7 +142,7 @@ export function ExplorerPage() {
             edges={graph.edges}
             focus={detail.data.graph.focus}
             onPick={(id) => id !== f.id && navigate(`/explorer?focus=${encodeURIComponent(id)}`)}
-            className="h-[460px] w-full"
+            className="w-full"
           />
         )}
       </Card>
@@ -150,9 +150,9 @@ export function ExplorerPage() {
       {detail.data.flow && (
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2">
+            <h2 className="flex items-center gap-2 text-sm font-semibold">
               <Route className="size-4" /> How this flow works
-            </CardTitle>
+            </h2>
           </CardHeader>
           <CardContent className="flex flex-col gap-2 text-sm">
             <p className="leading-relaxed">{withCode(detail.data.flow.narration)}</p>
@@ -166,9 +166,9 @@ export function ExplorerPage() {
       {zoom.contracts.length > 0 && (
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2">
+            <h2 className="flex items-center gap-2 text-sm font-semibold">
               <Network className="size-4" /> Contracts
-            </CardTitle>
+            </h2>
           </CardHeader>
           <CardContent className="flex flex-col gap-2">
             {zoom.contracts.map((c) => (

@@ -197,13 +197,14 @@ export function TreeView({
         {boxes.map((b) => (
           <button
             key={b.key}
-            onClick={() => onToggle(b.key)}
-            disabled={b.kind === "seen"}
+            onClick={() => b.kind !== "seen" && onToggle(b.key)}
+            aria-disabled={b.kind === "seen" || undefined}
+            aria-expanded={b.kind === "open" ? true : b.kind === "closed" ? false : undefined}
             title={b.kind === "seen" ? `${b.repo} is shown elsewhere in this tree` : undefined}
             className={cn(
               "absolute flex flex-col justify-center gap-0.5 rounded-md px-3 text-left transition-colors duration-100",
               b.kind === "seen"
-                ? "border border-dashed border-input text-muted-foreground"
+                ? "cursor-default border border-dashed border-input text-muted-foreground"
                 : "bg-muted hover:bg-[color-mix(in_srgb,var(--color-muted)_85%,var(--color-foreground))]",
               b.loopTo && b.kind !== "seen" && "shadow-[inset_0_0_0_1.5px_var(--color-warning)]",
               lit.has(b.key) && "bg-accent outline-2 outline-brand",
@@ -224,10 +225,11 @@ export function TreeView({
               {b.kind === "closed" && (
                 <span className="nums flex items-center text-xs text-muted-foreground" title={`Opens to ${b.more} more`}>
                   {b.more}
+                  <span className="sr-only"> more</span>
                   <ChevronRight className="size-3.5" />
                 </span>
               )}
-              {b.kind === "open" && <Minus className="size-3.5 text-muted-foreground" aria-label="Open" />}
+              {b.kind === "open" && <Minus className="size-3.5 text-muted-foreground" aria-hidden />}
             </span>
             <span className="flex min-w-0 items-baseline gap-1.5 text-xs text-muted-foreground">
               {b.col === 0 ? (
@@ -237,7 +239,11 @@ export function TreeView({
                   <span className={cn("min-w-0 truncate", b.contract && "font-mono", b.kind !== "seen" && b.contract && "text-accent-foreground")}>
                     {b.via}
                   </span>
-                  {b.kind === "seen" && <span className="shrink-0">shown elsewhere</span>}
+                  {b.kind === "seen" && (
+                    <span className="shrink-0">
+                      shown elsewhere<span className="sr-only"> in this tree; open it there</span>
+                    </span>
+                  )}
                 </>
               )}
             </span>

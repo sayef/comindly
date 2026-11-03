@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Check, CircleSlash, Clock, Copy, Loader2, X } from "lucide-react";
-import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
-import { duration, IndexLog, shortStatus } from "@/components/index-log";
+import { AlertTriangle, Check, CircleSlash, Clock, Copy, FolderGit2, Loader2, X } from "lucide-react";
+import { Link, useParams, useSearchParams } from "react-router";
+import { ConfirmButton } from "@/components/confirm";
+import { duration, IndexLog, shortStatus, useCopy } from "@/components/index-log";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,6 +36,15 @@ const STATUS: Record<JobStatus, { label: string; badge: "brand" | "warning" | "d
 };
 
 function StatusIcon({ status, className }: { status: JobStatus; className?: string }) {
+  return (
+    <>
+      <StatusGlyph status={status} className={className} />
+      <span className="sr-only">{STATUS[status].label}: </span>
+    </>
+  );
+}
+
+function StatusGlyph({ status, className }: { status: JobStatus; className?: string }) {
   const c = cn("size-4 shrink-0", className);
   if (status === "running") return <Loader2 className={cn(c, "animate-spin text-brand")} />;
   if (status === "queued") return <Clock className={cn(c, "text-muted-foreground")} />;
@@ -51,7 +60,8 @@ function took(j: JobRow): string {
   return duration(end - new Date(j.started).getTime());
 }
 
-type Filter = "all" | "running" | "queued" | "succeeded" | "failed";
+const FILTERS = ["all", "running", "queued", "succeeded", "failed"] as const;
+type Filter = (typeof FILTERS)[number];
 const failedLike = (s: JobStatus) => s === "failed" || s === "interrupted";
 const matches = (f: Filter, s: JobStatus) => f === "all" || (f === "failed" ? failedLike(s) : s === f);
 
@@ -105,8 +115,10 @@ export function ActivityPage() {
   const { id } = useParams();
   const { me } = useAccess();
   const who = (j: JobRow) => j.started_by ?? (me?.mode === "server" ? "automatic" : "this machine");
-  const navigate = useNavigate();
-  const [filter, setFilter] = useState<Filter>("all");
+  const [params, setParams] = useSearchParams();
+  const filter: Filter = FILTERS.find((f) => f === params.get("status")) ?? "all";
+  const setFilter = (f: Filter) => setParams(f === "all" ? {} : { status: f }, { replace: true });
+  const search = params.toString() ? `?${params}` : "";
   const jobs = useQuery({
     queryKey: ["jobs"],
     queryFn: api.jobs,
@@ -119,7 +131,7 @@ export function ActivityPage() {
   const count = (f: Filter) => all.filter((j) => matches(f, j.status)).length;
   const lastOk = all.find((j) => j.status === "succeeded");
   const lastBad = all.find((j) => failedLike(j.status));
-  const toggle = (f: Filter) => setFilter((was) => (was === f ? "all" : f));
+  const toggle = (f: Filter) => setFilter(filter === f ? "all" : f);
   const sections: [string, JobRow[]][] = [];
   for (const j of shown) {
     const name = section(j);
@@ -137,15 +149,16 @@ export function ActivityPage() {
       {jobs.isLoading ? (
         <Skeleton className="h-96" />
       ) : all.length === 0 ? (
-        <Card className="flex flex-col gap-2 px-5 py-8">
+        <Card className="flex flex-col items-start gap-2 px-5 py-8">
           <p className="font-semibold">No activity yet</p>
           <p className="max-w-[68ch] text-muted-foreground">
-            Each indexing run shows up here with its steps, warnings and cost. Start one from{" "}
-            <Link to="/settings/repositories" className="font-semibold text-brand hover:underline">
-              Repositories
-            </Link>{" "}
-            in the settings.
+            Each indexing run shows up here with its steps, warnings and cost. Start one from the repositories in the settings.
           </p>
+          <Button variant="outline" className="mt-2" asChild>
+            <Link to="/settings/repositories">
+              <FolderGit2 /> Open repositories
+            </Link>
+          </Button>
         </Card>
       ) : (
         <>
@@ -198,8 +211,9 @@ export function ActivityPage() {
                     <ul>
                       {rows.map((j) => (
                         <li key={j.id}>
-                          <button
-                            onClick={() => navigate(`/activity/${j.id}`)}
+                          <Link
+                            to={`/activity/${j.id}${search}`}
+                            aria-current={j.id === selected ? "page" : undefined}
                             className={cn(
                               "flex w-full items-start gap-3 border-b px-4 py-3 text-left transition-colors duration-100 hover:bg-muted/60",
                               j.id === selected && "bg-accent hover:bg-accent",
@@ -216,7 +230,7 @@ export function ActivityPage() {
                               </span>
                             </span>
                             <span className="nums shrink-0 pt-0.5 text-xs text-muted-foreground">{took(j)}</span>
-                          </button>
+                          </Link>
                         </li>
                       ))}
                     </ul>
@@ -244,6 +258,7 @@ export function ActivityPage() {
 function Detail({ id, who }: { id: string; who: (j: JobRow) => string }) {
   const qc = useQueryClient();
   const { admin } = useAccess();
+  const { copy, state: copied, live } = useCopy();
   const job = useQuery({
     queryKey: ["job", id],
     queryFn: () => api.job(id),
@@ -276,18 +291,32 @@ function Detail({ id, who }: { id: string; who: (j: JobRow) => string }) {
             {j.finished && <Meta label="Took">{took(j)}</Meta>}
             {j.request_id && (
               <Meta label="Request">
-                <button className="flex items-center gap-1 font-mono hover:text-foreground" title="Copy the request id, to find this run in the server's logs" onClick={() => navigator.clipboard?.writeText(j.request_id!)}>
+                <button
+                  className="flex items-center gap-1 font-mono hover:text-foreground"
+                  title="Copy the request id, to find this run in the server's logs"
+                  aria-label={`Copy request id ${j.request_id}`}
+                  onClick={() => copy(j.request_id!)}
+                >
                   {j.request_id.slice(0, 12)}
-                  <Copy className="size-3" />
+                  {copied(j.request_id) === "copied" ? <Check className="size-3" /> : <Copy className="size-3" />}
+                  {copied(j.request_id) === "failed" && <span className="font-sans">Could not copy</span>}
                 </button>
+                {live}
               </Meta>
             )}
           </dl>
         </div>
         {admin && active(j.status) && (
-          <Button variant="outline" size="sm" loading={cancel.isPending} onClick={() => cancel.mutate()}>
-            {j.status === "queued" ? "Remove from queue" : "Cancel"}
-          </Button>
+          <ConfirmButton
+            variant="outline"
+            size="sm"
+            loading={cancel.isPending}
+            question={j.status === "queued" ? "Take this run off the queue?" : "Stop this run? What it indexed so far is discarded."}
+            confirmLabel={j.status === "queued" ? "Remove" : "Stop run"}
+            onConfirm={() => cancel.mutate()}
+          >
+            {j.status === "queued" ? "Remove from queue" : "Stop"}
+          </ConfirmButton>
         )}
       </div>
       <div className="flex flex-col gap-4 p-5">

@@ -1,12 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
+import { useSearchParams } from "react-router";
 import { RepoDot } from "@/components/symbol";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Toggle, ToggleGroup } from "@/components/ui/tabs";
 import { api, type Package } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -41,7 +42,9 @@ function Pin({ p }: { p: Package }) {
 
 export function PackagesPage() {
   const rows = useQuery({ queryKey: ["packages"], queryFn: api.packages });
-  const [only, setOnly] = useState<"all" | "skew">("all");
+  const [params, setParams] = useSearchParams();
+  const only: "all" | "skew" = params.get("only") === "skew" ? "skew" : "all";
+  const setOnly = (v: string) => setParams((p) => (v === "skew" ? p.set("only", v) : p.delete("only"), p), { replace: true });
   const groups = useMemo(() => {
     const m = new Map<string, Package[]>();
     for (const p of rows.data ?? []) m.set(`${p.ecosystem}:${p.name}`, [...(m.get(`${p.ecosystem}:${p.name}`) ?? []), p]);
@@ -57,14 +60,12 @@ export function PackagesPage() {
         Libraries one repository publishes and others depend on, with the version each consumer pins. A pin that differs from the
         published version is skew: the consumer runs code the publisher has moved on from.
       </PageHeader>
-      <Tabs value={only} onValueChange={(v) => setOnly(v as "all" | "skew")}>
-        <TabsList>
-          <TabsTrigger value="all">All</TabsTrigger>
-          <TabsTrigger value="skew">
-            Version skew <span className="nums text-xs font-normal text-muted-foreground">{skewed}</span>
-          </TabsTrigger>
-        </TabsList>
-      </Tabs>
+      <ToggleGroup label="Show" value={only} onValueChange={setOnly} className="self-start">
+        <Toggle value="all">All</Toggle>
+        <Toggle value="skew">
+          Version skew <span className="nums text-xs font-normal text-muted-foreground">{skewed}</span>
+        </Toggle>
+      </ToggleGroup>
       {rows.isLoading && <Skeleton className="h-48 rounded-lg" />}
       {!rows.isLoading && groups.length === 0 && (
         <p className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">
@@ -74,7 +75,7 @@ export function PackagesPage() {
       {groups.map((g) => (
         <Card key={`${g[0].ecosystem}:${g[0].name}`} className="overflow-hidden">
           <div className="flex flex-wrap items-center gap-2 border-b px-5 py-3.5">
-            <span className="font-mono font-semibold">{g[0].name}</span>
+            <h2 className="font-mono font-semibold [overflow-wrap:anywhere]">{g[0].name}</h2>
             <Badge variant="outline">{g[0].ecosystem}</Badge>
             <span className="text-muted-foreground">published by</span>
             <span className="flex items-center gap-1.5">
@@ -82,7 +83,7 @@ export function PackagesPage() {
             </span>
             {g[0].published && <span className="nums text-muted-foreground">at version <span className="font-mono">{g[0].published}</span></span>}
           </div>
-          <Table>
+          <Table reflow>
             <thead>
               <tr className="border-b">
                 <Th>Consumer</Th>
@@ -95,13 +96,16 @@ export function PackagesPage() {
                 .filter((p) => only === "all" || p.skewed)
                 .map((p) => (
                   <Tr key={p.consumer}>
-                    <Td>
-                      <span className="flex items-center gap-1.5">
-                        <RepoDot repo={p.consumer} /> {p.consumer}
+                    <Td slot="main">
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <RepoDot repo={p.consumer} /> <span className="truncate">{p.consumer}</span>
                       </span>
                     </Td>
-                    <Td className="font-mono text-xs">{p.requirement ?? <span className="font-sans text-muted-foreground">any version</span>}</Td>
-                    <Td>
+                    <Td slot="meta" className="font-mono text-xs">
+                      <span className="hidden font-sans max-sm:inline">Requires </span>
+                      {p.requirement ?? <span className="font-sans text-muted-foreground">any version</span>}
+                    </Td>
+                    <Td slot="end">
                       <Pin p={p} />
                     </Td>
                   </Tr>

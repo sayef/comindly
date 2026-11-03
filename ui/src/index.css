@@ -23,11 +23,13 @@
   --color-brand-foreground: var(--brand-foreground);
   --color-warning: var(--warning);
   --color-danger: var(--danger);
-  --color-info: var(--info);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-sidebar: var(--sidebar);
+  /* Small text at 13px: meta, labels and table detail are read, not glanced at. */
+  --text-xs: 0.8125rem;
+  --text-xs--line-height: 1.15rem;
   --radius-sm: 5px;
   --radius-md: 7px;
   --radius-lg: 10px;
@@ -37,59 +39,57 @@
   --shadow-float: 0 1px 2px var(--shadow-ink), 0 12px 32px var(--shadow-ink-far);
 }
 
-/* Pine ink on cool paper; the logo's green as the one accent. Tokens and reasons: ui/DESIGN.md. */
+/* Slate: cool blue-grey neutrals with one steel-blue accent. Tokens and reasons: ui/DESIGN.md. */
 :root {
-  --background: #f4f6f4;
-  --foreground: #0f1f1a;
+  --background: #f4f5f6;
+  --foreground: #151719;
   --card: #ffffff;
-  --card-foreground: #0f1f1a;
+  --card-foreground: #151719;
   --popover: #ffffff;
-  --popover-foreground: #0f1f1a;
-  --primary: #0f1f1a;
+  --popover-foreground: #151719;
+  --primary: #151719;
   --primary-foreground: #ffffff;
-  --secondary: #eaeeeb;
-  --secondary-foreground: #0f1f1a;
-  --muted: #eaeeeb;
-  --muted-foreground: #4f605a;
-  --accent: #e2eee8;
-  --accent-foreground: #0b5640;
-  --brand: #0f6b50;
+  --secondary: #eaecee;
+  --secondary-foreground: #151719;
+  --muted: #eaecee;
+  --muted-foreground: #4f5660;
+  --accent: #e0e6ed;
+  --accent-foreground: #294d7d;
+  --brand: #2f5f9e;
   --brand-foreground: #ffffff;
   --warning: #8f5400;
   --danger: #b42318;
-  --info: #2f5fa8;
-  --border: #dde3df;
-  --input: #c9d2cd;
-  --ring: #0f6b50;
-  --sidebar: #edf1ee;
-  --shadow-ink: rgb(15 31 26 / 0.08);
-  --shadow-ink-far: rgb(15 31 26 / 0.14);
+  --border: #dddfe3;
+  --input: #c9cdd2;
+  --ring: #2f5f9e;
+  --sidebar: #edeff1;
+  --shadow-ink: rgb(22 27 33 / 0.08);
+  --shadow-ink-far: rgb(22 27 33 / 0.14);
 }
 
 .dark {
-  --background: #0b1311;
-  --foreground: #e4ece8;
-  --card: #121c19;
-  --card-foreground: #e4ece8;
-  --popover: #18241f;
-  --popover-foreground: #e4ece8;
-  --primary: #e4ece8;
-  --primary-foreground: #0b1311;
-  --secondary: #1a2623;
-  --secondary-foreground: #e4ece8;
-  --muted: #1a2623;
-  --muted-foreground: #9fafa9;
-  --accent: #153029;
-  --accent-foreground: #9be6c8;
-  --brand: #5ccfa4;
-  --brand-foreground: #04201a;
+  --background: #0e0f10;
+  --foreground: #e6e8ea;
+  --card: #151618;
+  --card-foreground: #e6e8ea;
+  --popover: #1c1e20;
+  --popover-foreground: #e6e8ea;
+  --primary: #e6e8ea;
+  --primary-foreground: #0e0f10;
+  --secondary: #1d2023;
+  --secondary-foreground: #e6e8ea;
+  --muted: #1d2023;
+  --muted-foreground: #a0a6ae;
+  --accent: #222933;
+  --accent-foreground: #a3c1ea;
+  --brand: #8db4ea;
+  --brand-foreground: #0e0f10;
   --warning: #e5ae4a;
   --danger: #f27a7c;
-  --info: #8fb3f5;
-  --border: #22302c;
-  --input: #34443f;
-  --ring: #5ccfa4;
-  --sidebar: #08100e;
+  --border: #26282c;
+  --input: #373b41;
+  --ring: #8db4ea;
+  --sidebar: #0b0c0d;
   --shadow-ink: rgb(0 0 0 / 0.3);
   --shadow-ink-far: rgb(0 0 0 / 0.45);
 }
@@ -166,13 +166,18 @@
   select {
     appearance: none;
     background-color: var(--color-card);
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238a9a94' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a0a6ae' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
     background-position: right 0.625rem center;
     background-repeat: no-repeat;
     background-size: 14px;
     padding-right: 2rem !important;
     color: var(--color-foreground);
     border-color: var(--color-input);
+  }
+  h1,
+  h2,
+  h3 {
+    scroll-margin-top: 1rem;
   }
   ::selection {
     background: color-mix(in srgb, var(--color-brand) 25%, transparent);
@@ -211,4 +216,20 @@
 }
 .react-flow__attribution a {
   color: var(--color-muted-foreground);
+}
+
+/* Outside the layers so it beats text-size utilities: phones zoom into fields under 16px, and touch
+   needs 44px targets. */
+@media (max-width: 639px) {
+  input:not([type="checkbox"], [type="radio"], [type="range"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+@media (pointer: coarse) {
+  input:not([type="checkbox"], [type="radio"], [type="range"]),
+  select {
+    min-height: 44px;
+  }
 }

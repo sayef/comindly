@@ -8,7 +8,7 @@ import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Toggle, ToggleGroup } from "@/components/ui/tabs";
 import { api, attention, when } from "@/lib/api";
 
 export function LedgerPage() {
@@ -18,15 +18,17 @@ export function LedgerPage() {
   const pendingCount = (ledger.data ?? []).filter((e) => attention(e) < 3).length;
   const view: "review" | "timeline" = (params.get("view") as "review" | "timeline" | null) ?? (ledger.data && pendingCount === 0 ? "timeline" : "review");
   const setView = (v: "review" | "timeline") => setParams((p) => (p.set("view", v), p), { replace: true });
-  const [q, setQ] = useState("");
+  const q = params.get("q") ?? "";
+  const setQ = (v: string) => setParams((p) => (v ? p.set("q", v) : p.delete("q"), p), { replace: true });
   const [adding, setAdding] = useState(false);
+  const text = useMemo(() => new Map((ledger.data ?? []).map((e) => [e.record.id, JSON.stringify(e.record).toLowerCase()])), [ledger.data]);
   const rows = useMemo(() => {
     const needle = q.toLowerCase();
-    const all = (ledger.data ?? []).filter((e) => !needle || JSON.stringify(e.record).toLowerCase().includes(needle));
+    const all = (ledger.data ?? []).filter((e) => !needle || text.get(e.record.id)?.includes(needle));
     return view === "timeline"
       ? all.slice().sort((a, b) => when(b).localeCompare(when(a)))
       : all.filter((e) => attention(e) < 3).sort((a, b) => attention(a) - attention(b) || b.record.created.localeCompare(a.record.created));
-  }, [ledger.data, view, q]);
+  }, [ledger.data, text, view, q]);
   const pending = (ledger.data ?? []).filter((e) => attention(e) < 3).length;
 
   let month = "";
@@ -46,19 +48,17 @@ export function LedgerPage() {
       </PageHeader>
       <RememberDialog open={adding} onOpenChange={setAdding} />
       <div className="flex flex-wrap items-center gap-3">
-        <Tabs value={view} onValueChange={(v) => setView(v as "review" | "timeline")}>
-          <TabsList>
-            <TabsTrigger value="review">
-              <Inbox className="size-3.5" /> Needs review <span className="nums text-xs font-normal text-muted-foreground">{pending}</span>
-            </TabsTrigger>
-            <TabsTrigger value="timeline">
-              <ListTree className="size-3.5" /> Timeline
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
-        <div className="relative ml-auto w-full max-w-xs">
+        <ToggleGroup label="View" value={view} onValueChange={(v) => setView(v as "review" | "timeline")}>
+          <Toggle value="review">
+            <Inbox className="size-3.5" /> Needs review {pending > 0 && <span className="nums text-xs font-normal text-muted-foreground">{pending}</span>}
+          </Toggle>
+          <Toggle value="timeline">
+            <ListTree className="size-3.5" /> Timeline
+          </Toggle>
+        </ToggleGroup>
+        <div className="relative w-full sm:ml-auto sm:max-w-xs">
           <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
-          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter records" className="pl-8" />
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter records" aria-label="Filter records" className="pl-8" />
         </div>
       </div>
       {ledger.isLoading && [0, 1, 2].map((i) => <Skeleton key={i} className="h-32 rounded-lg" />)}
@@ -96,7 +96,7 @@ export function LedgerPage() {
                   {new Date(`${m}-01`).toLocaleDateString(undefined, { year: "numeric", month: "long" })}
                 </h2>
               )}
-              <EntryCard entry={e} writable={overview.data?.writable} />
+              <EntryCard entry={e} writable={overview.data?.writable} heading={view === "timeline" ? "h3" : "h2"} />
             </div>
           );
         })}

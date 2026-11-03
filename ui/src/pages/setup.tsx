@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, BookOpen, Check, CheckCircle2, CircleDashed, Copy, KeyRound } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
+import { useCopy } from "@/components/index-log";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -60,21 +61,12 @@ const TERMINAL: [string, string][] = [
   ['comindly remember constraint --on OrderService --title "…"', "Record a constraint"],
 ];
 
-function useCopy() {
-  const [copied, setCopied] = useState<string | null>(null);
-  return {
-    copied,
-    copy: (text: string) => {
-      navigator.clipboard?.writeText(text);
-      setCopied(text);
-      setTimeout(() => setCopied((c) => (c === text ? null : c)), 1500);
-    },
-  };
-}
+const copyLabel = (state: "copied" | "failed" | null) => (state === "copied" ? "Copied" : state === "failed" ? "Could not copy" : "Copy");
 
 /** A code block with a copy button; `label` adds a header naming the file or place it goes. */
 export function Code({ children, label, shell }: { children: string; label?: string; shell?: boolean }) {
-  const { copied, copy } = useCopy();
+  const { copy, state, live } = useCopy();
+  const copied = state(children) === "copied";
   const body = (
     <pre className="whitespace-pre-wrap p-3.5 pr-12 font-mono text-xs leading-relaxed text-foreground [overflow-wrap:anywhere]">
       {shell && <span className="select-none text-muted-foreground">$ </span>}
@@ -85,9 +77,16 @@ export function Code({ children, label, shell }: { children: string; label?: str
     return (
       <div className="relative rounded-md bg-muted">
         {body}
-        <Button size="icon" variant="ghost" className="absolute right-1.5 top-1.5 size-7" aria-label="Copy" onClick={() => copy(children)}>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="absolute right-1.5 top-1.5 size-7"
+          aria-label={copyLabel(state(children))}
+          onClick={() => copy(children)}
+        >
           {copied ? <Check /> : <Copy />}
         </Button>
+        {live}
       </div>
     );
   return (
@@ -95,10 +94,11 @@ export function Code({ children, label, shell }: { children: string; label?: str
       <div className="flex h-9 items-center justify-between gap-2 border-b border-background/70 pl-3.5 pr-1.5">
         <span className="truncate text-xs text-muted-foreground">{label}</span>
         <Button size="sm" variant="ghost" className="h-7 gap-1.5 px-2" onClick={() => copy(children)}>
-          {copied ? <Check /> : <Copy />} {copied ? "Copied" : "Copy"}
+          {copied ? <Check /> : <Copy />} {copyLabel(state(children))}
         </Button>
       </div>
       {body}
+      {live}
     </div>
   );
 }
@@ -135,8 +135,10 @@ function Step({
       </span>
       <div className="min-w-0 flex-1 pt-0.5">
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <h3 className="font-semibold">{title}</h3>
-          {status && <span className={cn("text-xs", state === "done" ? "font-semibold text-brand" : "text-muted-foreground")}>{status}</span>}
+          <h2 className="font-semibold">{title}</h2>
+          {status && (
+            <span className={cn("text-xs", state === "done" ? "font-semibold text-foreground" : "text-muted-foreground")}>{status}</span>
+          )}
         </div>
         <div className="mt-3 flex flex-col gap-3 text-muted-foreground">{children}</div>
       </div>
@@ -155,7 +157,7 @@ function connect(agent: Agent, index: string) {
   switch (agent) {
     case "claude":
       return {
-        label: "Terminal, once for every project",
+        label: "Terminal, once for all projects",
         shell: true,
         code: `claude mcp add --scope user comindly -- comindly ${args.join(" ")}`,
       };
@@ -172,28 +174,47 @@ function connect(agent: Agent, index: string) {
 
 function AgentPicker({ agent, setAgent, connected }: { agent: Agent; setAgent: (a: Agent) => void; connected: string[] }) {
   return (
-    <div role="tablist" className="flex max-w-full flex-wrap gap-0.5 self-start rounded-lg bg-secondary p-0.5">
-      {AGENTS.map((a) => (
-        <button
-          key={a}
-          role="tab"
-          aria-selected={agent === a}
-          onClick={() => setAgent(a)}
-          className={cn(
-            "flex h-8 items-center gap-1.5 rounded-md px-3 text-xs font-semibold transition-colors duration-100",
-            agent === a ? "bg-card text-foreground shadow-[0_1px_2px_var(--shadow-ink)]" : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {connected.includes(a) && <Check className="size-3.5 text-brand" aria-label="connected" />}
-          {AGENT_NAME[a]}
-        </button>
-      ))}
-    </div>
+    <>
+      {/* Phones get a select; five agents don't fit one row of buttons. */}
+      <select
+        value={agent}
+        onChange={(e) => setAgent(e.target.value as Agent)}
+        aria-label="Agent"
+        className="h-9 w-full rounded-md border border-input bg-card px-2 text-sm text-foreground sm:hidden"
+      >
+        {AGENTS.map((a) => (
+          <option key={a} value={a}>
+            {AGENT_NAME[a]}
+            {connected.includes(a) ? " (connected)" : ""}
+          </option>
+        ))}
+      </select>
+      <div
+        role="group"
+        aria-label="Agent"
+        className="flex max-w-full flex-wrap gap-0.5 self-start rounded-lg bg-secondary p-0.5 max-sm:hidden"
+      >
+        {AGENTS.map((a) => (
+          <button
+            key={a}
+            aria-pressed={agent === a}
+            onClick={() => setAgent(a)}
+            className={cn(
+              "flex h-8 items-center gap-1.5 rounded-md px-3 text-xs font-semibold transition-colors duration-100 pointer-coarse:h-11 max-sm:px-2",
+              agent === a ? "bg-card text-foreground shadow-[0_1px_2px_var(--shadow-ink)]" : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {connected.includes(a) && <Check className="size-3.5 text-brand" aria-label="connected" />}
+            {AGENT_NAME[a]}
+          </button>
+        ))}
+      </div>
+    </>
   );
 }
 
 function FirstQuestion() {
-  const { copied, copy } = useCopy();
+  const { copy, state, live } = useCopy();
   const tries = [ASK[2].items[0][1], ASK[1].items[1][1], ASK[3].items[0][1]];
   return (
     <div className="flex flex-col gap-2">
@@ -204,11 +225,17 @@ function FirstQuestion() {
           className="group flex min-h-11 items-center justify-between gap-3 rounded-md bg-muted px-3.5 py-2.5 text-left text-foreground transition-colors duration-100 hover:bg-[color-mix(in_srgb,var(--color-muted)_85%,var(--color-foreground))]"
         >
           <span>“{q}”</span>
-          <span className="shrink-0 text-xs font-semibold text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
-            {copied === q ? "Copied" : "Copy"}
+          <span
+            className={cn(
+              "shrink-0 text-xs font-semibold text-muted-foreground transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 pointer-coarse:opacity-100",
+              state(q) ? "opacity-100" : "opacity-0",
+            )}
+          >
+            {copyLabel(state(q))}
           </span>
         </button>
       ))}
+      {live}
     </div>
   );
 }
@@ -230,7 +257,15 @@ function Health({ s, server }: { s: Setup | undefined; server: boolean }) {
       <span className={cn("min-w-0 text-xs [overflow-wrap:anywhere]", !c.ok && "text-muted-foreground")}>
         {sentence(c.message)
           .split("`")
-          .map((part, i) => (i % 2 ? <code key={i} className="font-mono text-xs text-foreground">{part}</code> : part))}
+          .map((part, i) =>
+            i % 2 ? (
+              <code key={i} className="font-mono text-xs text-foreground">
+                {part}
+              </code>
+            ) : (
+              part
+            ),
+          )}
       </span>
     </li>
   );
@@ -350,7 +385,7 @@ function ServerSteps() {
 }
 
 function Questions({ s }: { s: Setup | undefined }) {
-  const { copied, copy } = useCopy();
+  const { copy, state, live } = useCopy();
   const about = new Map(s?.tools.map((t) => [t.name, t.description]));
   const listed = new Set(ASK.flatMap((g) => g.items.map(([t]) => t)));
   const rest = s?.tools.filter((t) => !listed.has(t.name)) ?? [];
@@ -373,13 +408,14 @@ function Questions({ s }: { s: Setup | undefined }) {
               >
                 <span>{q}</span>
                 <span className="mt-0.5 shrink-0 font-mono text-xs text-muted-foreground group-hover:text-foreground">
-                  {copied === q ? <span className="font-sans font-semibold text-brand">Copied</span> : tool}
+                  {state(q) ? <span className="font-sans font-semibold text-brand">{copyLabel(state(q))}</span> : tool}
                 </span>
               </button>
             ))}
           </Card>
         ))}
       </div>
+      {live}
       {rest.length > 0 && (
         <p className="text-xs text-muted-foreground">
           Also:{" "}
@@ -395,7 +431,7 @@ function Questions({ s }: { s: Setup | undefined }) {
 }
 
 function Terminal() {
-  const { copied, copy } = useCopy();
+  const { copy, state, live } = useCopy();
   return (
     <section className="flex flex-col gap-4">
       <div>
@@ -416,10 +452,13 @@ function Terminal() {
               <span className="select-none text-muted-foreground">$ </span>
               {cmd}
             </code>
-            <span className="text-xs text-muted-foreground">{copied === cmd ? <span className="font-semibold text-brand">Copied</span> : what}</span>
+            <span className="text-xs text-muted-foreground">
+              {state(cmd) ? <span className="font-semibold text-brand">{copyLabel(state(cmd))}</span> : what}
+            </span>
           </button>
         ))}
       </Card>
+      {live}
     </section>
   );
 }
@@ -442,8 +481,8 @@ export function SetupPage() {
           </Button>
         }
       >
-        comindly answers your coding agent's questions across every repository: what calls what, which services talk through which
-        routes and queues, what a change can break, and what the team recorded about the code.
+        comindly answers your coding agent's questions across every repository: what calls what, which services talk through which routes
+        and queues, what a change can break, and what the team recorded about the code.
       </PageHeader>
 
       <div className={cn("grid grid-cols-1 items-start gap-6", admin && "lg:grid-cols-[minmax(0,1fr)_340px]")}>

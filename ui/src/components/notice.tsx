@@ -10,7 +10,7 @@ export function Notice({ ok, message, className }: { ok: boolean; message: strin
   const [open, setOpen] = useState(false);
   const long = message.length > 240;
   return (
-    <div className={cn("flex items-start gap-1.5 text-xs", ok ? "text-muted-foreground" : "text-warning", className)}>
+    <div role={ok ? "status" : "alert"} className={cn("flex items-start gap-1.5 text-xs", ok ? "text-muted-foreground" : "text-warning", className)}>
       {ok ? <CheckCircle2 className="mt-px size-3.5 shrink-0 text-brand" /> : <AlertTriangle className="mt-px size-3.5 shrink-0" />}
       <div className={cn(wrap, "flex-1")}>
         <p className={cn(long && !open && "line-clamp-3")}>{sentence(message)}</p>

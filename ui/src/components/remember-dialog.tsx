@@ -18,7 +18,7 @@ const KINDS = [
 ] as const;
 type Kind = (typeof KINDS)[number][0];
 
-const area = "min-h-20 w-full rounded-md border border-input bg-card px-3 py-2 text-sm outline-none transition-[border-color,box-shadow] duration-100 hover:border-muted-foreground/50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/20 max-sm:text-base";
+const area = "min-h-20 w-full rounded-md border border-input bg-card px-3 py-2 text-sm transition-[border-color,box-shadow] duration-100 hover:border-muted-foreground/50 focus-visible:border-ring focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring max-sm:text-base";
 const label = "flex flex-col gap-1.5 text-sm font-semibold";
 
 /** Pick the symbols a record is about, by name. */
@@ -38,14 +38,27 @@ function SymbolPicker({ value, onChange }: { value: Node[]; onChange: (v: Node[]
           {value.map((n) => (
             <span key={n.id} className="flex items-center gap-1 rounded-sm bg-muted px-2 py-0.5 text-xs">
               <RepoDot repo={n.repo} /> {n.name}
-              <button aria-label="Remove" onClick={() => onChange(value.filter((x) => x.id !== n.id))}>
+              <button type="button" aria-label={`Remove ${n.name}`} onClick={() => onChange(value.filter((x) => x.id !== n.id))}>
                 <X className="size-3" />
               </button>
             </span>
           ))}
         </div>
       )}
-      <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search a function, class or file…" />
+      <Input
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter") return;
+          e.preventDefault();
+          const first = found.data?.find((n) => !chosen.has(n.id));
+          if (first && debounced.length > 1) (onChange([...value, first]), setQ(""));
+        }}
+        aria-label="Search a symbol this record is about"
+        autoComplete="off"
+        spellCheck={false}
+        placeholder="Search a function, class or file…"
+      />
       {debounced.length > 1 && (found.data?.length ?? 0) > 0 && (
         <div className="max-h-40 overflow-y-auto overscroll-contain rounded-md bg-muted/50">
           {found.data!
@@ -53,6 +66,7 @@ function SymbolPicker({ value, onChange }: { value: Node[]; onChange: (v: Node[]
             .slice(0, 8)
             .map((n) => (
               <button
+                type="button"
                 key={n.id}
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-muted"
                 onClick={() => (onChange([...value, n]), setQ(""))}
@@ -105,18 +119,40 @@ export function RememberDialog({ open, onOpenChange, about = [] }: { open: boole
   });
   const needsEvidence = kind === "attempt";
   const ready = title.trim() && on.length > 0 && (!needsEvidence || evidence.trim());
+  const written = [title, body, trigger, evidence, extra].some((v) => v.trim());
+  const [leaving, setLeaving] = useState(false);
+  useEffect(() => {
+    if (!open) setLeaving(false);
+  }, [open]);
+  const discard = () => {
+    for (const set of [setTitle, setBody, setTrigger, setEvidence, setExtra]) set("");
+    onOpenChange(false);
+  };
+  const close = () => (written ? setLeaving(true) : onOpenChange(false));
+  const hold = (e: Event) => {
+    if (!written) return;
+    e.preventDefault();
+    setLeaving(true);
+  };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="top-[8%] max-h-[84vh] overflow-y-auto p-5">
+    <Dialog open={open} onOpenChange={(o) => (o ? onOpenChange(o) : close())}>
+      <DialogContent className="top-[8%] max-h-[84vh] overflow-y-auto p-5" onEscapeKeyDown={hold} onInteractOutside={hold}>
         <DialogTitle className="text-[17px] font-semibold">Add to the ledger</DialogTitle>
         <p className="mt-1 text-sm text-muted-foreground">
           A short fact a future engineer or agent should know before changing this code. It carries your name (or a pseudonymous id) and is shown to agents.
         </p>
-        <div className="mt-4 flex flex-col gap-3">
+        <form
+          className="mt-4 flex flex-col gap-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (ready && !save.isPending) save.mutate();
+          }}
+        >
           <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
             {KINDS.map(([k, name, hint]) => (
               <button
+                type="button"
                 key={k}
                 title={hint}
                 onClick={() => setKind(k)}
@@ -137,7 +173,7 @@ export function RememberDialog({ open, onOpenChange, about = [] }: { open: boole
           </div>
           <label className={label}>
             Title
-            <Input value={title} maxLength={160} onChange={(e) => setTitle(e.target.value)} placeholder="One neutral, factual line" />
+            <Input value={title} maxLength={160} onChange={(e) => setTitle(e.target.value)} placeholder="One neutral, factual line…" />
           </label>
           <label className={label}>
             Details <span className="font-normal text-muted-foreground">optional</span>
@@ -146,37 +182,51 @@ export function RememberDialog({ open, onOpenChange, about = [] }: { open: boole
           {kind === "decision" && (
             <label className={label}>
               Alternatives considered
-              <Input value={extra} onChange={(e) => setExtra(e.target.value)} placeholder="What was rejected, and why" />
+              <Input value={extra} onChange={(e) => setExtra(e.target.value)} placeholder="What was rejected, and why…" />
             </label>
           )}
           {kind === "attempt" && (
             <label className={label}>
               Outcome
-              <Input value={extra} onChange={(e) => setExtra(e.target.value)} placeholder="reverted, failed in staging, too slow…" />
+              <Input value={extra} onChange={(e) => setExtra(e.target.value)} placeholder="Reverted, failed in staging, too slow…" />
             </label>
           )}
           <label className={label}>
             Relevant when <span className="font-normal text-muted-foreground">optional</span>
-            <Input value={trigger} onChange={(e) => setTrigger(e.target.value)} placeholder="e.g. adding caching to auth paths" />
+            <Input value={trigger} onChange={(e) => setTrigger(e.target.value)} placeholder="e.g. adding caching to auth paths…" />
           </label>
           <label className={label}>
             Evidence {!needsEvidence && <span className="font-normal text-muted-foreground">optional</span>}
             <Input
+              autoComplete="off"
+              spellCheck={false}
               value={evidence}
               onChange={(e) => setEvidence(e.target.value)}
               placeholder="commit:abc123, mr:!412, test:tests/test_x.py::test_y"
             />
           </label>
-          {save.error && <p className="text-xs text-danger [overflow-wrap:anywhere]">{sentence(save.error.message)}</p>}
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button variant="brand" disabled={!ready} loading={save.isPending} onClick={() => save.mutate()}>
-              <Plus /> Add
-            </Button>
-          </div>
-        </div>
+          {save.error && <p role="alert" className="text-xs text-danger [overflow-wrap:anywhere]">{sentence(save.error.message)}</p>}
+          {leaving ? (
+            <div role="group" aria-label="Discard this record?" className="flex flex-wrap items-center justify-end gap-2">
+              <span className="text-sm text-muted-foreground">Discard what you wrote?</span>
+              <Button type="button" variant="ghost" onClick={() => setLeaving(false)} autoFocus>
+                Keep writing
+              </Button>
+              <Button type="button" variant="outline" className="text-danger hover:text-danger" onClick={discard}>
+                Discard
+              </Button>
+            </div>
+          ) : (
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={close}>
+                Cancel
+              </Button>
+              <Button type="submit" variant="brand" disabled={!ready} loading={save.isPending}>
+                <Plus /> Add
+              </Button>
+            </div>
+          )}
+        </form>
       </DialogContent>
     </Dialog>
   );

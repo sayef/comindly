@@ -86,6 +86,7 @@ function ByEmail() {
         <Input
           type="email"
           autoComplete="email"
+          spellCheck={false}
           autoFocus
           value={email}
           onChange={(e) => setEmail(e.target.value)}
@@ -135,6 +136,7 @@ function ByCode() {
         <Input
           type="email"
           autoComplete="username"
+          spellCheck={false}
           autoFocus
           value={email}
           onChange={(e) => setEmail(e.target.value)}
@@ -146,6 +148,7 @@ function ByCode() {
         <Input
           type="password"
           autoComplete="current-password"
+          spellCheck={false}
           value={code}
           onChange={(e) => setCode(e.target.value)}
           placeholder="XXXX-XXXX-XXXX-XXXX-XXXX"
@@ -183,7 +186,7 @@ function AdminToken() {
     >
       <label className={field}>
         Admin token
-        <Input type="password" autoComplete="off" value={secret} onChange={(e) => setSecret(e.target.value)} />
+        <Input type="password" autoComplete="off" spellCheck={false} value={secret} onChange={(e) => setSecret(e.target.value)} />
       </label>
       <Button type="submit" variant="outline" size="sm" disabled={!secret.trim()} loading={redeem.isPending}>
         Sign in as admin

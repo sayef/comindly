@@ -1,7 +1,31 @@
 import { AlertTriangle, Check, ChevronDown, CircleSlash, Copy, Loader2, Sparkles, X } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { IndexEvent, JobStatus } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { cn, compact, usd } from "@/lib/utils";
+
+/** Copies text to the clipboard and remembers whether it worked; `live` announces the outcome. */
+export function useCopy() {
+  const [last, setLast] = useState<{ text: string; ok: boolean } | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const copy = async (text: string) => {
+    let ok = true;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      ok = false;
+    }
+    setLast({ text, ok });
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setLast(null), ok ? 1500 : 4000);
+  };
+  const state = (text: string) => (last?.text === text ? (last.ok ? "copied" : "failed") : null);
+  const live = (
+    <span role="status" className="sr-only">
+      {last ? (last.ok ? "Copied" : "Could not copy; select the text and copy it yourself") : ""}
+    </span>
+  );
+  return { copy, state, live };
+}
 
 const fmt = (n: number) => n.toLocaleString();
 const clock = (iso?: string | null) => (iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "");
@@ -48,6 +72,7 @@ type Step = {
 };
 
 type State = "done" | "running" | "warning" | "failed" | "stopped";
+const STATE_LABEL: Record<State, string> = { done: "done", running: "running", warning: "done with warnings", failed: "failed", stopped: "stopped" };
 
 /** Events grouped under the step they belong to. */
 function steps(events: IndexEvent[], finished: string | null) {
@@ -85,25 +110,25 @@ function Marker({ state }: { state: State }) {
   const base = "relative z-10 flex size-6 shrink-0 items-center justify-center rounded-full border bg-card [&_svg]:size-3.5";
   if (state === "running")
     return (
-      <span className={cn(base, "border-brand/50 text-brand")}>
+      <span aria-hidden className={cn(base, "border-brand/50 text-brand")}>
         <Loader2 className="animate-spin" />
       </span>
     );
   if (state === "failed")
     return (
-      <span className={cn(base, "border-danger/40 bg-danger/10 text-danger")}>
+      <span aria-hidden className={cn(base, "border-danger/40 bg-danger/10 text-danger")}>
         <X />
       </span>
     );
   if (state === "warning")
     return (
-      <span className={cn(base, "border-warning/40 bg-warning/10 text-warning")}>
+      <span aria-hidden className={cn(base, "border-warning/40 bg-warning/10 text-warning")}>
         <AlertTriangle />
       </span>
     );
   if (state === "stopped")
     return (
-      <span className={cn(base, "text-muted-foreground")}>
+      <span aria-hidden className={cn(base, "text-muted-foreground")}>
         <CircleSlash />
       </span>
     );
@@ -144,6 +169,7 @@ function Lines({ lines }: { lines: IndexEvent[] }) {
             isError(e) ? "bg-danger/8 text-danger" : isWarn(e) ? "bg-warning/8 text-warning" : e.kind === "done" ? "text-foreground" : "text-muted-foreground",
           )}
         >
+          {(isError(e) || isWarn(e)) && <span className="sr-only">{isError(e) ? "Error: " : "Warning: "}</span>}
           {isError(e) ? (
             <X className="mt-0.5 size-3.5 shrink-0" />
           ) : isWarn(e) ? (
@@ -172,18 +198,16 @@ function StepRow({ step, state, last }: { step: Step; state: State; last: boolea
   const [open, setOpen] = useState<boolean | null>(null);
   const expanded = open ?? (state === "running" || state === "failed" || state === "warning");
   const hasMore = step.lines.length > 0;
+  const Head = hasMore ? "button" : "div";
   const took = step.at && step.end ? duration(new Date(step.end).getTime() - new Date(step.at).getTime()) : state === "running" && step.at ? duration(Date.now() - new Date(step.at).getTime()) : "";
   return (
     <li className="relative flex gap-3 pb-4 last:pb-0">
       {!last && <span className="absolute top-6 bottom-0 left-3 w-px bg-border" />}
       <Marker state={state} />
       <div className="min-w-0 flex-1 pt-0.5">
-        <button
-          className={cn("flex w-full items-center gap-2 text-left", !hasMore && "cursor-default")}
-          onClick={() => hasMore && setOpen(!expanded)}
-          aria-expanded={hasMore ? expanded : undefined}
-        >
+        <Head className="flex w-full items-center gap-2 text-left" {...(hasMore ? { onClick: () => setOpen(!expanded), "aria-expanded": expanded } : {})}>
           <span className={cn("text-sm font-semibold", state === "stopped" && "text-muted-foreground")}>{step.title}</span>
+          <span className="sr-only">, {STATE_LABEL[state]}</span>
           {step.warnings > 0 && <span className="nums rounded-sm bg-warning/12 px-1.5 text-xs font-semibold text-warning">{step.warnings} warning{step.warnings > 1 && "s"}</span>}
           {step.errors > 0 && <span className="nums rounded-sm bg-danger/12 px-1.5 text-xs font-semibold text-danger">{step.errors} error{step.errors > 1 && "s"}</span>}
           {hasMore && !step.warnings && !step.errors && <span className="nums text-xs text-muted-foreground">{step.lines.length}</span>}
@@ -192,13 +216,13 @@ function StepRow({ step, state, last }: { step: Step; state: State; last: boolea
             {step.tokensIn > 0 && (
               <span className="hidden items-center gap-1 sm:flex" title={`${fmt(step.tokensIn)} tokens in, ${fmt(step.tokensOut)} out`}>
                 <Sparkles className="size-3" />
-                {step.usd < 0.01 ? "<$0.01" : `$${step.usd.toFixed(2)}`}
+                {usd(step.usd)}
               </span>
             )}
             <span className="nums">{took}</span>
             <span className="hidden md:inline">{clock(step.at)}</span>
           </span>
-        </button>
+        </Head>
         {state === "running" && step.progress && <Bar e={step.progress} />}
         {expanded && hasMore && <Lines lines={step.lines} />}
       </div>
@@ -232,12 +256,13 @@ export function IndexLog({
   summary?: boolean;
 }) {
   const [plain, setPlain] = useState(false);
+  const { copy, state: copyState, live } = useCopy();
   const state: JobStatus = status ?? (running ? "running" : "succeeded");
   const list = steps(events, finished ?? null);
   if (events.length === 0) return null;
   const warnings = list.reduce((n, s) => n + s.warnings, 0);
   const errors = list.reduce((n, s) => n + s.errors, 0);
-  const usd = list.reduce((n, s) => n + s.usd, 0);
+  const cost = list.reduce((n, s) => n + s.usd, 0);
   const tokens = list.reduce((n, s) => n + s.tokensIn + s.tokensOut, 0);
   const from = started ?? events[0]?.timestamp;
   const to = finished ?? (running ? new Date().toISOString() : events[events.length - 1]?.timestamp);
@@ -253,7 +278,7 @@ export function IndexLog({
           <Stat label="Duration" value={from && to ? duration(new Date(to).getTime() - new Date(from).getTime()) : "—"} />
           <Stat label="Steps" value={String(list.length)} />
           <Stat label="Issues" value={errors ? `${errors} error${errors > 1 ? "s" : ""}` : warnings ? `${warnings} warning${warnings > 1 ? "s" : ""}` : "None"} tone={errors ? "danger" : warnings ? "warning" : undefined} />
-          <Stat label="LLM" value={tokens ? `${usd < 0.01 ? "under $0.01" : `$${usd.toFixed(2)}`}, ${fmt(tokens)} tokens` : "Not used"} />
+          <Stat label="LLM" value={tokens ? `${usd(cost)}, ${compact(tokens)} tokens` : "Not used"} />
         </div>
       )}
 
@@ -272,10 +297,12 @@ export function IndexLog({
           {plain ? "Timeline" : "Plain log"}
         </button>
         {plain && (
-          <button className="flex items-center gap-1 hover:text-foreground" onClick={() => navigator.clipboard?.writeText(text)}>
-            <Copy className="size-3" /> Copy
+          <button className="flex items-center gap-1 hover:text-foreground" onClick={() => copy(text)}>
+            {copyState(text) === "copied" ? <Check className="size-3" /> : <Copy className="size-3" />}
+            {copyState(text) === "copied" ? "Copied" : copyState(text) === "failed" ? "Could not copy" : "Copy"}
           </button>
         )}
+        {live}
       </div>
     </div>
   );
