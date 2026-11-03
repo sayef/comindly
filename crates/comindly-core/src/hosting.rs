@@ -336,6 +336,44 @@ pub fn managed_path(data_dir: &std::path::Path, clone_url: &str) -> Result<std::
         .join(path))
 }
 
+/// A browser link to `path` at `line` in `commit` of the repository cloned from `remote`.
+pub fn file_link(remote: &str, commit: &str, path: &str, line: usize) -> Option<String> {
+    let (provider, base) = web_base(remote)?;
+    let path: String = path
+        .chars()
+        .map(|c| match c {
+            ' ' => "%20".to_string(),
+            '#' => "%23".to_string(),
+            '?' => "%3F".to_string(),
+            c => c.to_string(),
+        })
+        .collect();
+    Some(match provider {
+        Provider::GitLab => format!("{base}/-/blob/{commit}/{path}#L{line}"),
+        Provider::GitHub => format!("{base}/blob/{commit}/{path}#L{line}"),
+    })
+}
+
+/// A browser link to `commit` of the repository cloned from `remote`.
+pub fn commit_link(remote: &str, commit: &str) -> Option<String> {
+    let (provider, base) = web_base(remote)?;
+    Some(match provider {
+        Provider::GitLab => format!("{base}/-/commit/{commit}"),
+        Provider::GitHub => format!("{base}/commit/{commit}"),
+    })
+}
+
+/// The repository's web address, without any credentials the clone URL carries.
+fn web_base(remote: &str) -> Option<(Provider, String)> {
+    let s = parse(&crate::storage::without_userinfo(remote)).ok()?;
+    let path = match (&s.repo, s.provider) {
+        (Some(r), _) => format!("{}/{r}", s.owner),
+        (None, Provider::GitLab) => s.owner.clone(),
+        (None, Provider::GitHub) => return None,
+    };
+    Some((s.provider, format!("https://{}/{path}", s.host)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -398,6 +436,29 @@ mod tests {
             (r.name.as_str(), r.archived, r.fork),
             ("payments", true, false)
         );
+    }
+
+    #[test]
+    fn links_to_files_and_commits_without_credentials() {
+        assert_eq!(
+            file_link(
+                "https://oauth2:secret@gitlab.com/acme/team/orders.git",
+                "abc",
+                "src/a b.py",
+                7
+            )
+            .unwrap(),
+            "https://gitlab.com/acme/team/orders/-/blob/abc/src/a%20b.py#L7"
+        );
+        assert_eq!(
+            commit_link("git@github.com:acme/orders.git", "abc").unwrap(),
+            "https://github.com/acme/orders/commit/abc"
+        );
+        assert_eq!(
+            commit_link("https://git.example.com/acme/orders", "abc").unwrap(),
+            "https://git.example.com/acme/orders/-/commit/abc"
+        );
+        assert_eq!(commit_link("https://github.com/acme", "abc"), None);
     }
 
     #[test]

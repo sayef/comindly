@@ -1,6 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ShieldCheck } from "lucide-react";
 import { useState } from "react";
+import { ConfirmButton } from "@/components/confirm";
 import { Outcome } from "@/components/notice";
 import { Reveal } from "@/components/reveal";
 import { Badge } from "@/components/ui/badge";
@@ -9,11 +10,39 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { api, type Role, type SecretState } from "@/lib/api";
-import { Section } from "@/pages/settings";
+import { date } from "@/lib/utils";
+import { PageHeader } from "@/components/page-header";
+import { Section, SettingsTabs } from "@/pages/settings";
 import { Code } from "@/pages/setup";
 
-const select = "h-9 rounded-md border bg-card px-2 text-sm";
-const day = (t?: string | null) => (t ? t.slice(0, 10) : "—");
+const select = "h-9 rounded-md border border-input bg-card px-2 text-sm transition-colors duration-100 hover:border-muted-foreground/50";
+const ROLES: Record<Role, string> = { viewer: "Viewer", member: "Member", admin: "Admin" };
+
+/** A member's role, changed only after a second, explicit step. */
+function RoleSelect({ email, role, pending, onChange }: { email: string; role: Role; pending: boolean; onChange: (r: Role) => void }) {
+  const [next, setNext] = useState<Role | null>(null);
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <select className={select} value={next ?? role} aria-label={`Role of ${email}`} onChange={(e) => setNext(e.target.value === role ? null : (e.target.value as Role))}>
+        {(Object.keys(ROLES) as Role[]).map((r) => (
+          <option key={r} value={r}>
+            {ROLES[r]}
+          </option>
+        ))}
+      </select>
+      {next && (
+        <span role="group" aria-label={`Change role of ${email}`} className="inline-flex items-center gap-1">
+          <Button size="sm" variant="ghost" onClick={() => setNext(null)}>
+            Cancel
+          </Button>
+          <Button size="sm" variant="outline" loading={pending} onClick={() => (onChange(next), setNext(null))}>
+            Make {ROLES[next].toLowerCase()}
+          </Button>
+        </span>
+      )}
+    </div>
+  );
+}
 
 export function MembersPage() {
   const qc = useQueryClient();
@@ -43,11 +72,13 @@ export function MembersPage() {
     mutationFn: (e: string) => api.revokeInvite(e),
     onSuccess: refresh,
   });
-  if (!list.data) return <Skeleton className="h-96 rounded-xl" />;
+  if (!list.data) return <Skeleton className="h-96 rounded-lg" />;
   const codes = list.data.sign_in === "code";
 
   return (
-    <div className="flex max-w-4xl flex-col gap-5">
+    <div className="flex max-w-5xl flex-col gap-4">
+      <PageHeader title="Members">Who can sign in here and what each person may do: admins change settings, members add to the ledger and conventions, viewers read.</PageHeader>
+      <SettingsTabs />
       <Section
         title="Invite someone"
         description={
@@ -65,12 +96,15 @@ export function MembersPage() {
         >
           <Input
             type="email"
+            aria-label="Email address to invite"
+            autoComplete="off"
+            spellCheck={false}
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="colleague@company.com"
             className="min-w-56 flex-1"
           />
-          <select className={select} value={role} onChange={(e) => setRole(e.target.value as Role)}>
+          <select className={select} value={role} aria-label="Role" onChange={(e) => setRole(e.target.value as Role)}>
             <option value="viewer">Viewer</option>
             <option value="member">Member</option>
             <option value="admin">Admin</option>
@@ -93,7 +127,7 @@ export function MembersPage() {
       </Section>
 
       <Section
-        title="Members"
+        title="People"
         description="Admins named by the deployment are always admins; change anyone else's role here."
       >
         <Table>
@@ -116,37 +150,44 @@ export function MembersPage() {
                     <Badge variant="outline" title="Set by the deployment (COMINDLY_ADMIN_EMAILS)">
                       <ShieldCheck className="size-3" /> Admin
                     </Badge>
+                  ) : m.email === me.data?.email || !me.data ? (
+                    <span>{ROLES[m.role]}</span>
                   ) : (
-                    <select className={select} value={m.role} onChange={(e) => change.mutate({ e: m.email, r: e.target.value as Role })}>
-                      <option value="viewer">Viewer</option>
-                      <option value="member">Member</option>
-                      <option value="admin">Admin</option>
-                    </select>
+                    <RoleSelect
+                      key={m.role}
+                      email={m.email}
+                      role={m.role}
+                      pending={change.isPending && change.variables?.e === m.email}
+                      onChange={(r) => change.mutate({ e: m.email, r })}
+                    />
                   )}
                 </Td>
-                <Td className="align-middle text-muted-foreground">{day(m.last_seen)}</Td>
+                <Td className="align-middle text-muted-foreground">{date(m.last_seen)}</Td>
                 <Td className="align-middle text-right">
                   <div className="flex justify-end gap-1">
-                    {codes && m.email !== me.data?.email && (
-                      <Button
+                    {codes && me.data && m.email !== me.data.email && (
+                      <ConfirmButton
                         variant="ghost"
                         size="sm"
-                        onClick={() =>
-                          confirm(`Give ${m.email} a new sign-in code? Their current code and sessions stop working.`) &&
-                          reset.mutate(m.email)
-                        }
+                        question={`Give ${m.email} a new code? Their current code and sessions stop working.`}
+                        confirmLabel="Reset code"
+                        loading={reset.isPending && reset.variables === m.email}
+                        onConfirm={() => reset.mutate(m.email)}
                       >
                         Reset code
-                      </Button>
+                      </ConfirmButton>
                     )}
-                    {!m.fixed && m.email !== me.data?.email && (
-                      <Button
+                    {!m.fixed && me.data && m.email !== me.data.email && (
+                      <ConfirmButton
                         variant="ghost"
                         size="sm"
-                        onClick={() => confirm(`Remove ${m.email}? Their sessions and tokens stop working.`) && remove.mutate(m.email)}
+                        question={`Remove ${m.email}? Their sessions and tokens stop working.`}
+                        confirmLabel="Remove"
+                        loading={remove.isPending && remove.variables === m.email}
+                        onConfirm={() => remove.mutate(m.email)}
                       >
                         Remove
-                      </Button>
+                      </ConfirmButton>
                     )}
                   </div>
                 </Td>
@@ -154,7 +195,7 @@ export function MembersPage() {
             ))}
           </tbody>
         </Table>
-        <Outcome error={change.error ?? remove.error ?? reset.error} />
+        <Outcome error={change.error ?? remove.error ?? reset.error ?? revoke.error} />
         {reset.data?.code && (
           <Reveal
             label={`New sign-in code for ${reset.variables}`}
@@ -173,12 +214,19 @@ export function MembersPage() {
                   <Td className="align-middle font-medium">{i.email}</Td>
                   <Td className="align-middle capitalize">{i.role}</Td>
                   <Td className="align-middle text-muted-foreground">
-                    by {i.created_by}, until {day(i.expires)}
+                    by {i.created_by}, until {date(i.expires)}
                   </Td>
                   <Td className="align-middle text-right">
-                    <Button variant="ghost" size="sm" onClick={() => revoke.mutate(i.email)}>
+                    <ConfirmButton
+                      variant="ghost"
+                      size="sm"
+                      question={`Withdraw the invitation for ${i.email}?`}
+                      confirmLabel="Withdraw"
+                      loading={revoke.isPending && revoke.variables === i.email}
+                      onConfirm={() => revoke.mutate(i.email)}
+                    >
                       Withdraw
-                    </Button>
+                    </ConfirmButton>
                   </Td>
                 </Tr>
               ))}
@@ -198,20 +246,21 @@ function SecretRow({ s, canStore }: { s: SecretState; canStore: boolean }) {
     meta: { inline: true },
     onSuccess: () => (setValue(""), qc.invalidateQueries({ queryKey: ["secrets"] })),
   });
+  const removing = save.isPending && save.variables === "";
   return (
     <div className="flex flex-col gap-2 border-b py-3 last:border-0">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm font-medium">{s.label}</span>
+        <span className="text-sm font-semibold">{s.label}</span>
         {s.source === "deployment" && <Badge variant="outline">From the deployment</Badge>}
         {s.source === "stored" && (
-          <Badge variant="outline" className="font-mono">
-            {s.hint}
+          <Badge variant="outline">
+            <span className="font-mono">{s.hint}</span>
           </Badge>
         )}
         {s.source === "none" && <span className="text-xs text-muted-foreground">Not set</span>}
         {s.source === "stored" && (
           <span className="text-xs text-muted-foreground">
-            by {s.updated_by}, {day(s.updated)}
+            by {s.updated_by}, {date(s.updated)}
           </span>
         )}
       </div>
@@ -226,18 +275,28 @@ function SecretRow({ s, canStore }: { s: SecretState; canStore: boolean }) {
           <Input
             type="password"
             autoComplete="off"
+            spellCheck={false}
+            aria-label={s.label}
             value={value}
             onChange={(e) => setValue(e.target.value)}
-            placeholder={s.source === "stored" ? "Replace with a new value" : "Paste the token or key"}
+            placeholder={s.source === "stored" ? "Replace with a new value…" : "Paste the token or key…"}
             className="flex-1"
           />
-          <Button type="submit" variant="outline" size="sm" disabled={!value.trim()} loading={save.isPending && !!value}>
+          <Button type="submit" variant="outline" size="sm" disabled={!value.trim()} loading={save.isPending && !removing}>
             Save
           </Button>
           {s.source === "stored" && (
-            <Button type="button" variant="ghost" size="sm" onClick={() => save.mutate("")}>
+            <ConfirmButton
+              type="button"
+              variant="ghost"
+              size="sm"
+              question={`Remove the stored value for ${s.label}? The server stops using it.`}
+              confirmLabel="Remove"
+              loading={removing}
+              onConfirm={() => save.mutate("")}
+            >
               Remove
-            </Button>
+            </ConfirmButton>
           )}
         </form>
       )}
@@ -250,7 +309,7 @@ export function IntegrationsPage() {
   const list = useQuery({ queryKey: ["secrets"], queryFn: api.secrets });
   const [host, setHost] = useState("");
   const [extra, setExtra] = useState<string[]>([]);
-  if (!list.data) return <Skeleton className="h-96 rounded-xl" />;
+  if (!list.data) return <Skeleton className="h-96 rounded-lg" />;
   const names = new Set(list.data.secrets.map((s) => s.name));
   const rows = [
     ...list.data.secrets,
@@ -264,7 +323,9 @@ export function IntegrationsPage() {
   ];
 
   return (
-    <div className="flex max-w-3xl flex-col gap-5">
+    <div className="flex max-w-5xl flex-col gap-4">
+      <PageHeader title="Integrations">Tokens and keys the server uses to clone repositories and call the LLM. Values are encrypted and never shown again.</PageHeader>
+      <SettingsTabs />
       <Section
         title="Tokens and keys"
         description="What the server uses to list and clone repositories and to call the LLM. Values never come back to the browser. Ones the deployment provides win and are changed where it keeps its secrets."
@@ -294,6 +355,9 @@ export function IntegrationsPage() {
             }}
           >
             <Input
+              aria-label="Git host"
+              autoComplete="off"
+              spellCheck={false}
               value={host}
               onChange={(e) => setHost(e.target.value)}
               placeholder="Another host, e.g. gitlab.company.com"
@@ -330,24 +394,28 @@ export function AccessPage() {
     mutationFn: (id: string) => api.revokeToken(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["tokens"] }),
   });
-  if (!list.data) return <Skeleton className="h-64 rounded-xl" />;
+  if (!list.data) return <Skeleton className="h-64 rounded-lg" />;
 
   return (
-    <div className="flex max-w-3xl flex-col gap-5">
+    <div className="flex max-w-5xl flex-col gap-4">
+      <PageHeader title="Your access">How you sign in, and the personal access tokens your agents and command line use.</PageHeader>
+      <SettingsTabs />
       {me.data?.sign_in === "code" && (
         <Section
           title="Your sign-in code"
           description="You sign in with your email address and this code. A new one replaces it and signs you out everywhere else."
         >
           <div>
-            <Button
+            <ConfirmButton
               variant="outline"
               size="sm"
               loading={newCode.isPending}
-              onClick={() => confirm("Make a new sign-in code? The current one stops working.") && newCode.mutate()}
+              question="Make a new sign-in code? The current one stops working."
+              confirmLabel="Make a new code"
+              onConfirm={() => newCode.mutate()}
             >
               Make a new sign-in code
-            </Button>
+            </ConfirmButton>
           </div>
           <Outcome error={newCode.error} />
           {newCode.data?.code && (
@@ -360,17 +428,19 @@ export function AccessPage() {
         description="Agents and scripts use comindly as you with a token, sent as Authorization: Bearer …. They stop working if you are removed from the team."
       >
         <form
-          className="flex gap-2"
+          className="flex flex-wrap gap-2"
           onSubmit={(e) => {
             e.preventDefault();
             if (name.trim()) create.mutate();
           }}
         >
           <Input
+            aria-label="Token name"
+            autoComplete="off"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Name, e.g. Claude Code on my laptop"
-            className="flex-1"
+            placeholder="Name, e.g. Claude Code on my laptop…"
+            className="min-w-48 flex-1 basis-60"
           />
           <select className={select} value={days} onChange={(e) => setDays(e.target.value)} aria-label="Expires">
             <option value="30">30 days</option>
@@ -382,7 +452,7 @@ export function AccessPage() {
             Create token
           </Button>
         </form>
-        <Outcome error={create.error} />
+        <Outcome error={create.error ?? revoke.error} />
         {create.data?.token && <Reveal label="Your new token" value={create.data.token} hint="Copy it now; it is not shown again." />}
         <Connect url={me.data?.public_url ?? window.location.origin} token={create.data?.token} />
         {list.data.tokens.length > 0 && (
@@ -400,15 +470,22 @@ export function AccessPage() {
               {list.data.tokens.map((t) => (
                 <Tr key={t.id}>
                   <Td className="align-middle font-medium">{t.name}</Td>
-                  <Td className="align-middle text-muted-foreground">{day(t.created)}</Td>
-                  <Td className="align-middle text-muted-foreground">{day(t.last_used)}</Td>
+                  <Td className="align-middle text-muted-foreground">{date(t.created)}</Td>
+                  <Td className="align-middle text-muted-foreground">{date(t.last_used)}</Td>
                   <Td className="align-middle text-muted-foreground">
-                    {t.expired ? <Badge variant="outline">Expired</Badge> : t.expires ? day(t.expires) : "Never"}
+                    {t.expired ? <Badge variant="outline">Expired</Badge> : t.expires ? date(t.expires) : "Never"}
                   </Td>
                   <Td className="align-middle text-right">
-                    <Button variant="ghost" size="sm" onClick={() => revoke.mutate(t.id)}>
+                    <ConfirmButton
+                      variant="ghost"
+                      size="sm"
+                      question={`Revoke ${t.name}? Agents using it lose access.`}
+                      confirmLabel="Revoke"
+                      loading={revoke.isPending && revoke.variables === t.id}
+                      onConfirm={() => revoke.mutate(t.id)}
+                    >
                       Revoke
-                    </Button>
+                    </ConfirmButton>
                   </Td>
                 </Tr>
               ))}
@@ -428,13 +505,15 @@ export function AuditPage() {
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.next,
   });
-  if (!log.data) return <Skeleton className="h-96 rounded-xl" />;
+  if (!log.data) return <Skeleton className="h-96 rounded-lg" />;
   const entries = log.data.pages.flatMap((p) => p.entries);
   const when = (t: string) => (t ? new Date(t).toLocaleString() : "—");
 
   return (
-    <div className="flex max-w-4xl flex-col gap-5">
-      <Section title="Audit log" description="Sign-ins, invitations, role changes, tokens, secrets and repositories. Token values and codes are never recorded.">
+    <div className="flex max-w-5xl flex-col gap-4">
+      <PageHeader title="Audit log">Who changed what on this server, newest first.</PageHeader>
+      <SettingsTabs />
+      <Section title="Events" description="Sign-ins, invitations, role changes, tokens, secrets and repositories. Token values and codes are never recorded.">
         {entries.length === 0 ? (
           <p className="text-sm text-muted-foreground">Nothing recorded yet.</p>
         ) : (
@@ -500,9 +579,9 @@ function Connect({ url, token }: { url: string; token?: string }) {
   return (
     <div className="flex flex-col gap-2 border-t pt-3">
       <div className="text-sm font-medium">Connect an agent</div>
-      <div className="flex flex-wrap gap-1">
+      <div role="group" aria-label="Agent" className="flex flex-wrap gap-1">
         {(Object.keys(AGENTS) as (keyof typeof AGENTS)[]).map((a) => (
-          <Button key={a} variant={a === agent ? "outline" : "ghost"} size="sm" onClick={() => setAgent(a)}>
+          <Button key={a} variant={a === agent ? "outline" : "ghost"} size="sm" aria-pressed={a === agent} onClick={() => setAgent(a)}>
             {AGENTS[a]}
           </Button>
         ))}

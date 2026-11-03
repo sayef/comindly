@@ -80,7 +80,9 @@ pub(super) async fn test(Json(p): Json<api::IndexDirRequest>) -> Reply<api::Done
     let root = crate::config::expand_tilde(p.index_dir.trim());
     let graph = format!("{}/_graph", root.trim_end_matches('/'));
     let message = match crate::index::graph_versions(&graph).await {
-        Ok(v) if !v.is_empty() => format!("index found: {} version(s)", v.len()),
+        Ok(v) if !v.is_empty() => {
+            format!("index found: {}", crate::doctor::plural(v.len(), "version"))
+        }
         Ok(_) | Err(_) if !root.contains("://") && !std::path::Path::new(&root).exists() => {
             "empty location: an index will be created here when you index repositories".into()
         }

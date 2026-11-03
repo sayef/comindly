@@ -15,7 +15,7 @@ export function DevicePage() {
     <Shell>
       <div className="flex items-center gap-2">
         <Terminal className="size-4 text-muted-foreground" />
-        <h1 className="text-base font-semibold">Sign in a command line</h1>
+        <h1 className="text-[17px] font-semibold">Sign in a command line</h1>
       </div>
       {answer.isSuccess ? (
         <div className="mt-4">

@@ -5,8 +5,8 @@
   --line: rgba(242, 242, 242, 0.08);
   --text: #f2f2f2;
   --muted: rgba(242, 242, 242, 0.66);
-  --accent: #8be3c9;
-  --highlight: #c2f1e3;
+  --accent: #8db4ea;
+  --highlight: #c9d7ea;
   --mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
   background: var(--night);
@@ -245,7 +245,7 @@ body:has(.cm-home) .md-footer {
   position: absolute;
   inset: 10% 5% -6%;
   z-index: -1;
-  background: radial-gradient(closest-side, rgba(139, 227, 201, 0.22), rgba(194, 241, 227, 0.08) 60%, transparent);
+  background: radial-gradient(closest-side, rgba(141, 180, 234, 0.22), rgba(201, 215, 234, 0.08) 60%, transparent);
   filter: blur(40px);
 }
 
@@ -497,8 +497,8 @@ body:has(.cm-home) .md-footer {
   position: absolute;
   inset: 20% -10% -40%;
   background:
-    radial-gradient(ellipse 35% 50% at 30% 70%, rgba(139, 227, 201, 0.2), transparent),
-    radial-gradient(ellipse 35% 50% at 70% 70%, rgba(194, 241, 227, 0.14), transparent);
+    radial-gradient(ellipse 35% 50% at 30% 70%, rgba(141, 180, 234, 0.2), transparent),
+    radial-gradient(ellipse 35% 50% at 70% 70%, rgba(201, 215, 234, 0.14), transparent);
   filter: blur(30px);
 }
 

@@ -420,7 +420,7 @@ enum Cmd {
 
 #[derive(Subcommand)]
 enum TeamWhat {
-    /// Set team settings, KEY=VALUE: name, llm_model, llm_base_url, embed_model, embed, enrich, flows, guide, max_enrich, max_flows, llm_concurrency, llm_price_in, llm_price_out, format, scip, auto_index, auto_index_llm (empty removes)
+    /// Set team settings, KEY=VALUE: name, llm_model, llm_base_url, embed_model, embed, enrich, flows, guide, max_enrich, max_flows, llm_concurrency, llm_price_in, llm_price_out, format, scip, auto_index, auto_index_llm, auto_index_minutes (empty removes)
     Set {
         #[arg(required = true, value_name = "KEY=VALUE")]
         pairs: Vec<String>,
@@ -1438,7 +1438,7 @@ fn cmd_ledger(from: Option<&str>, inbox: bool, check: bool, compact: bool) -> Ex
         return match comindly::ledger::compact_blocking(&cfg.index_dir(from)) {
             Ok((added, removed)) => {
                 comindly::ui::ok(&format!(
-                    "ledger compacted: {added} added, {removed} erased record(s) dropped"
+                    "ledger compacted: {added} added, {removed} erased dropped"
                 ));
                 ExitCode::SUCCESS
             }
@@ -1515,11 +1515,16 @@ fn cmd_erase(ids: &[String], actor: Option<&str>, yes: bool, from: Option<&str>)
                 println!("- {} `{}` ({})", r.kind.as_str(), r.title, r.id);
             }
             if yes {
-                comindly::ui::ok(&format!("erased {} record(s)", gone.len()));
+                comindly::ui::ok(&format!(
+                    "erased {} record{}",
+                    gone.len(),
+                    if gone.len() == 1 { "" } else { "s" }
+                ));
             } else {
                 comindly::ui::ok(&format!(
-                    "{} record(s) would be erased; re-run with --yes",
-                    gone.len()
+                    "{} record{} would be erased; re-run with --yes",
+                    gone.len(),
+                    if gone.len() == 1 { "" } else { "s" }
                 ));
             }
             ExitCode::SUCCESS
@@ -1873,6 +1878,15 @@ fn team_run(what: Option<TeamWhat>, root: &str) -> anyhow::Result<()> {
                     }
                     "auto_index" => s.auto_index = flag()?,
                     "auto_index_llm" => s.auto_index_llm = flag()?,
+                    "auto_index_minutes" => {
+                        s.auto_index_minutes = number(k, v)?;
+                        anyhow::ensure!(
+                            s.auto_index_minutes.is_none_or(|n| {
+                                (1..=comindly::context::MAX_AUTO_INDEX_MINUTES).contains(&n)
+                            }),
+                            "auto_index_minutes is between 1 and 1440"
+                        );
+                    }
                     other => anyhow::bail!("unknown team setting `{other}`"),
                 }
             }

@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Check, CircleSlash, Clock, Copy, Loader2, X } from "lucide-react";
-import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
-import { duration, IndexLog, shortStatus } from "@/components/index-log";
+import { AlertTriangle, Check, CircleSlash, Clock, Copy, FolderGit2, Loader2, X } from "lucide-react";
+import { Link, useParams, useSearchParams } from "react-router";
+import { ConfirmButton } from "@/components/confirm";
+import { duration, IndexLog, shortStatus, useCopy } from "@/components/index-log";
+import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -35,6 +36,15 @@ const STATUS: Record<JobStatus, { label: string; badge: "brand" | "warning" | "d
 };
 
 function StatusIcon({ status, className }: { status: JobStatus; className?: string }) {
+  return (
+    <>
+      <StatusGlyph status={status} className={className} />
+      <span className="sr-only">{STATUS[status].label}: </span>
+    </>
+  );
+}
+
+function StatusGlyph({ status, className }: { status: JobStatus; className?: string }) {
   const c = cn("size-4 shrink-0", className);
   if (status === "running") return <Loader2 className={cn(c, "animate-spin text-brand")} />;
   if (status === "queued") return <Clock className={cn(c, "text-muted-foreground")} />;
@@ -50,7 +60,8 @@ function took(j: JobRow): string {
   return duration(end - new Date(j.started).getTime());
 }
 
-type Filter = "all" | "running" | "queued" | "succeeded" | "failed";
+const FILTERS = ["all", "running", "queued", "succeeded", "failed"] as const;
+type Filter = (typeof FILTERS)[number];
 const failedLike = (s: JobStatus) => s === "failed" || s === "interrupted";
 const matches = (f: Filter, s: JobStatus) => f === "all" || (f === "failed" ? failedLike(s) : s === f);
 
@@ -85,15 +96,15 @@ function Tile({
       onClick={onClick}
       aria-pressed={on}
       className={cn(
-        "flex min-w-0 flex-col gap-2 rounded-[10px] border bg-card px-4 py-3.5 text-left transition-colors hover:border-input",
-        on && "border-brand/60 bg-accent/40 hover:border-brand/60",
+        "flex min-w-0 flex-col gap-1.5 rounded-lg border bg-card px-4 py-3.5 text-left transition-colors duration-100 hover:border-input",
+        on && "border-brand/60 bg-accent hover:border-brand/60",
       )}
     >
       <span className="flex items-center justify-between gap-2">
-        <span className="eyebrow">{label}</span>
+        <span className="text-sm font-semibold">{label}</span>
         {icon}
       </span>
-      <span className={cn("nums text-2xl font-semibold tracking-[-0.03em]", value > 0 && tone === "danger" && "text-danger", value > 0 && tone === "brand" && "text-brand")}>{value}</span>
+      <span className={cn("nums text-[26px] font-semibold tracking-[-0.02em]", value > 0 && tone === "danger" && "text-danger", value > 0 && tone === "brand" && "text-brand")}>{value}</span>
       <span className="truncate text-xs text-muted-foreground">{note}</span>
     </button>
   );
@@ -104,8 +115,10 @@ export function ActivityPage() {
   const { id } = useParams();
   const { me } = useAccess();
   const who = (j: JobRow) => j.started_by ?? (me?.mode === "server" ? "automatic" : "this machine");
-  const navigate = useNavigate();
-  const [filter, setFilter] = useState<Filter>("all");
+  const [params, setParams] = useSearchParams();
+  const filter: Filter = FILTERS.find((f) => f === params.get("status")) ?? "all";
+  const setFilter = (f: Filter) => setParams(f === "all" ? {} : { status: f }, { replace: true });
+  const search = params.toString() ? `?${params}` : "";
   const jobs = useQuery({
     queryKey: ["jobs"],
     queryFn: api.jobs,
@@ -118,7 +131,7 @@ export function ActivityPage() {
   const count = (f: Filter) => all.filter((j) => matches(f, j.status)).length;
   const lastOk = all.find((j) => j.status === "succeeded");
   const lastBad = all.find((j) => failedLike(j.status));
-  const toggle = (f: Filter) => setFilter((was) => (was === f ? "all" : f));
+  const toggle = (f: Filter) => setFilter(filter === f ? "all" : f);
   const sections: [string, JobRow[]][] = [];
   for (const j of shown) {
     const name = section(j);
@@ -128,27 +141,24 @@ export function ActivityPage() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-[28px] font-semibold tracking-[-0.035em]">Activity</h1>
-        <p className="mt-1.5 text-sm text-muted-foreground">
-          What comindly works on in the background: what waits in the queue, what runs now and how each run went, step by step.
-        </p>
-      </div>
+    <div className="flex flex-col gap-5">
+      <PageHeader title="Activity">
+        What comindly works on in the background: what waits in the queue, what runs now and how each run went, step by step.
+      </PageHeader>
 
       {jobs.isLoading ? (
         <Skeleton className="h-96" />
       ) : all.length === 0 ? (
-        <Card className="flex flex-col items-center gap-3 px-6 py-14 text-center">
-          <Clock className="size-6 text-muted-foreground" />
-          <p className="text-sm font-medium">No activity yet</p>
-          <p className="max-w-sm text-sm text-muted-foreground">
-            Each indexing run shows up here with its steps, warnings and cost. Start one from{" "}
-            <Link to="/settings/repositories" className="underline underline-offset-2">
-              Settings → Repositories
-            </Link>
-            .
+        <Card className="flex flex-col items-start gap-2 px-5 py-8">
+          <p className="font-semibold">No activity yet</p>
+          <p className="max-w-[68ch] text-muted-foreground">
+            Each indexing run shows up here with its steps, warnings and cost. Start one from the repositories in the settings.
           </p>
+          <Button variant="outline" className="mt-2" asChild>
+            <Link to="/settings/repositories">
+              <FolderGit2 /> Open repositories
+            </Link>
+          </Button>
         </Card>
       ) : (
         <>
@@ -194,47 +204,48 @@ export function ActivityPage() {
               <div className="max-h-[70vh] overflow-y-auto">
                 {sections.map(([name, rows]) => (
                   <section key={name}>
-                    <h3 className="eyebrow sticky top-0 z-10 flex items-center justify-between border-b bg-card/95 px-4 py-2 backdrop-blur">
+                    <h3 className="eyebrow sticky top-0 z-10 flex items-center justify-between border-b bg-card px-4 py-2">
                       {name}
                       <span className="nums">{rows.length}</span>
                     </h3>
                     <ul>
                       {rows.map((j) => (
                         <li key={j.id}>
-                          <button
-                            onClick={() => navigate(`/activity/${j.id}`)}
+                          <Link
+                            to={`/activity/${j.id}${search}`}
+                            aria-current={j.id === selected ? "page" : undefined}
                             className={cn(
-                              "flex w-full items-start gap-3 border-b px-4 py-3 text-left transition-colors hover:bg-muted/50",
-                              j.id === selected && "bg-accent/50 hover:bg-accent/60",
+                              "flex w-full items-start gap-3 border-b px-4 py-3 text-left transition-colors duration-100 hover:bg-muted/60",
+                              j.id === selected && "bg-accent hover:bg-accent",
                             )}
                           >
                             <StatusIcon status={j.status} className="mt-0.5" />
                             <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                              <span className="flex items-center gap-2 text-[13.5px] font-medium">
+                              <span className="flex items-center gap-2 text-sm font-medium">
                                 {kind(j.kind)}
-                                {j.status === "queued" && j.position != null && <span className="font-mono text-[10.5px] text-muted-foreground">#{j.position} in queue</span>}
+                                {j.status === "queued" && j.position != null && <span className="nums text-xs font-normal text-muted-foreground">number {j.position} in the queue</span>}
                               </span>
                               <span className="truncate text-xs text-muted-foreground">
-                                {new Date(j.created).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · {who(j)}
+                                {new Date(j.created).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}, by {who(j)}
                               </span>
                             </span>
-                            <span className="nums shrink-0 pt-0.5 font-mono text-[11px] text-muted-foreground">{took(j)}</span>
-                          </button>
+                            <span className="nums shrink-0 pt-0.5 text-xs text-muted-foreground">{took(j)}</span>
+                          </Link>
                         </li>
                       ))}
                     </ul>
                   </section>
                 ))}
                 {shown.length === 0 && (
-                  <p className="px-4 py-6 text-center text-sm text-muted-foreground">
-                    Nothing here.{" "}
-                    <button className="underline underline-offset-2" onClick={() => setFilter("all")}>
+                  <p className="px-4 py-6 text-muted-foreground">
+                    No run matches this filter.{" "}
+                    <button className="font-semibold text-brand hover:underline" onClick={() => setFilter("all")}>
                       Show everything
                     </button>
                   </p>
                 )}
               </div>
-              <p className="border-t px-4 py-2 text-[11px] text-muted-foreground">The last 50 runs are kept.</p>
+              <p className="border-t px-4 py-2 text-xs text-muted-foreground">The last 50 runs are kept.</p>
             </Card>
             {selected && <Detail id={selected} who={who} />}
           </div>
@@ -247,6 +258,7 @@ export function ActivityPage() {
 function Detail({ id, who }: { id: string; who: (j: JobRow) => string }) {
   const qc = useQueryClient();
   const { admin } = useAccess();
+  const { copy, state: copied, live } = useCopy();
   const job = useQuery({
     queryKey: ["job", id],
     queryFn: () => api.job(id),
@@ -269,7 +281,7 @@ function Detail({ id, who }: { id: string; who: (j: JobRow) => string }) {
       <div className="flex flex-wrap items-start justify-between gap-3 border-b px-5 py-4">
         <div className="flex min-w-0 flex-col gap-1.5">
           <div className="flex items-center gap-2.5">
-            <h2 className="text-lg font-semibold tracking-[-0.02em]">{kind(j.kind)}</h2>
+            <h2 className="text-[17px] font-semibold tracking-[-0.02em]">{kind(j.kind)}</h2>
             <Badge variant={STATUS[j.status].badge}>{STATUS[j.status].label}</Badge>
             {j.status === "queued" && position != null && <span className="text-xs text-muted-foreground">position {position}</span>}
           </div>
@@ -279,23 +291,37 @@ function Detail({ id, who }: { id: string; who: (j: JobRow) => string }) {
             {j.finished && <Meta label="Took">{took(j)}</Meta>}
             {j.request_id && (
               <Meta label="Request">
-                <button className="flex items-center gap-1 font-mono hover:text-foreground" title="Copy the request id, to find this run in the server's logs" onClick={() => navigator.clipboard?.writeText(j.request_id!)}>
+                <button
+                  className="flex items-center gap-1 font-mono hover:text-foreground"
+                  title="Copy the request id, to find this run in the server's logs"
+                  aria-label={`Copy request id ${j.request_id}`}
+                  onClick={() => copy(j.request_id!)}
+                >
                   {j.request_id.slice(0, 12)}
-                  <Copy className="size-3" />
+                  {copied(j.request_id) === "copied" ? <Check className="size-3" /> : <Copy className="size-3" />}
+                  {copied(j.request_id) === "failed" && <span className="font-sans">Could not copy</span>}
                 </button>
+                {live}
               </Meta>
             )}
           </dl>
         </div>
         {admin && active(j.status) && (
-          <Button variant="outline" size="sm" loading={cancel.isPending} onClick={() => cancel.mutate()}>
-            {j.status === "queued" ? "Remove from queue" : "Cancel"}
-          </Button>
+          <ConfirmButton
+            variant="outline"
+            size="sm"
+            loading={cancel.isPending}
+            question={j.status === "queued" ? "Take this run off the queue?" : "Stop this run? What it indexed so far is discarded."}
+            confirmLabel={j.status === "queued" ? "Remove" : "Stop run"}
+            onConfirm={() => cancel.mutate()}
+          >
+            {j.status === "queued" ? "Remove from queue" : "Stop"}
+          </ConfirmButton>
         )}
       </div>
       <div className="flex flex-col gap-4 p-5">
         {j.error && (
-          <div className="flex items-start gap-2.5 rounded-lg border border-danger/30 bg-danger/8 px-3.5 py-2.5 text-sm text-danger">
+          <div className="flex items-start gap-2.5 rounded-md bg-danger/10 px-3.5 py-2.5 text-sm text-danger">
             <X className="mt-0.5 size-4 shrink-0" />
             <span className="[overflow-wrap:anywhere]">{j.error}</span>
           </div>
@@ -315,8 +341,8 @@ function Detail({ id, who }: { id: string; who: (j: JobRow) => string }) {
 function Meta({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-1.5">
-      <dt className="eyebrow">{label}</dt>
-      <dd className="text-foreground/80">{children}</dd>
+      <dt>{label}</dt>
+      <dd className="text-foreground">{children}</dd>
     </div>
   );
 }

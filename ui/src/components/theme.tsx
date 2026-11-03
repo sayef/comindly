@@ -10,13 +10,14 @@ function initial(): Theme {
   } catch {
     // storage may be unavailable
   }
-  return "dark";
+  return window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark";
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState<Theme>(initial);
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme === "dark" ? "#0e0f10" : "#f4f5f6");
     try {
       localStorage.setItem("comindly.theme", theme);
     } catch {

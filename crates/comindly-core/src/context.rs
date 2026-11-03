@@ -31,7 +31,13 @@ pub struct Settings {
     pub scip: crate::scip::Mode,
     pub auto_index: bool,
     pub auto_index_llm: bool,
+    /// Time between checks whether a default branch moved.
+    pub auto_index_every: std::time::Duration,
 }
+
+/// Default and largest minutes between automatic re-index checks.
+pub const AUTO_INDEX_MINUTES: usize = 5;
+pub const MAX_AUTO_INDEX_MINUTES: usize = 1440;
 
 impl Settings {
     /// `env` looks up overrides such as `COMINDLY_LLM_MODEL`.
@@ -74,6 +80,12 @@ impl Settings {
                 .unwrap_or(crate::scip::Mode::Auto),
             auto_index: team.auto_index.unwrap_or(false),
             auto_index_llm: team.auto_index_llm.unwrap_or(false),
+            auto_index_every: std::time::Duration::from_secs(
+                60 * team
+                    .auto_index_minutes
+                    .unwrap_or(AUTO_INDEX_MINUTES)
+                    .clamp(1, MAX_AUTO_INDEX_MINUTES) as u64,
+            ),
         }
     }
 }

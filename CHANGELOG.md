@@ -14,10 +14,43 @@ All notable changes to this project are documented here. The format follows
   changed code only.
 - Ledger records store the indexed commit of each anchor and up to three snippets of the code that
   shaped them (`remember --snippet path:START-END`, MCP `snippets`).
+- `auto_index_minutes` sets how often automatic re-indexing checks the remotes (default 5), also on the
+  Repositories page.
+- The index stores the contents of the indexed files, once per distinct content, so code is shown
+  from the index: on a server it no longer needs a checkout on disk, also right after a restart.
+- Code shown on the Conventions page links to the file at the indexed commit on GitHub or GitLab.
 
 ### Changed
 
 - `comindly server` logs to stdout.
+- Re-indexing no longer re-embeds every service contract when nothing changed: changed files are
+  looked up by repository, not by package.
+- Recipe conventions show the commits they were learned from, linked to GitHub or GitLab, instead of
+  a "Show code" that could not find them.
+- The index records each repository's default branch, so the Repositories page shows it without a clone.
+- A new theme for the app on its existing layout: cool blue-grey neutrals with one steel-blue accent,
+  muted repository colours, and Atkinson Hyperlegible for text and code. Tokens
+  and rules are in `ui/DESIGN.md`.
+- The sidebar collapses to icons (button beside the logo, or `⌘ \`); on phones it opens as a menu.
+- On phones, tables become two-line rows, filters fit the screen, and the org map picks its repository
+  from a list so the graph shows first.
+- Irreversible actions ask once more in place: revoking a token, removing a repository, member or stored
+  secret, withdrawing an invitation, deleting a team convention and stopping an indexing run. Nobody
+  can change their own role.
+- Settings keep unsaved edits when the data refreshes and warn before the tab closes with changes.
+- Labelled fields, announced errors, keyboard access to the org map's arrows, and no light flash when
+  dark mode loads.
+- Filters on Contracts, Conventions, Flows, Ledger, Packages and Activity are part of the address.
+- Ledger cards badge only what needs attention; flows open with the crossings between repositories and
+  fold steps that stay in one repository.
+- Org-wide conventions read like "Tests use pytest: in 3 of 10 measured repos", counting only the repositories with
+  measured conventions.
+- The org map shows one repository at a time: what uses it above, what it uses below, with the list of
+  repositories (by how many depend on each) to move between them. Hovering or tabbing to an arrow lists
+  the contracts and code references behind it; cycles are amber, and a key explains the arrows. The previous tree is one click away.
+- Overview's figures show a breakdown where there is one (symbols per repository, contracts by type);
+  what needs attention moves above the org map when there is something to review.
+- The ledger opens on the timeline when nothing needs review, and its view is part of the address.
 - A summary is written again only when its symbol's name, signature or path changed, not whenever
   its file did.
 - Style guides are rewritten per section, and only when that section's evidence drifted.

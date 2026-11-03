@@ -66,6 +66,7 @@ second save is refused and asks to reload).
 | `scip` | Compiler-grade resolution: `auto` uses SCIP indexes when present, `require` fails without them, `off` uses tree-sitter only | `auto` |
 | `auto_index` | Re-index when a listed repository's default branch moves on its remote (checked from the app or server) | off |
 | `auto_index_llm` | Run the LLM steps on those automatic re-indexes too; only new or changed code is sent | off |
+| `auto_index_minutes` | Minutes between those checks, 1 to 1440 | 5 |
 
 Summaries, walkthroughs and style guides are kept and reused while their input is unchanged, and saved as
 they are written (summaries every 500), so an interrupted run continues where it stopped. Those of code

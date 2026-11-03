@@ -8,12 +8,13 @@ export const DialogTitle = DialogPrimitive.Title;
 export function DialogContent({ className, children, ...props }: React.ComponentProps<typeof DialogPrimitive.Content>) {
   return (
     <DialogPrimitive.Portal>
-      <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/55 backdrop-blur-[3px]" />
+      <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-[rgb(6_14_12/0.55)]" />
       <DialogPrimitive.Content
         className={cn(
-          "fixed left-1/2 top-[15%] z-50 w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 overflow-hidden rounded-xl border bg-popover shadow-[0_24px_80px_-12px_rgba(0,0,0,0.55)]",
+          "fixed left-1/2 top-[15%] z-50 w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 overflow-hidden overscroll-contain rounded-xl bg-popover shadow-float",
           className,
         )}
+        aria-describedby={undefined}
         {...props}
       >
         {children}

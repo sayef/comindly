@@ -14,7 +14,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import { useMemo, useState } from "react";
 import { useTheme } from "@/components/theme";
-import { CONTRACTS, cn, repoHue } from "@/lib/utils";
+import { CONTRACTS, cn, repoColor } from "@/lib/utils";
 
 export interface GraphNode {
   id: string;
@@ -44,18 +44,20 @@ type Data = { label: string; repo: string; focus: boolean; dim: boolean; more: b
 /** Neighbours shown per side of the focus before the rest fold into a "+N more" node. */
 const PER_SIDE = 12;
 const HEIGHT = 44;
+/** Keeps 13px labels at 12px or more on screen; larger graphs pan instead, centred on the focus on phones. */
+const MIN_ZOOM = 0.93;
 
-const color = (repo: string) => (repo === CONTRACTS ? "var(--color-brand)" : `hsl(${repoHue(repo)} 62% 62%)`);
+const color = (repo: string) => (repo === CONTRACTS ? "var(--color-brand)" : repoColor(repo));
 const isContract = (kind: string) => kind === "contract" || kind === "counterpart";
 
 function SymbolNode({ data }: NodeProps<Node<Data>>) {
   return (
     <div
       className={cn(
-        "flex h-10 max-w-[260px] cursor-pointer items-center gap-2 rounded-lg border border-input bg-popover px-3 text-[13px] transition-[opacity,border-color] hover:border-muted-foreground/50",
-        data.large && "text-sm font-medium",
-        data.focus && "border-brand font-medium shadow-[0_0_0_4px_color-mix(in_srgb,var(--color-brand)_14%,transparent)]",
-        data.more && "cursor-default border-dashed text-muted-foreground",
+        "flex h-10 max-w-[280px] cursor-pointer items-center gap-2 rounded-md bg-card px-3 text-[13px] leading-tight shadow-[0_1px_2px_var(--shadow-ink)] transition-[opacity,background-color] duration-100 hover:bg-muted",
+        data.large && "text-sm font-semibold",
+        data.focus && "bg-accent font-semibold outline-2 outline-brand",
+        data.more && "cursor-default border border-dashed border-input bg-transparent text-muted-foreground shadow-none",
         data.dim && "opacity-25",
       )}
     >
@@ -63,7 +65,7 @@ function SymbolNode({ data }: NodeProps<Node<Data>>) {
       {!data.more && <span className="size-2 shrink-0 rounded-[2px]" style={{ background: color(data.repo) }} />}
       <div className="min-w-0">
         <div className={cn("truncate", data.repo === CONTRACTS && "font-mono")}>{data.label}</div>
-        {data.showRepo && <div className="truncate text-[10px] font-normal text-muted-foreground">{data.repo}</div>}
+        {data.showRepo && <div className="truncate font-normal text-muted-foreground">{data.repo}</div>}
       </div>
       <Handle type="source" position={data.large ? Position.Bottom : Position.Right} className="!pointer-events-none !opacity-0" />
     </div>
@@ -112,7 +114,7 @@ function place(nodes: GraphNode[], edges: GraphEdge[], wide: boolean) {
   const g = new Graph();
   g.setGraph({ rankdir: wide ? "TB" : "LR", nodesep: wide ? 48 : 14, ranksep: wide ? 50 : 110, marginx: 16, marginy: 16 });
   g.setDefaultEdgeLabel(() => ({}));
-  const width = (n: GraphNode) => Math.min(260, Math.max(120, 44 + Math.max(n.label.length, n.repo.length * 0.8) * (wide ? 8 : 6.6)));
+  const width = (n: GraphNode) => Math.min(280, Math.max(120, 44 + Math.max(n.label.length, n.repo.length * 0.8) * (wide ? 8 : 7.2)));
   for (const n of nodes) g.setNode(n.id, { width: width(n), height: HEIGHT });
   for (const e of edges) if (e.src !== e.dst) g.setEdge(e.src, e.dst);
   layout(g);
@@ -133,7 +135,8 @@ export function GraphView({ nodes, edges, focus, highlight, onPick, className }:
   const { at: positions, height: laid } = useMemo(() => place(shown.nodes, shown.edges, !focus), [shown, focus]);
   const focusRepo = shown.nodes.find((n) => n.id === focus)?.repo;
   const maxW = Math.max(1, ...shown.edges.map((e) => e.weight ?? 1));
-  const height = focus ? Math.min(680, Math.max(300, laid + 60)) : undefined;
+  const narrow = window.innerWidth < 640;
+  const height = focus ? Math.min(narrow ? 480 : 920, Math.max(300, laid + 60)) : undefined;
 
   const flowNodes: Node<Data>[] = shown.nodes.map((n) => ({
     id: n.id,
@@ -181,7 +184,11 @@ export function GraphView({ nodes, edges, focus, highlight, onPick, className }:
         nodeTypes={nodeTypes}
         colorMode={theme === "dark" ? "dark" : "light"}
         fitView
-        fitViewOptions={{ padding: 0.12, maxZoom: 1.2 }}
+        fitViewOptions={
+          focus && narrow
+            ? { nodes: [{ id: focus }], minZoom: MIN_ZOOM, maxZoom: MIN_ZOOM }
+            : { padding: 0.12, maxZoom: 1.2, minZoom: MIN_ZOOM }
+        }
         minZoom={0.15}
         zoomOnScroll={false}
         panOnScroll={false}

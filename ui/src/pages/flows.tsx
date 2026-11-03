@@ -1,10 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, ChevronLeft, Search, Sparkles } from "lucide-react";
+import { ArrowRight, ChevronDown, ChevronLeft, ChevronRight, Search, Sparkles } from "lucide-react";
 import { useMemo, useState } from "react";
+import { withCode } from "@/components/code-text";
 import { Link, useSearchParams } from "react-router";
 import { RepoDot, SymbolLink } from "@/components/symbol";
+import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, type FlowStep, type Node } from "@/lib/api";
@@ -23,7 +25,7 @@ function Journey({ repos }: { repos: string[] }) {
       {repos.map((r, i) => (
         <span key={r} className="flex items-center gap-1">
           {i > 0 && <ArrowRight className="size-3 text-muted-foreground" />}
-          <span className="flex items-center gap-1 rounded-full border px-2 py-0.5">
+          <span className="flex min-w-0 items-center gap-1.5 rounded-sm bg-muted px-2 py-0.5 [overflow-wrap:anywhere]">
             <RepoDot repo={r} /> {r}
           </span>
         </span>
@@ -32,51 +34,137 @@ function Journey({ repos }: { repos: string[] }) {
   );
 }
 
-function withCode(text: string) {
-  return text.split(/`([^`]+)`/).map((part, i) =>
-    i % 2 ? (
-      <code key={i} className="rounded bg-muted px-1 py-0.5 font-mono text-[0.85em]">
-        {part}
-      </code>
-    ) : (
-      part
-    ),
+
+/** A contract name with its kind word in the text face, as Contracts shows it. */
+function ContractName({ name }: { name: string }) {
+  const label = contractLabel(name);
+  const at = label.indexOf(" ");
+  if (!name.includes(":") || name.startsWith("http:") || at < 0) return <>{label}</>;
+  return (
+    <>
+      <span className="font-sans font-semibold">{label.slice(0, at)}</span> {label.slice(at + 1)}
+    </>
   );
 }
 
-/** The flow as a tree: each step under the step that led to it. */
-function Path({ entry, steps }: { entry: Node; steps: FlowStep[] }) {
-  const children = useMemo(() => {
-    const m = new Map<string, FlowStep[]>();
-    for (const s of steps) m.set(s.from, [...(m.get(s.from) ?? []), s]);
-    return m;
-  }, [steps]);
-  const render = (id: string, repo: string, depth: number): React.ReactNode =>
-    (children.get(id) ?? []).map((s) => {
-      const contract = s.node.kind === "Contract";
-      const crosses = !contract && s.node.repo !== repo;
-      return (
-        <li key={s.node.id} className="flex flex-col">
-          <div className={cn("flex flex-wrap items-center gap-2 rounded-md px-2 py-1", contract && "bg-accent")}>
-            <span className="w-20 shrink-0 text-right font-mono text-[11px] text-muted-foreground">{s.via}</span>
-            {contract ? (
-              <span className="font-mono text-xs text-accent-foreground">{s.node.name}</span>
-            ) : (
-              <SymbolLink node={s.node} />
-            )}
-            {crosses && <Badge variant="brand">Into {s.node.repo}</Badge>}
-          </div>
-          {depth < 12 && <ul className="ml-6 border-l pl-2">{render(s.node.id, contract ? repo : s.node.repo, depth + 1)}</ul>}
-        </li>
-      );
-    });
+/** A contract as Contracts writes it: `POST /path`, `Table name`, `SQS name`. */
+function contractLabel(name: string) {
+  const i = name.indexOf(":");
+  if (i < 0) return name;
+  const [kind, rest] = [name.slice(0, i), name.slice(i + 1)];
+  return kind === "http" ? rest : `${kind === "table" ? "Table" : kind.toUpperCase()} ${rest}`;
+}
+
+const MAX_DEPTH = 12;
+const indent = "ml-6 border-l pl-2 max-sm:ml-1 max-sm:pl-1.5";
+
+type Tree = { children: Map<string, FlowStep[]>; size: Map<string, number>; crosses: Set<string> };
+
+function Step({ t, s, repo, depth }: { t: Tree; s: FlowStep; repo: string; depth: number }) {
+  const contract = s.node.kind === "Contract";
+  const into = !contract && s.node.repo !== repo;
+  const n = depth < MAX_DEPTH ? (t.size.get(s.node.id) ?? 0) : 0;
+  const foldable = n >= 3 && !t.crosses.has(s.node.id);
+  const [open, setOpen] = useState(!foldable);
   return (
-    <div className="flex flex-col gap-1 text-sm">
-      <div className="flex items-center gap-2 px-2 py-1">
-        <span className="w-20 shrink-0 text-right font-mono text-[11px] text-muted-foreground">start</span>
-        <SymbolLink node={entry} />
+    <li className="flex flex-col">
+      <div className={cn("flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded-md px-2 py-1", contract && "bg-accent")}>
+        <span className="w-20 shrink-0 text-right text-xs text-muted-foreground max-sm:w-auto max-sm:text-left">{s.via}</span>
+        {contract ? (
+          <span className="min-w-0 font-mono text-xs text-accent-foreground [overflow-wrap:anywhere]"><ContractName name={s.node.name} /></span>
+        ) : (
+          <SymbolLink node={s.node} showRepo={false} />
+        )}
+        {into && <Badge variant="brand">Into {s.node.repo}</Badge>}
+        {foldable && (
+          <button
+            className="flex items-center gap-0.5 rounded-sm text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => setOpen(!open)}
+            aria-expanded={open}
+          >
+            {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+            <span className="nums">{n} steps</span>
+          </button>
+        )}
       </div>
-      <ul className="ml-6 border-l pl-2">{render(entry.id, entry.repo, 0)}</ul>
+      {open && n > 0 && <Steps t={t} id={s.node.id} repo={contract ? repo : s.node.repo} depth={depth + 1} />}
+    </li>
+  );
+}
+
+function Steps({ t, id, repo, depth }: { t: Tree; id: string; repo: string; depth: number }) {
+  return (
+    <ul className={indent}>
+      {(t.children.get(id) ?? []).map((s) => (
+        <Step key={s.node.id} t={t} s={s} repo={repo} depth={depth} />
+      ))}
+    </ul>
+  );
+}
+
+/** The flow as a tree: each step under the step that led to it; same-repository subtrees fold. */
+function Path({ entry, steps }: { entry: Node; steps: FlowStep[] }) {
+  const tree = useMemo(() => {
+    const children = new Map<string, FlowStep[]>();
+    for (const s of steps) children.set(s.from, [...(children.get(s.from) ?? []), s]);
+    const size = new Map<string, number>();
+    const crosses = new Set<string>();
+    const lines = new Map<string, { from: string; contract?: string; to: string }>();
+    // Returns whether the subtree under `id` leaves `repo` or touches a contract.
+    const walk = (id: string, repo: string, depth: number, via?: string): boolean => {
+      let n = 0;
+      let out = false;
+      for (const s of children.get(id) ?? []) {
+        const contract = s.node.kind === "Contract";
+        if (!contract && s.node.repo !== repo) {
+          const line = { from: repo, contract: via, to: s.node.repo };
+          lines.set(`${line.from}|${line.contract ?? ""}|${line.to}`, line);
+        }
+        let sub = contract || s.node.repo !== repo;
+        if (depth < MAX_DEPTH) sub = walk(s.node.id, contract ? repo : s.node.repo, depth + 1, contract ? contractLabel(s.node.name) : undefined) || sub;
+        n += 1 + (size.get(s.node.id) ?? 0);
+        out ||= sub;
+      }
+      size.set(id, n);
+      if (out) crosses.add(id);
+      return out;
+    };
+    walk(entry.id, entry.repo, 0);
+    return { children, size, crosses, crossings: [...lines.values()] };
+  }, [entry, steps]);
+  const { crossings } = tree;
+
+  return (
+    <div className="flex flex-col gap-4 text-sm">
+      {crossings.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <span className="eyebrow">Crossings</span>
+          {crossings.map((c) => (
+            <div key={`${c.from}|${c.contract}|${c.to}`} className="flex flex-wrap items-center gap-1.5 text-xs">
+              <span className="flex items-center gap-1.5">
+                <RepoDot repo={c.from} /> {c.from}
+              </span>
+              <ArrowRight className="size-3 text-muted-foreground" />
+              {c.contract && (
+                <>
+                  <span className="min-w-0 rounded-sm bg-accent px-1.5 py-0.5 font-mono text-accent-foreground [overflow-wrap:anywhere]">{c.contract}</span>
+                  <ArrowRight className="size-3 text-muted-foreground" />
+                </>
+              )}
+              <span className="flex items-center gap-1.5">
+                <RepoDot repo={c.to} /> {c.to}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center gap-2 px-2 py-1">
+          <span className="w-20 shrink-0 text-right text-xs text-muted-foreground max-sm:w-auto">Start</span>
+          <SymbolLink node={entry} />
+        </div>
+        <Steps t={tree} id={entry.id} repo={entry.repo} depth={0} />
+      </div>
     </div>
   );
 }
@@ -86,7 +174,7 @@ function FlowView({ id }: { id: string }) {
   const f = flow.data;
   return (
     <div className="flex flex-col gap-5">
-      <Link to="/flows" className="flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+      <Link to="/flows" className="-mt-2 flex min-h-9 w-fit items-center gap-1 text-sm font-semibold text-muted-foreground hover:text-foreground">
         <ChevronLeft className="size-4" /> All flows
       </Link>
       {!f ? (
@@ -94,32 +182,32 @@ function FlowView({ id }: { id: string }) {
       ) : (
         <>
           <div className="flex flex-col gap-2">
-            <h1 className="text-[28px] font-semibold tracking-[-0.035em]">{f.entry.name}</h1>
+            <h1 className="font-mono text-[26px] font-semibold tracking-[-0.02em] [overflow-wrap:anywhere]">{f.entry.name}</h1>
             <Journey repos={journey(f.entry, f.steps)} />
           </div>
           {f.narration && (
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
+                <h2 className="flex items-center gap-2 text-sm font-semibold">
                   <Sparkles className="size-4 text-brand" /> Walkthrough
-                </CardTitle>
+                </h2>
               </CardHeader>
               <CardContent className="flex flex-col gap-3 text-sm leading-relaxed">
                 {f.narration.split("\n\n").map((p, i) => (
                   <p key={i}>{withCode(p)}</p>
                 ))}
                 {f.questions && f.questions.length > 0 && (
-                  <p className="text-xs text-muted-foreground">Answers: {withCode(f.questions.join(" · "))}</p>
+                  <p className="text-xs text-muted-foreground">Answers: {withCode(f.questions.join("; "))}</p>
                 )}
               </CardContent>
             </Card>
           )}
           <Card>
             <CardHeader>
-              <CardTitle>Path</CardTitle>
-              <CardDescription>
-                Every step from the entry point, across HTTP routes, topics and queues into other repositories. Highlighted steps are
-                contracts.
+              <h2 className="text-sm font-semibold">Path</h2>
+              <CardDescription className="max-w-[70ch]">
+                Every step from the entry point into other repositories. Highlighted steps are contracts; steps that stay in one
+                repository fold.
               </CardDescription>
             </CardHeader>
             <CardContent className="overflow-x-auto">
@@ -133,49 +221,55 @@ function FlowView({ id }: { id: string }) {
 }
 
 export function FlowsPage() {
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const id = params.get("id");
   const flows = useQuery({ queryKey: ["flows"], queryFn: api.flows, enabled: !id });
-  const [filter, setFilter] = useState("");
-  const [across, setAcross] = useState(true);
+  const filter = params.get("q") ?? "";
+  const across = params.get("within") !== "1";
+  const set = (k: string, v: string) => setParams((p) => (v ? p.set(k, v) : p.delete(k), p), { replace: true });
+  const setAcross = (on: boolean) => set("within", on ? "" : "1");
   if (id) return <FlowView id={id} />;
   const rows = (flows.data ?? [])
     .filter((f) => !across || f.repos.length > 1)
     .filter((f) => {
       const q = filter.trim().toLowerCase();
-      return !q || [f.entry.name, ...f.repos, ...f.contracts].some((x) => x.toLowerCase().includes(q));
+      return !q || [f.entry.name, ...f.repos, ...f.contracts, ...f.contracts.map(contractLabel)].some((x) => x.toLowerCase().includes(q));
     });
   const total = flows.data?.length ?? 0;
 
   return (
     <div className="flex flex-col gap-5">
-      <div>
-        <h1 className="text-[28px] font-semibold tracking-[-0.035em]">Flows</h1>
-        <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-          Where work starts and where it travels: calls, then across HTTP routes, topics and queues into the services that handle
-          them. With LLM summaries on when indexing, flows also get a written walkthrough.
-        </p>
-      </div>
+      <PageHeader title="Flows">
+        Where work starts and where it travels: calls, then across HTTP routes, topics and queues into the services that handle them.
+        With LLM summaries on when indexing, flows also get a written walkthrough.
+      </PageHeader>
       <div className="flex flex-wrap items-center gap-3">
-        <div className="relative w-full max-w-sm">
-          <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
-          <Input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter by name, repository or contract" className="pl-8" />
-        </div>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={across} onChange={(e) => setAcross(e.target.checked)} />
           Only flows across repositories
         </label>
-        <span className="text-xs text-muted-foreground">
+        <span className="nums text-xs text-muted-foreground">
           {rows.length} of {total}
         </span>
+        <div className="relative w-full sm:ml-auto sm:max-w-xs">
+          <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
+          <Input
+            value={filter}
+            onChange={(e) => set("q", e.target.value)}
+            placeholder="Filter by name, repository or contract"
+            aria-label="Filter flows"
+            spellCheck={false}
+            className="pl-8"
+          />
+        </div>
       </div>
       <Card className="overflow-hidden">
         {flows.isLoading && <Skeleton className="h-40" />}
         {flows.data && rows.length === 0 && (
-          <p className="p-6 text-center text-sm text-muted-foreground">
-            {total === 0 ? "No flows in this index yet." : "No flows match."}{" "}
+          <p className="px-5 py-8 text-muted-foreground">
+            {total === 0 ? "No flows in this index yet. They appear once repositories are indexed." : "No flow matches."}{" "}
             {across && total > 0 && (
-              <button className="underline underline-offset-2" onClick={() => setAcross(false)}>
+              <button className="font-semibold text-brand hover:underline" onClick={() => setAcross(false)}>
                 Show flows within one repository too
               </button>
             )}
@@ -185,26 +279,32 @@ export function FlowsPage() {
           <Link
             key={f.entry.id}
             to={`/flows?id=${encodeURIComponent(f.entry.id)}`}
-            className="flex flex-col gap-1.5 border-b px-4 py-3 last:border-0 hover:bg-muted/40"
+            className="flex min-w-0 flex-col gap-2 border-b px-5 py-3.5 last:border-0 hover:bg-muted/60 max-sm:px-4"
           >
-            <div className="flex flex-wrap items-center gap-2">
-              <RepoDot repo={f.entry.repo} />
-              <span className="font-medium">{f.entry.name}</span>
-              <span className="font-mono text-[11px] text-muted-foreground">{f.entry.location}</span>
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+              <span className="flex min-w-0 max-w-full items-center gap-2">
+                <RepoDot repo={f.entry.repo} />
+                <span className="truncate font-mono font-semibold" title={f.entry.name}>
+                  {f.entry.name}
+                </span>
+              </span>
+              <span className="min-w-0 max-w-full truncate font-mono text-xs text-muted-foreground max-sm:order-last max-sm:basis-full" title={f.entry.location}>
+                {f.entry.location}
+              </span>
               {f.narrated && <Badge variant="brand">Walkthrough</Badge>}
-              <span className="ml-auto text-xs text-muted-foreground">{f.steps} steps</span>
+              <span className="nums ml-auto text-xs text-muted-foreground">{f.steps} steps</span>
             </div>
             <Journey repos={f.repos} />
             {f.contracts.length > 0 && (
-              <div className="flex flex-wrap gap-1">
+              <div className="flex min-w-0 flex-wrap gap-1">
                 {f.contracts.map((c) => (
-                  <span key={c} className="rounded bg-accent px-1.5 py-0.5 font-mono text-[11px] text-accent-foreground">
-                    {c}
+                  <span key={c} className="max-w-full rounded-sm bg-accent px-1.5 py-0.5 font-mono text-xs text-accent-foreground [overflow-wrap:anywhere]">
+                    <ContractName name={c} />
                   </span>
                 ))}
               </div>
             )}
-            {f.summary && <p className="line-clamp-2 text-xs text-muted-foreground">{f.summary.replace(/`/g, "")}</p>}
+            {f.summary && <p className="line-clamp-2 max-w-[80ch] text-muted-foreground">{f.summary.replace(/`/g, "")}</p>}
           </Link>
         ))}
       </Card>

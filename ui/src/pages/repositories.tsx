@@ -13,28 +13,32 @@ import {
   Trash2,
   Users,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { RepoDot } from "@/components/symbol";
 import { Link } from "react-router";
 import { IndexLog } from "@/components/index-log";
+import { PageHeader } from "@/components/page-header";
+import { SettingsTabs } from "@/pages/settings";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Outcome } from "@/components/notice";
+import { ConfirmButton } from "@/components/confirm";
+import { ago, bytes, compact, date } from "@/lib/utils";
 import { useAbort } from "@/lib/abort";
 import { useAccess } from "@/lib/me";
 import { ApiError, api, type NeedsToken, pickFolder, type ScanHit, type TeamSettings } from "@/lib/api";
 
-const field = "flex flex-col gap-1 text-xs font-medium";
+const field = "flex flex-col gap-1.5 text-sm font-semibold";
 
 /** A path input with a native folder picker in the desktop app. */
 function FolderInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
   return (
     <div className="flex gap-2">
-      <Input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="font-mono text-xs" />
+      <Input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} spellCheck={false} autoComplete="off" className="font-mono text-xs" />
       {pickFolder && (
         <Button
           variant="outline"
@@ -65,7 +69,7 @@ function AddDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bo
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="p-5">
-        <DialogTitle className="text-base font-semibold">Add a repository</DialogTitle>
+        <DialogTitle className="text-[17px] font-semibold">Add a repository</DialogTitle>
         <p className="mt-1 text-sm text-muted-foreground">Your local clone. comindly indexes its default branch from its own checkout.</p>
         <div className="mt-4 flex flex-col gap-3">
           <label className={field}>
@@ -125,8 +129,8 @@ function ScanDialog({ open, onOpenChange, indexed }: { open: boolean; onOpenChan
 
   return (
     <Dialog open={open} onOpenChange={close}>
-      <DialogContent className="top-[8%] max-h-[84vh] overflow-y-auto p-5">
-        <DialogTitle className="text-base font-semibold">Scan a folder for repositories</DialogTitle>
+      <DialogContent className="top-[8%] max-h-[84dvh] overflow-y-auto p-5">
+        <DialogTitle className="text-[17px] font-semibold">Scan a folder for repositories</DialogTitle>
         <p className="mt-1 text-sm text-muted-foreground">Tick the ones comindly should index; untick to drop one from the list.</p>
         <div className="mt-4 flex flex-col gap-3">
           <label className={field}>
@@ -151,6 +155,8 @@ function ScanDialog({ open, onOpenChange, indexed }: { open: boolean; onOpenChan
                   value={filter}
                   onChange={(e) => setFilter(e.target.value)}
                   placeholder={`Filter ${found.length} repositories`}
+                  aria-label="Filter repositories"
+                  spellCheck={false}
                   className="h-8 text-xs"
                 />
                 <Button variant="ghost" size="sm" onClick={() => setChecked(new Set([...checked, ...shown.map((f) => f.path)]))}>
@@ -164,7 +170,7 @@ function ScanDialog({ open, onOpenChange, indexed }: { open: boolean; onOpenChan
                   Select none
                 </Button>
               </div>
-              <div className="max-h-72 overflow-y-auto rounded-md border">
+              <div className="max-h-72 overflow-y-auto overscroll-contain rounded-md bg-muted/50">
                 {shown.length === 0 && <p className="p-3 text-xs text-muted-foreground">No git repositories found.</p>}
                 {shown.map((f) => (
                   <label
@@ -172,9 +178,9 @@ function ScanDialog({ open, onOpenChange, indexed }: { open: boolean; onOpenChan
                     className="flex cursor-pointer items-center gap-2.5 border-b px-3 py-2 text-sm last:border-0 hover:bg-muted/50"
                   >
                     <input type="checkbox" checked={checked.has(f.path)} onChange={() => toggle(f.path)} />
-                    <span className="font-medium">{f.name}</span>
+                    <span className="min-w-0 truncate font-medium">{f.name}</span>
                     {f.listed && <Badge variant="outline">Added</Badge>}
-                    <span className="ml-auto truncate font-mono text-[11px] text-muted-foreground">{f.remote ?? f.path}</span>
+                    <span className="ml-auto min-w-0 truncate font-mono text-xs text-muted-foreground max-sm:hidden">{f.remote ?? f.path}</span>
                   </label>
                 ))}
               </div>
@@ -232,20 +238,22 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
     }
   }, [j, seen, qc]);
   const watch = useQuery({ queryKey: ["index-watch"], queryFn: api.indexWatch, refetchInterval: 30_000 });
-  const settings = useQuery({ queryKey: ["settings"], queryFn: api.settings });
   const team = useQuery({ queryKey: ["team"], queryFn: api.team });
+  const [minutes, setMinutes] = useState<string | null>(null);
   const auto = useMutation({
-    mutationFn: (s: Pick<TeamSettings, "auto_index" | "auto_index_llm">) =>
+    mutationFn: (s: Pick<TeamSettings, "auto_index" | "auto_index_llm" | "auto_index_minutes">) =>
       api.saveTeam({ ...team.data!.settings, ...s }, team.data!.version),
-    onSuccess: () => (qc.invalidateQueries({ queryKey: ["team"] }), qc.invalidateQueries({ queryKey: ["index-watch"] })),
+    onSuccess: () => (setMinutes(null), qc.invalidateQueries({ queryKey: ["team"] }), qc.invalidateQueries({ queryKey: ["index-watch"] })),
   });
+  const every = minutes ?? String(team.data?.settings.auto_index_minutes ?? watch.data?.minutes ?? 5);
+  const everyValid = /^\d+$/.test(every) && Number(every) >= 1 && Number(every) <= 1440;
 
   return (
     <Card>
-      <CardHeader className="flex-row items-start justify-between gap-4">
-        <div>
-          <CardTitle>Index</CardTitle>
-          <CardDescription>
+      <CardHeader className="flex-row flex-wrap items-start justify-between gap-4 pb-3">
+        <div className="max-w-[68ch]">
+          <h2 className="text-sm font-semibold">Index</h2>
+          <CardDescription className="mt-1 text-sm">
             Fetches each repository's default branch into comindly's own checkout, then rebuilds the index. Unchanged code reuses its
             embeddings{llm ? " and summaries" : ""}.
           </CardDescription>
@@ -267,7 +275,7 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
               {!start.isPending && <Play />} {j?.running ? "Queue next" : "Index now"}
             </Button>
           </div>
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <label className="flex min-h-8 items-center gap-1.5 text-xs text-muted-foreground">
             <input type="checkbox" checked={llm} onChange={(e) => setLlm(e.target.checked)} />
             LLM summaries (sends code to the LLM)
           </label>
@@ -279,16 +287,36 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
           )}
         </div>
       </CardHeader>
-      <CardContent className="flex flex-col gap-2">
-        <label className="flex items-center gap-2 text-sm">
+      <CardContent className="flex flex-col gap-2 border-t pt-4">
+        <label className="flex min-h-8 items-center gap-2 text-sm">
           <input
             type="checkbox"
             checked={team.data?.settings.auto_index ?? false}
             disabled={!team.data || auto.isPending}
             onChange={(e) => auto.mutate({ auto_index: e.target.checked })}
           />
-          Re-index automatically when a default branch moves (checked every {settings.data?.cache_ttl_secs ?? 300} s)
+          Re-index automatically when a default branch moves
         </label>
+        <div className="ml-6 flex flex-wrap items-center gap-2 text-sm">
+          Check every
+          <Input
+            type="number"
+            min={1}
+            max={1440}
+            className="h-8 w-20"
+            value={every}
+            disabled={!team.data || auto.isPending || !team.data.settings.auto_index}
+            onChange={(e) => setMinutes(e.target.value)}
+            aria-label="Minutes between checks"
+          />
+          minutes
+          {minutes !== null && (
+            <Button size="sm" variant="outline" disabled={!everyValid} loading={auto.isPending} onClick={() => auto.mutate({ auto_index_minutes: Number(every) })}>
+              Save
+            </Button>
+          )}
+          {minutes !== null && !everyValid && <span className="text-xs text-warning">Between 1 and 1440 minutes</span>}
+        </div>
         <label className="ml-6 flex items-center gap-2 text-sm">
           <input
             type="checkbox"
@@ -298,9 +326,10 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
           />
           With LLM steps: summaries, style guides and walkthroughs for new or changed code only
         </label>
+        <Message error={auto.error} />
         {watch.data?.enabled && watch.data.last.checked && (
           <p className="text-xs text-muted-foreground">
-            Last check {new Date(watch.data.last.checked).toLocaleTimeString()}: {watch.data.last.result}
+            Last check {ago(watch.data.last.checked)}: {watch.data.last.result}
           </p>
         )}
         <Message error={start.error} />
@@ -308,11 +337,15 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
           <p className={`flex items-center gap-1.5 text-sm ${j.ok ? "" : "text-warning"}`}>
             {j.ok ? <CheckCircle2 className="size-4 text-brand" /> : <AlertTriangle className="size-4" />}
             {j.ok ? "Indexed; every page shows the new index." : j.cancelled ? "Indexing cancelled." : "Indexing failed; see the log."}
-            {j.finished && <span className="text-xs text-muted-foreground">{new Date(j.finished).toLocaleString()}</span>}
+            {j.finished && (
+              <span className="text-xs text-muted-foreground" title={new Date(j.finished).toLocaleString()}>
+                {ago(j.finished)}
+              </span>
+            )}
           </p>
         )}
         {queued.map((q) => (
-          <p key={q.id} className="flex items-center gap-1.5 text-sm">
+          <p key={q.id} className="flex flex-wrap items-center gap-1.5 text-sm">
             <Clock className="size-4 text-muted-foreground" />
             Queued{queued.length > 1 ? ` (position ${q.position})` : ""}: indexing starts when the running job ends.
             <Button variant="outline" size="sm" loading={dequeue.isPending} onClick={() => dequeue.mutate(q.id)}>
@@ -383,17 +416,23 @@ function OrgDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bo
   return (
     <Dialog open={open} onOpenChange={close}>
       <DialogContent className="max-w-2xl p-5">
-        <DialogTitle className="text-base font-semibold">From GitHub or GitLab</DialogTitle>
+        <DialogTitle className="text-[17px] font-semibold">From GitHub or GitLab</DialogTitle>
         <p className="mt-1 text-sm text-muted-foreground">
           An organisation or group (github.com/acme, gitlab.com/acme/platform), or one repository (github.com/acme/orders, or a clone URL).
           comindly keeps its own copies and always indexes each repository's default branch.
         </p>
-        <div className="mt-4 flex gap-2">
+        <label htmlFor="org-url" className={`${field} mt-4`}>
+          Organisation, group or repository
+        </label>
+        <div className="mt-1.5 flex gap-2">
           <Input
+            id="org-url"
             value={url}
             onChange={(e) => (setUrl(e.target.value), setAsked(null))}
             onKeyDown={(e) => e.key === "Enter" && url.trim() && list.mutate()}
             placeholder="github.com/acme or github.com/acme/orders"
+            spellCheck={false}
+            autoComplete="off"
             className="font-mono text-xs"
           />
           {list.isPending ? (
@@ -407,7 +446,7 @@ function OrgDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bo
           )}
         </div>
         {asked && (
-          <div className="mt-3 flex flex-col gap-2 rounded-lg border bg-muted/40 p-3">
+          <div className="mt-3 flex flex-col gap-2 rounded-md bg-muted p-3">
             <p className="text-xs text-muted-foreground">
               {asked.host} needs an access token that can read these repositories.{" "}
               {server
@@ -415,8 +454,14 @@ function OrgDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bo
                 : "Your git credential helper keeps it afterwards."}
             </p>
             <div className="grid gap-2 sm:grid-cols-[10rem_1fr]">
-              <Input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Username" className="text-xs" />
-              <Input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="Access token" autoFocus />
+              <label className="flex flex-col gap-1 text-xs font-semibold">
+                Username
+                <Input value={username} onChange={(e) => setUsername(e.target.value)} spellCheck={false} autoComplete="username" className="text-xs" />
+              </label>
+              <label className="flex flex-col gap-1 text-xs font-semibold">
+                Access token
+                <Input type="password" value={token} onChange={(e) => setToken(e.target.value)} spellCheck={false} autoComplete="off" autoFocus />
+              </label>
             </div>
           </div>
         )}
@@ -433,7 +478,9 @@ function OrgDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bo
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
                 placeholder={`Filter ${found.length} repositories`}
-                className="h-8 max-w-xs text-xs"
+                aria-label="Filter repositories"
+                spellCheck={false}
+                className="h-8 text-xs sm:max-w-xs"
               />
               <Button variant="ghost" size="sm" onClick={() => setChecked(new Set(shown.filter((r) => !r.listed).map((r) => r.clone_url)))}>
                 Select all
@@ -442,7 +489,7 @@ function OrgDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bo
                 Select none
               </Button>
             </div>
-            <div className="max-h-80 overflow-y-auto rounded-lg border">
+            <div className="max-h-80 overflow-y-auto overscroll-contain rounded-md bg-muted/50">
               {shown.map((r) => (
                 <label
                   key={r.clone_url}
@@ -458,16 +505,16 @@ function OrgDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bo
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="text-sm font-medium">{r.name}</span>
-                      <span className="truncate font-mono text-[11px] text-muted-foreground">{r.full_path}</span>
+                      <span className="truncate font-mono text-xs text-muted-foreground">{r.full_path}</span>
                       {r.listed && <Badge variant="outline">Added</Badge>}
                       {r.archived && <Badge variant="outline">Archived</Badge>}
                       {r.fork && <Badge variant="outline">Fork</Badge>}
                     </div>
                     {r.description && <div className="truncate text-xs text-muted-foreground">{r.description}</div>}
                   </div>
-                  <div className="shrink-0 text-right text-[11px] text-muted-foreground">
-                    {r.last_activity && <div>{new Date(r.last_activity).toLocaleDateString()}</div>}
-                    {r.size_kib != null && <div>{r.size_kib >= 1024 ? `${Math.round(r.size_kib / 1024)} MB` : `${r.size_kib} KB`}</div>}
+                  <div className="shrink-0 text-right text-xs text-muted-foreground">
+                    {r.last_activity && <div>{date(r.last_activity)}</div>}
+                    {r.size_kib != null && <div>{bytes(r.size_kib)}</div>}
                   </div>
                 </label>
               ))}
@@ -490,6 +537,38 @@ function OrgDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bo
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+function Symbols({ n }: { n: number }) {
+  return (
+    <span className="nums" title={`${n.toLocaleString()} symbols`}>
+      {compact(n)} symbols
+    </span>
+  );
+}
+
+/** One repository: name and status, then what is indexed, then where it lives; actions at the end. */
+function RepoRow({ name, status, meta, where, actions }: { name: string; status: ReactNode; meta: ReactNode; where?: string | null; actions?: ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-start gap-x-3 gap-y-2 border-b px-5 py-3 last:border-0 max-sm:px-4">
+      <div className="min-w-0 flex-1 basis-48">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="flex min-w-0 items-center gap-2">
+            <RepoDot repo={name} />
+            <span className="truncate font-semibold">{name}</span>
+          </span>
+          {status}
+        </div>
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">{meta}</div>
+        {where && (
+          <div className="mt-0.5 truncate font-mono text-xs text-muted-foreground" title={where}>
+            {where}
+          </div>
+        )}
+      </div>
+      {actions && <div className="ml-auto flex flex-wrap justify-end gap-1.5">{actions}</div>}
+    </div>
   );
 }
 
@@ -521,27 +600,25 @@ export function RepositoriesPage() {
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-[28px] font-semibold tracking-[-0.035em]">Repositories</h1>
-          <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-            What comindly indexes. Each repository is indexed at its default branch from comindly's own checkout
-            {server ? "." : ", so your folders and branches are never touched."}
-          </p>
-        </div>
+      <PageHeader title="Repositories">
+        What comindly indexes. Each repository is indexed at its default branch from comindly's own checkout
+        {server ? "." : ", so your folders and branches are never touched."}
+      </PageHeader>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <SettingsTabs />
         {admin && (
-          <div className="flex flex-wrap gap-2">
+          <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap">
             {!server && (
               <Button variant="outline" onClick={() => setDialog("add")}>
-                <Plus /> Add a folder
+                <Plus /> Add a folder…
               </Button>
             )}
-            <Button variant="brand" onClick={() => setDialog("org")}>
-              <Building2 /> From GitHub or GitLab
+            <Button variant="brand" className="col-span-2 max-sm:order-first" onClick={() => setDialog("org")}>
+              <Building2 /> Add from GitHub or GitLab…
             </Button>
             {!server && (
               <Button variant="outline" onClick={() => setDialog("scan")}>
-                <FolderSearch /> Scan a folder
+                <FolderSearch /> Scan a folder…
               </Button>
             )}
           </div>
@@ -549,7 +626,7 @@ export function RepositoriesPage() {
       </div>
 
       {admin && teamMissing.length > 0 && (
-        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-brand/40 bg-brand/5 p-3 text-sm">
+        <div className="flex flex-wrap items-center gap-3 rounded-md bg-accent px-4 py-3 text-sm">
           <Users className="size-4 shrink-0 text-brand" />
           <span className="min-w-0 flex-1">
             The team has {teamMissing.length === 1 ? "a repository" : `${teamMissing.length} repositories`} you don't have here yet.
@@ -561,30 +638,30 @@ export function RepositoriesPage() {
       )}
 
       {unlisted.length > 0 ? (
-        <p className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/5 p-3 text-sm">
+        <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 gap-y-3 rounded-md bg-warning/10 px-4 py-3 text-sm md:grid-cols-[auto_minmax(0,1fr)_auto]">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
           <span className="min-w-0 [overflow-wrap:anywhere]">
             {unlisted.length === 1 ? "One repository" : `${unlisted.length} repositories`} in this index{" "}
             {unlisted.length === 1 ? "has" : "have"} no folder {server ? "on this server" : "on this machine"} yet.{" "}
-            {server ? "Add it and comindly clones it" : "Locate your copy, or Add it and comindly clones it"}; comindly indexes all
-            repositories together so their links stay complete.
+            {server ? "Add one and comindly clones it." : "Locate your copy, or add it and comindly clones it."} All repositories are
+            indexed together, so their links stay complete.
           </span>
           {admin && unlisted.filter((r) => r.remote).length > 1 && (
             <Button
               variant="outline"
               size="sm"
-              className="ml-auto shrink-0"
+              className="col-start-2 justify-self-start md:col-start-auto"
               loading={addAll.isPending}
               onClick={() => addAll.mutate(unlisted.flatMap((r) => (r.remote ? [r.remote] : [])))}
             >
               <Plus /> Add all {unlisted.filter((r) => r.remote).length}
             </Button>
           )}
-        </p>
+        </div>
       ) : (
         remote &&
         !server && (
-          <p className="text-xs text-muted-foreground">
+          <p className="text-muted-foreground">
             Shared in a bucket: indexing from here publishes a new version for everyone using it.
           </p>
         )
@@ -593,7 +670,7 @@ export function RepositoriesPage() {
       <Card className="overflow-hidden">
         {repos.isLoading && <Skeleton className="h-32" />}
         {repos.data && repos.data.repos.length === 0 && unlisted.length === 0 && (
-          <p className="p-6 text-center text-sm text-muted-foreground">
+          <p className="px-5 py-8 text-muted-foreground">
             {!admin
               ? "No repositories yet. An admin adds them."
               : server
@@ -602,82 +679,100 @@ export function RepositoriesPage() {
           </p>
         )}
         {repos.data?.repos.map((r) => (
-          <div key={r.path} className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b px-4 py-3 last:border-0">
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <RepoDot repo={r.name} />
-                <span className="font-medium">{r.name}</span>
-                {r.managed && !r.cloned && <Badge variant="outline">Cloned when indexing</Badge>}
+          <RepoRow
+            key={r.path}
+            name={r.name}
+            status={
+              <>
+                {r.managed && !r.cloned && !r.indexed_commit && <Badge variant="outline">Cloned when indexing</Badge>}
                 {!r.managed && !r.exists && <Badge variant="danger">Folder missing</Badge>}
-                {r.symbols == null ? (
-                  <Badge variant="outline">Not indexed yet</Badge>
-                ) : (
-                  <Badge variant="outline">{r.symbols.toLocaleString()} symbols</Badge>
+                {r.symbols == null && <Badge variant="outline">Not indexed yet</Badge>}
+              </>
+            }
+            meta={
+              <>
+                {r.symbols != null && <Symbols n={r.symbols} />}
+                <span className="flex items-center gap-1" title="What comindly indexes">
+                  <GitBranch className="size-3.5 shrink-0" />
+                  {r.branch ? <span className="font-mono text-foreground">origin/{r.branch}</span> : "Default branch"}
+                  {r.indexed_commit && <span className="font-mono text-foreground">{r.indexed_commit.slice(0, 7)}</span>}
+                </span>
+                {!r.managed && (
+                  <span title="Your own checkout, left as it is">
+                    Yours: <span className="font-mono">{r.your_branch ?? "detached"}</span>
+                  </span>
                 )}
-              </div>
-              <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground" title={r.path}>
-                {r.managed ? r.remote : r.path}
-              </div>
-            </div>
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground" title="What comindly indexes">
-              <GitBranch className="size-3.5" /> Indexes{" "}
-              {r.branch ? <span className="font-mono text-foreground">origin/{r.branch}</span> : "the default branch"}
-              {r.indexed_commit && <span className="font-mono">@ {r.indexed_commit.slice(0, 7)}</span>}
-            </div>
-            {!r.managed && (
-              <div className="text-xs text-muted-foreground" title="Your own checkout, left as it is">
-                Yours: <span className="font-mono">{r.your_branch ?? "?"}</span>
-              </div>
-            )}
-            {admin && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-8"
-                aria-label="Remove"
-                title="Remove from the list (your folder stays)"
-                loading={remove.isPending && remove.variables === r.path}
-                onClick={() => remove.mutate(r.path)}
-              >
-                {!(remove.isPending && remove.variables === r.path) && <Trash2 />}
-              </Button>
-            )}
-          </div>
+              </>
+            }
+            where={r.managed ? r.remote : r.path}
+            actions={
+              admin && (
+                <ConfirmButton
+                  variant="ghost"
+                  size="icon"
+                  className="size-8"
+                  aria-label={`Remove ${r.name}`}
+                  title="Remove from the list (your folder stays)"
+                  question={`Remove ${r.name}?`}
+                  confirmLabel="Remove"
+                  loading={remove.isPending && remove.variables === r.path}
+                  onConfirm={() => remove.mutate(r.path)}
+                >
+                  {!(remove.isPending && remove.variables === r.path) && <Trash2 />}
+                </ConfirmButton>
+              )
+            }
+          />
         ))}
         {unlisted.map((r) => (
-          <div key={r.name} className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b bg-muted/30 px-4 py-3 last:border-0">
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <RepoDot repo={r.name} />
-                <span className="font-medium">{r.name}</span>
-                <Badge variant="warning">No folder here</Badge>
-                {r.symbols != null && <Badge variant="outline">{r.symbols.toLocaleString()} symbols</Badge>}
-              </div>
-              <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
-                {r.remote ?? "remote unknown (indexed before comindly recorded remotes)"}
-              </div>
-            </div>
-            {r.commit && <span className="font-mono text-xs text-muted-foreground">indexed @ {r.commit.slice(0, 7)}</span>}
-            {admin && (
-              <div className="flex gap-1.5">
-                {!server && (
-                  <Button variant="outline" size="sm" onClick={() => setDialog("add")}>
-                    <FolderOpen /> Locate
-                  </Button>
+          <RepoRow
+            key={r.name}
+            name={r.name}
+            status={
+              (repos.data?.repos.length ?? 0) > 0 && <span className="text-xs whitespace-nowrap text-muted-foreground">{server ? "Not on this server" : "Not on this machine"}</span>
+            }
+            meta={
+              <>
+                {r.symbols != null && <Symbols n={r.symbols} />}
+                {r.commit && (
+                  <span>
+                    Indexed at <span className="font-mono text-foreground">{r.commit.slice(0, 7)}</span>
+                  </span>
                 )}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={!r.remote}
-                  title={r.remote ? "comindly clones it into its own folder when indexing" : "The index has no clone URL for it"}
-                  loading={addOne.isPending && addOne.variables === r.remote}
-                  onClick={() => r.remote && addOne.mutate(r.remote)}
-                >
-                  <Plus /> Add
-                </Button>
-              </div>
-            )}
-          </div>
+              </>
+            }
+            where={r.remote ?? "remote unknown (indexed before comindly recorded remotes)"}
+            actions={
+              admin && (
+                <>
+                  {!server && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-8"
+                      aria-label={`Locate ${r.name}`}
+                      title="Locate your copy of it on this machine"
+                      onClick={() => setDialog("add")}
+                    >
+                      <FolderOpen />
+                    </Button>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-8"
+                    aria-label={`Add ${r.name}`}
+                    disabled={!r.remote}
+                    title={r.remote ? "Add it: comindly clones it into its own folder when indexing" : "The index has no clone URL for it"}
+                    loading={addOne.isPending && addOne.variables === r.remote}
+                    onClick={() => r.remote && addOne.mutate(r.remote)}
+                  >
+                    {!(addOne.isPending && addOne.variables === r.remote) && <Plus />}
+                  </Button>
+                </>
+              )
+            }
+          />
         ))}
       </Card>
 

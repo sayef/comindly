@@ -1,11 +1,11 @@
 @import url("https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap");
 
-/* Neutral ink and paper, with the mark's mint as the one accent. */
+/* Neutral ink and paper, with the mark's slate blue as the one accent. */
 :root {
   --cm-ink: #0e0e0f;
   --cm-paper: #f2f2f2;
-  --cm-accent: #8be3c9;
-  --cm-highlight: #c2f1e3;
+  --cm-accent: #8db4ea;
+  --cm-highlight: #c9d7ea;
   --md-text-font: "Geist";
   --md-code-font: "Geist Mono";
 }
@@ -16,9 +16,9 @@
   --md-primary-fg-color--dark: #ffffff;
   --md-primary-bg-color: var(--cm-ink);
   --md-primary-bg-color--light: rgba(14, 14, 15, 0.6);
-  --md-accent-fg-color: #13795b;
-  --md-accent-fg-color--transparent: rgba(19, 121, 91, 0.08);
-  --md-typeset-a-color: #13795b;
+  --md-accent-fg-color: #2f5f9e;
+  --md-accent-fg-color--transparent: rgba(47, 95, 158, 0.08);
+  --md-typeset-a-color: #2f5f9e;
   --md-default-bg-color: #ffffff;
   --md-default-fg-color: rgba(14, 14, 15, 0.9);
   --md-default-fg-color--light: rgba(14, 14, 15, 0.62);
@@ -35,8 +35,8 @@
   --md-primary-fg-color--dark: var(--cm-ink);
   --md-primary-bg-color: var(--cm-paper);
   --md-primary-bg-color--light: rgba(242, 242, 242, 0.6);
-  --md-accent-fg-color: #a8ebd7;
-  --md-accent-fg-color--transparent: rgba(139, 227, 201, 0.1);
+  --md-accent-fg-color: #a9c4ea;
+  --md-accent-fg-color--transparent: rgba(141, 180, 234, 0.1);
   --md-typeset-a-color: var(--cm-accent);
   --md-default-bg-color: var(--cm-ink);
   --md-default-fg-color: rgba(242, 242, 242, 0.92);

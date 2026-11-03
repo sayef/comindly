@@ -37,6 +37,10 @@ pub(super) async fn list(State(app): State<Shared>, Cur(s): Cur) -> Json<api::Re
         .iter()
         .map(|r| (r.name.clone(), r.commit.clone()))
         .collect();
+    let branches: std::collections::HashMap<String, String> = meta
+        .iter()
+        .filter_map(|r| Some((r.name.clone(), r.branch.clone()?)))
+        .collect();
     let symbols = indexed.clone();
     let listed = repos.clone();
     let rows = tokio::task::spawn_blocking(move || {
@@ -48,7 +52,9 @@ pub(super) async fn list(State(app): State<Shared>, Cur(s): Cur) -> Json<api::Re
                 api::RepoRow {
                     path: r.path.clone(),
                     exists: p.join(".git").exists(),
-                    branch: worktree::default_branch(p).ok(),
+                    branch: worktree::default_branch(p)
+                        .ok()
+                        .or_else(|| branches.get(&name).cloned()),
                     managed: r.remote.is_some(),
                     cloned: p.exists(),
                     your_branch: worktree::current_branch(p),
@@ -348,17 +354,19 @@ pub(super) async fn begin(
         })
 }
 
-/// With `auto_index` on, check every freshness interval whether a default branch moved on the
+/// With `auto_index` on, check every `auto_index_minutes` whether a default branch moved on the
 /// remote (`git ls-remote`, no download) and queue a re-index when one did, with the LLM steps
 /// when `auto_index_llm` is on.
 pub(super) async fn watch(app: Shared) {
+    let mut last = tokio::time::Instant::now();
     loop {
-        let fresh = app.config().fresh();
-        tokio::time::sleep(fresh.max(std::time::Duration::from_secs(60))).await;
+        // A short tick, so a changed interval applies without a restart.
+        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
         let settings = app.settings();
-        if !settings.auto_index {
+        if !settings.auto_index || last.elapsed() < settings.auto_index_every {
             continue;
         }
+        last = tokio::time::Instant::now();
         let result = match moved(&app).await {
             Ok(m) if m.is_empty() => "every default branch is indexed".to_string(),
             Ok(m) => {
@@ -423,8 +431,10 @@ async fn moved(app: &Shared) -> anyhow::Result<Vec<String>> {
 }
 
 pub(super) async fn watch_state(State(app): State<Shared>) -> Json<api::IndexWatch> {
+    let settings = app.settings();
     Json(api::IndexWatch {
-        enabled: app.settings().auto_index,
+        enabled: settings.auto_index,
+        minutes: settings.auto_index_every.as_secs() / 60,
         last: app.watch.lock().await.clone(),
     })
 }

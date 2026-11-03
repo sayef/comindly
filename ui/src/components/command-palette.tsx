@@ -14,7 +14,7 @@ function iconFor(n: { repo: string; kind: string }) {
   return FunctionSquare;
 }
 
-const heading = "px-2 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground";
+const group = "[&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:text-muted-foreground";
 const item = "flex cursor-pointer items-center gap-3 rounded-md px-3 py-2 text-sm data-[selected=true]:bg-muted";
 
 export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
@@ -38,18 +38,27 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
   };
   const shownIds = new Set((names.data ?? []).slice(0, 8).map((n) => n.id));
   const hits = (code.data ?? []).filter((h) => !shownIds.has(h.id)).slice(0, 10);
+  const searching = names.isFetching || code.isFetching;
+  const found = Math.min(names.data?.length ?? 0, 8) + hits.length;
+  const status = debounced.length <= 1 ? "" : searching ? "Searching…" : found ? `${found} result${found > 1 ? "s" : ""}` : "No results";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogTitle className="sr-only">Search the index</DialogTitle>
-        <Command shouldFilter={false} className="flex flex-col">
+        <Command shouldFilter={false} label="Search the index" className="flex flex-col">
           <Command.Input
             value={q}
             onValueChange={setQ}
+            aria-label="Search the index"
+            spellCheck={false}
+            autoComplete="off"
             placeholder="Search by name, or describe what you are looking for…"
-            className="h-12 border-b bg-transparent px-4 text-sm outline-none placeholder:text-muted-foreground"
+            className="h-12 border-b bg-transparent px-4 text-sm outline-none placeholder:text-muted-foreground focus-visible:outline-none focus-visible:shadow-[inset_0_-2px_0_var(--color-ring)] max-sm:text-base"
           />
+          <div role="status" aria-live="polite" className="sr-only">
+            {status}
+          </div>
           <Command.List className="max-h-[65vh] overflow-y-auto p-2">
             {debounced.length <= 1 && (
               <div className="px-3 py-8 text-center text-sm text-muted-foreground">
@@ -57,33 +66,36 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
               </div>
             )}
             {debounced.length > 1 && !names.isFetching && !code.isFetching && (
-              <Command.Empty className="px-3 py-8 text-center text-sm text-muted-foreground">No matches.</Command.Empty>
+              <Command.Empty className="px-3 py-8 text-center text-sm text-muted-foreground">Nothing in the index matches. Try part of a name or path.</Command.Empty>
             )}
             {(names.data?.length ?? 0) > 0 && (
-              <Command.Group>
-                <div className={heading}>By name</div>
+              <Command.Group heading="By name" className={group}>
                 {names.data!.slice(0, 8).map((n) => {
                   const Icon = iconFor(n);
                   return (
                     <Command.Item key={n.id} value={`name:${n.id}`} onSelect={() => go(n.id)} className={item}>
                       <Icon className="size-4 shrink-0 text-muted-foreground" />
                       <div className="min-w-0 flex-1">
-                        <div className="truncate font-medium">{n.name}</div>
+                        <div className="truncate font-mono font-semibold">{n.name}</div>
                         <div className="truncate font-mono text-xs text-muted-foreground">
-                          {n.repo === CONTRACTS ? "contract" : `${n.repo} · ${n.location}`}
+                          {n.repo === CONTRACTS ? "Contract" : `${n.repo}/${n.location}`}
                         </div>
                       </div>
-                      <span className="text-xs text-muted-foreground">{n.kind}</span>
+                      <span className="text-xs text-muted-foreground">{n.kind.charAt(0).toUpperCase() + n.kind.slice(1)}</span>
                     </Command.Item>
                   );
                 })}
               </Command.Group>
             )}
             {debounced.length > 2 && (
-              <Command.Group>
-                <div className={heading}>
-                  <Sparkles className="mr-1 inline size-3" /> Code search
-                </div>
+              <Command.Group
+                heading={
+                  <>
+                    <Sparkles className="mr-1 inline size-3" /> Code search
+                  </>
+                }
+                className={group}
+              >
                 {code.isFetching && <div className="px-3 py-2 text-xs text-muted-foreground">Searching…</div>}
                 {code.error && <div className="px-3 py-2 text-xs text-muted-foreground [overflow-wrap:anywhere]">{sentence(code.error.message)}</div>}
                 {hits.map((h) => {
@@ -94,7 +106,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
                       <div className="min-w-0 flex-1">
                         <div className="truncate font-medium">{h.name}</div>
                         <div className="truncate text-xs text-muted-foreground">
-                          {h.summary ?? <span className="font-mono">{`${h.repo} · ${h.location}`}</span>}
+                          {h.summary ?? <span className="font-mono">{`${h.repo}/${h.location}`}</span>}
                         </div>
                       </div>
                       <span className="shrink-0 text-xs text-muted-foreground">{h.repo}</span>

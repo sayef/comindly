@@ -26,12 +26,20 @@ so the plain address works as a bookmark afterwards. Other programs and web page
 UI's API without it. The token is kept in `~/.config/comindly/ui-token`; delete the file to issue a
 new one.
 
-- **Overview**: counts, the org map, a version slider to compare with earlier index versions, what needs
-  attention, the flows that reach furthest, symbols per repository and version skew. The org map is a
-  tree from the entry points (or any repository you pick) to what each uses, or turned around to what
-  uses it; click a box to open it, and each branch names the contract it goes through. A repository
-  already shown elsewhere is dashed, and where repositories depend on each other in a circle an amber
-  line loops back; **↺ cycles** lists them all.
+The sidebar collapses to icons with the button beside the logo or `⌘ \`, and stays that way in this
+browser; on a phone it opens from the menu button. Filters are part of the address, so a filtered view
+can be bookmarked or shared.
+
+- **Overview**: counts with their breakdown (symbols per repository, contracts by type), what needs
+  attention (above the map when there is something to review), the org map, a version slider to compare
+  with earlier index versions, the flows that reach furthest, symbols per repository and version skew. The org map shows one
+  repository at a time: the repositories that use it above, the ones it uses below, and the list of all
+  repositories beside it, ordered by how many depend on each; click a box or a name to move there.
+  Blue arrows go through a contract, grey ones are imports and calls, dashed amber ones are part of a
+  cycle, and hovering or tabbing to an arrow lists the contracts and code references behind it. On a
+  phone you pick the repository from a list above the graph. **Tree** switches to a tree from the entry points (or
+  any repository) to what each uses, or turned around to what uses it; **cycles** lists every group of
+  repositories that depend on each other in a circle.
 - **Contracts**: every route, queue, topic, bucket and table with its providers and consumers, filtered
   by type, by whether both sides are indexed, and by name.
 - **Ledger**: records that need review (challenged, stale or orphaned, and unconfirmed machine
@@ -46,7 +54,8 @@ new one.
   flows also get a written walkthrough.
 - **Conventions**: every measured and team convention in one table, filtered by scope (org-wide or a
   repository), topic, origin and text, and sorted by scope, topic or how widely it is followed. Expand a
-  row to see where it comes from: the places that follow it and those that deviate, each with its code.
+  row to see where it comes from: the places that follow it and those that deviate, each with its code
+  as indexed and a link to it on GitHub or GitLab. Recipes, learned from commit history, list commits.
   Add your own, edit or hide measured ones (hidden ones can be restored). `/conventions?repo=<name>`
   opens one repository.
 - **Packages**: internal packages, who publishes each, and the version every consumer pins, marked
@@ -64,9 +73,10 @@ new one.
   repository's remote URL, so one indexed elsewhere shows **No folder here** with **Locate** and **Add**.
   comindly indexes all repositories together so cross-repo links stay complete, so **Index now** waits
   until every indexed repository has a folder here, unless you choose to drop the missing ones. With
-  **Re-index automatically** on (`auto_index`), the app checks every freshness interval whether a default
-  branch moved on the remote and re-indexes when one did, with the LLM steps for new or changed code
-  only if **With LLM steps** is on (`auto_index_llm`); both are among the index's shared settings.
+  **Re-index automatically** on (`auto_index`), the app checks every few minutes (`auto_index_minutes`,
+  default 5) whether a default branch moved on the remote and re-indexes when one did, with the LLM steps
+  for new or changed code only if **With LLM steps** is on (`auto_index_llm`); all three are among the
+  index's shared settings.
 - **Settings**: the index location (with a connection test), the index's shared settings (LLM
   endpoint and model, embedding model, LLM steps, limits and prices), your own API key, your name on
   ledger records, and how often to check for a new index version. Changing the index location switches

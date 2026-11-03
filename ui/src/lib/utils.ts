@@ -5,7 +5,13 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-/** Stable hue per repository, so a repo keeps its colour on every graph. */
+/** Muted tones that sit with the slate theme; a repository always gets the same one. */
+const REPO_TONES = ["#5f9e8a", "#8f7f9a", "#9a8f5e", "#b08d6a", "#7f8f9e", "#6fa36b", "#a07a6a", "#5d8f9a"];
+
+export function repoColor(repo: string): string {
+  return REPO_TONES[repoHue(repo) % REPO_TONES.length];
+}
+
 export function repoHue(repo: string): number {
   let h = 0;
   for (const c of repo) h = (h * 31 + c.charCodeAt(0)) % 360;
@@ -29,3 +35,23 @@ export function ago(iso: string | null | undefined): string {
   if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
   return `${Math.floor(s / 86400)} d ago`;
 }
+
+const compactFmt = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 });
+/** A count in a few characters: "1.2K", "14K". */
+export const compact = (n: number) => compactFmt.format(n);
+
+/** `a` as a share of `b`: "0.4 %", "38 %". */
+export const percent = (a: number, b: number) =>
+  new Intl.NumberFormat(undefined, { style: "percent", maximumFractionDigits: b && a / b < 0.1 ? 1 : 0 }).format(b ? a / b : 0);
+
+/** A size given in KiB, in KB or MB. */
+export const bytes = (kib: number) =>
+  kib >= 1024
+    ? new Intl.NumberFormat(undefined, { style: "unit", unit: "megabyte", maximumFractionDigits: 0 }).format(kib / 1024)
+    : new Intl.NumberFormat(undefined, { style: "unit", unit: "kilobyte" }).format(kib);
+
+/** An LLM cost in US dollars; amounts under a cent read "under $0.01". */
+export const usd = (n: number) => (n < 0.01 ? "under $0.01" : new Intl.NumberFormat("en", { style: "currency", currency: "USD" }).format(n));
+
+/** A calendar date in the reader's locale, or a dash. */
+export const date = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "—");
