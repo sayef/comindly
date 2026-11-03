@@ -26,12 +26,15 @@ so the plain address works as a bookmark afterwards. Other programs and web page
 UI's API without it. The token is kept in `~/.config/comindly/ui-token`; delete the file to issue a
 new one.
 
-- **Overview**: counts, the org map, a version slider to compare with earlier index versions, what needs
-  attention, the flows that reach furthest, symbols per repository and version skew. The org map is a
-  tree from the entry points (or any repository you pick) to what each uses, or turned around to what
-  uses it; click a box to open it, and each branch names the contract it goes through. A repository
-  already shown elsewhere is dashed, and where repositories depend on each other in a circle an amber
-  line loops back; **↺ cycles** lists them all.
+- **Overview**: counts with their breakdown (symbols per repository, contracts by type, records by
+  status), the org map, a version slider to compare with earlier index versions, what needs attention,
+  the flows that reach furthest, symbols per repository and version skew. The org map shows one
+  repository at a time: the repositories that use it above, the ones it uses below, and the list of all
+  repositories beside it, ordered by how many depend on each; click a box or a name to move there.
+  Green arrows go through a contract, dashed amber ones are part of a cycle, and hovering an arrow lists
+  the contracts and code references behind it. **Tree** switches to a tree from the entry points (or
+  any repository) to what each uses, or turned around to what uses it; **cycles** lists every group of
+  repositories that depend on each other in a circle.
 - **Contracts**: every route, queue, topic, bucket and table with its providers and consumers, filtered
   by type, by whether both sides are indexed, and by name.
 - **Ledger**: records that need review (challenged, stale or orphaned, and unconfirmed machine
