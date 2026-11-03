@@ -27,8 +27,8 @@ MEDIUM = instance("Geist.ttf", 500)
 
 INK, PAPER = "#131315", "#F2F2F2"
 THEMES = {
-    "light": {"text": INK, "tagline": "#646466", "petals": ("#0F604A", "#1F9A74"), "back": PAPER},
-    "dark": {"text": PAPER, "tagline": "#9A9A9C", "petals": ("#6FDBB9", "#C2F1E3"), "back": INK},
+    "light": {"text": INK, "tagline": "#646466", "petals": ("#1A3455", "#305789"), "back": PAPER},
+    "dark": {"text": PAPER, "tagline": "#9A9A9C", "petals": ("#7EA0CC", "#C9D7EA"), "back": INK},
 }
 TAGLINE = "Your team’s engineering memory for coding agents"
 
@@ -123,7 +123,7 @@ if __name__ == "__main__":
     social = f"""<rect width="1280" height="640" fill="{INK}"/>
 <g transform="translate({(1280 - w) / 2:.1f} 190)">{body}</g>
 <g transform="translate({(1280 - tag_w) / 2:.1f} 420)"><path d="{tag}" fill="#9A9A9C"/></g>
-<g transform="translate({(1280 - points_w) / 2:.1f} 478)"><path d="{points}" fill="#8BE3C9"/></g>"""
+<g transform="translate({(1280 - points_w) / 2:.1f} 478)"><path d="{points}" fill="#7EA0CC"/></g>"""
     (OUT / "social-preview.svg").write_text(svg(1280, 640, social, "comindly"))
 
     # PNGs for places that take no SVG (GitHub social preview, app bundles); ImageMagick's own renderer drops the mark, so resvg first.

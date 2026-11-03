@@ -8,10 +8,10 @@
 | `banner-light.svg`, `banner-dark.svg` | The name and tagline, as at the top of the README |
 | `social-preview.svg`, `social-preview.png` | 1280 × 640 repository preview for GitHub and link cards |
 
-The mark is a ring of ten petals around a graph, the petals running from deep to pale mint (`#0F604A` to
-`#1F9A74` on light backgrounds, `#6FDBB9` to `#C2F1E3` on dark), the graph in ink (`#131315`, or paper
-`#F2F2F2` on dark). The name follows the mark in bold. Mint is the one accent; links on light backgrounds
-take `#13795B`, which reads at body size. Text is converted to outlines from
+The mark is a ring of ten petals around a graph, the petals running from deep to pale slate blue (`#1A3455` to
+`#305789` on light backgrounds, `#7EA0CC` to `#C9D7EA` on dark), the graph in ink (`#131315`, or paper
+`#F2F2F2` on dark). The name follows the mark in bold. Slate blue is the one accent; links on light backgrounds
+take `#2F5F9E`, which reads at body size. Text is converted to outlines from
 [Space Grotesk](https://github.com/floriankarsten/space-grotesk) (the name) and
 [Geist](https://github.com/vercel/geist-font) (the tagline), both under the SIL Open Font
 License, so the files need no fonts. The graph is adapted from the [Phosphor Icons](https://phosphoricons.com)
