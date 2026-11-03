@@ -27,8 +27,8 @@ MEDIUM = instance("Geist.ttf", 500)
 
 INK, PAPER = "#131315", "#F2F2F2"
 THEMES = {
-    "light": {"text": INK, "tagline": "#646466", "petals": ("#1A3455", "#305789"), "back": PAPER},
-    "dark": {"text": PAPER, "tagline": "#9A9A9C", "petals": ("#7EA0CC", "#C9D7EA"), "back": INK},
+    "light": {"text": INK, "tagline": "#646466", "petals": ("#1A3455", "#2F5F9E"), "back": PAPER},
+    "dark": {"text": PAPER, "tagline": "#9A9A9C", "petals": ("#8DB4EA", "#C9D7EA"), "back": INK},
 }
 TAGLINE = "Your team’s engineering memory for coding agents"
 
@@ -52,28 +52,30 @@ def blend(a, b, t):
     return "#" + "".join(f"{round(x + (y - x) * t):02X}" for x, y in zip(a, b))
 
 
-def mark(theme, solid=False):
-    """The petal ring around the graph glyph (adapted from Phosphor Icons "graph", MIT), on a 256 grid."""
+def mark(theme):
+    """Solid petals around the graph glyph (adapted from Phosphor Icons "graph", MIT), both in one gradient, on a 256 grid."""
     start, end = THEMES[theme]["petals"]
+    gid = f"cm-{theme}"
+    # One sweep from the top right to the bottom left, in the user space of the 256 grid.
+    paint = (
+        f'<defs><linearGradient id="{gid}" gradientUnits="userSpaceOnUse" x1="218.5" y1="37.5" x2="37.5" y2="218.5">'
+        f'<stop offset="0" stop-color="{start}"/><stop offset="1" stop-color="{end}"/></linearGradient></defs>'
+    )
     petals = []
     for i in range(10):
         angle = i * 36
         cx = 128 + 102 * math.sin(math.radians(angle))
         cy = 128 - 102 * math.cos(math.radians(angle))
-        colour = blend(start, end, i / 9)
-        paint = f'fill="{colour}"' if solid else f'fill="none" stroke="{colour}" stroke-width="9"'
-        petals.append(
-            f'<ellipse cx="{cx:.1f}" cy="{cy:.1f}" rx="11" ry="22" transform="rotate({angle} {cx:.1f} {cy:.1f})" {paint}/>'
-        )
+        petals.append(f'<ellipse cx="{cx:.1f}" cy="{cy:.1f}" rx="14" ry="25" transform="rotate({angle} {cx:.1f} {cy:.1f})" fill="url(#{gid})"/>')
     graph = (
-        f'<g transform="translate(128 128) scale(0.56) translate(-128 -124)" fill="none" stroke="{THEMES[theme]["text"]}" '
-        'stroke-linecap="round" stroke-linejoin="round" stroke-width="20">'
+        f'<g transform="translate(128 128) scale(0.56) translate(-128 -124)" fill="none" stroke="url(#{gid})" '
+        'stroke-linecap="round" stroke-linejoin="round" stroke-width="14">'
         '<line x1="177.23" y1="111.59" x2="150.77" y2="120.41"/><line x1="181.06" y1="169.27" x2="146.94" y2="142.73"/>'
         '<line x1="110.06" y1="143.94" x2="73.94" y2="176.06"/><line x1="118.25" y1="106.07" x2="105.75" y2="77.93"/>'
-        '<circle cx="128" cy="128" r="24"/><circle cx="200" cy="104" r="24"/><circle cx="200" cy="184" r="24"/>'
-        '<circle cx="56" cy="192" r="24"/><circle cx="96" cy="56" r="24"/></g>'
+        '<circle cx="128" cy="128" r="22"/><circle cx="200" cy="104" r="22"/><circle cx="200" cy="184" r="22"/>'
+        '<circle cx="56" cy="192" r="22"/><circle cx="96" cy="56" r="22"/></g>'
     )
-    return "".join(petals) + graph
+    return paint + "".join(petals) + graph
 
 
 def lockup(x, top, size, theme):
@@ -98,8 +100,8 @@ def svg(width, height, body, label):
 if __name__ == "__main__":
     (OUT / "logo.svg").write_text(svg(256, 256, mark("light"), "comindly"))
     (OUT / "logo-dark.svg").write_text(svg(256, 256, mark("dark"), "comindly"))
-    # The app icon and favicon: solid petals on a dark tile read at 16 px.
-    tile = f'<rect width="256" height="256" rx="58" fill="{INK}"/><g transform="translate(128 128) scale(0.84) translate(-128 -128)">{mark("dark", solid=True)}</g>'
+    # The app icon and favicon: the dark mark on a dark tile.
+    tile = f'<rect width="256" height="256" rx="58" fill="{INK}"/><g transform="translate(128 128) scale(0.84) translate(-128 -128)">{mark("dark")}</g>'
     (OUT / "icon.svg").write_text(svg(256, 256, tile, "comindly"))
 
     for theme, suffix in (("light", ""), ("dark", "-dark")):
