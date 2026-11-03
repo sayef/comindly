@@ -1481,7 +1481,10 @@ async fn erase(Cur(s): Cur, Json(b): Json<api::IdRequest>) -> Reply<api::Done> {
         let records = ledger.all().await?;
         *s.entries.write().await =
             crate::ledger::derive(&records, &s.data.symbols, &crate::config::local_verifier());
-        anyhow::Ok(format!("deleted {}", crate::doctor::plural(gone.len(), "record")))
+        anyhow::Ok(format!(
+            "deleted {}",
+            crate::doctor::plural(gone.len(), "record")
+        ))
     };
     match run.await {
         Ok(msg) => Ok(Json(api::Done::new(msg))),

@@ -1515,7 +1515,11 @@ fn cmd_erase(ids: &[String], actor: Option<&str>, yes: bool, from: Option<&str>)
                 println!("- {} `{}` ({})", r.kind.as_str(), r.title, r.id);
             }
             if yes {
-                comindly::ui::ok(&format!("erased {} record{}", gone.len(), if gone.len() == 1 { "" } else { "s" }));
+                comindly::ui::ok(&format!(
+                    "erased {} record{}",
+                    gone.len(),
+                    if gone.len() == 1 { "" } else { "s" }
+                ));
             } else {
                 comindly::ui::ok(&format!(
                     "{} record{} would be erased; re-run with --yes",

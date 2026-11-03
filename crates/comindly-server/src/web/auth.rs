@@ -498,7 +498,10 @@ pub(super) async fn set_role(
     Json(q): Json<api::MemberRole>,
 ) -> Reply<Done> {
     if server::normalize(&q.email) == who.email {
-        return Err(fail(StatusCode::BAD_REQUEST, "You cannot change your own role"));
+        return Err(fail(
+            StatusCode::BAD_REQUEST,
+            "You cannot change your own role",
+        ));
     }
     done(
         server.accounts.set_role(&who.email, &q.email, q.role),

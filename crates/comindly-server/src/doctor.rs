@@ -35,7 +35,10 @@ pub fn run(
             let latest = chrono::DateTime::parse_from_rfc3339(&at)
                 .map(|t| t.to_utc().format("%-d %b %Y, %H:%M UTC").to_string())
                 .unwrap_or(at);
-            let msg = format!("index readable: {}, latest {latest}", plural(v.len(), "version"));
+            let msg = format!(
+                "index readable: {}, latest {latest}",
+                plural(v.len(), "version")
+            );
             check(true, false, &msg, "");
         }
         _ => check(
