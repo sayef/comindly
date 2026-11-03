@@ -26,14 +26,28 @@ All notable changes to this project are documented here. The format follows
 - Recipe conventions show the commits they were learned from, linked to GitHub or GitLab, instead of
   a "Show code" that could not find them.
 - The index records each repository's default branch, so the Repositories page shows it without a clone.
-- A new theme for the app on its existing layout: pine ink on a cool paper ground with the logo's green as
-  the one accent, muted repository colours, and Atkinson Hyperlegible for text and code. Tokens and rules
-  are in `ui/DESIGN.md`.
+- A new theme for the app on its existing layout: cool blue-grey neutrals with one steel-blue accent,
+  muted repository colours, and Atkinson Hyperlegible for text and code. Tokens
+  and rules are in `ui/DESIGN.md`.
+- The sidebar collapses to icons (button beside the logo, or `⌘ \`); on phones it opens as a menu.
+- On phones, tables become two-line rows, filters fit the screen, and the org map picks its repository
+  from a list so the graph shows first.
+- Irreversible actions ask once more in place: revoking a token, removing a repository, member or stored
+  secret, withdrawing an invitation, deleting a team convention and stopping an indexing run. Nobody
+  can change their own role.
+- Settings keep unsaved edits when the data refreshes and warn before the tab closes with changes.
+- Labelled fields, announced errors, keyboard access to the org map's arrows, and no light flash when
+  dark mode loads.
+- Filters on Contracts, Conventions, Flows, Ledger, Packages and Activity are part of the address.
+- Ledger cards badge only what needs attention; flows open with the crossings between repositories and
+  fold steps that stay in one repository.
+- Org-wide conventions read like "Tests use pytest: in 3 of 10 measured repos", counting only the repositories with
+  measured conventions.
 - The org map shows one repository at a time: what uses it above, what it uses below, with the list of
-  repositories (by how many depend on each) to move between them. Hovering an arrow lists the contracts
-  and code references behind it; cycles are amber. The previous tree is one click away.
-- Overview's figures each show their breakdown: symbols per repository, contracts by type and ledger
-  records by status.
+  repositories (by how many depend on each) to move between them. Hovering or tabbing to an arrow lists
+  the contracts and code references behind it; cycles are amber, and a key explains the arrows. The previous tree is one click away.
+- Overview's figures show a breakdown where there is one (symbols per repository, contracts by type);
+  what needs attention moves above the org map when there is something to review.
 - The ledger opens on the timeline when nothing needs review, and its view is part of the address.
 - A summary is written again only when its symbol's name, signature or path changed, not whenever
   its file did.

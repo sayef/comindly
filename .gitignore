@@ -62,3 +62,5 @@ assets/png/
 .cache/
 
 .design-kit/
+.agents/
+skills-lock.json
