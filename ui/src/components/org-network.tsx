@@ -1,15 +1,13 @@
-import { Graph, layout } from "@dagrejs/dagre";
-import { Maximize, Minus, Plus, X } from "lucide-react";
+import { RefreshCcw } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Org } from "@/components/org-views";
 import { RepoDot } from "@/components/symbol";
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-const W = 184;
-const H = 52;
-const MIN_HEIGHT = 360;
-const MAX_HEIGHT = 640;
+const W = 168;
+const H = 50;
+const GAP = 16;
+const ROW = 104;
 
 interface L {
   /** Code references (imports and calls), apart from contracts. */
@@ -20,22 +18,60 @@ interface L {
   contract: boolean;
   cycle: boolean;
   via: string[];
-  points: { x: number; y: number }[];
+}
+
+interface Box {
+  id: string;
+  x: number;
+  y: number;
+  line: number;
 }
 
 const short = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : String(n));
 
-/** A smooth path through dagre's points, leaving and entering each box horizontally. */
-function curve(p: { x: number; y: number }[]) {
-  if (p.length < 2) return "";
-  let d = `M${p[0].x},${p[0].y}`;
-  for (let i = 1; i < p.length; i++) {
-    const a = p[i - 1];
-    const b = p[i];
-    const dx = (b.x - a.x) / 2;
-    d += ` C${a.x + dx},${a.y} ${b.x - dx},${b.y} ${b.x},${b.y}`;
+type P = { x: number; y: number };
+
+/** A smooth vertical path through `p`: a plain curve for two points, a B-spline through more. */
+function curve(p: P[]) {
+  if (p.length === 2) {
+    const [a, b] = p;
+    const dy = (b.y - a.y) / 2;
+    return `M${a.x},${a.y} C${a.x},${a.y + dy} ${b.x},${b.y - dy} ${b.x},${b.y}`;
   }
-  return d;
+  let d = `M${p[0].x},${p[0].y} L${(5 * p[0].x + p[1].x) / 6},${(5 * p[0].y + p[1].y) / 6}`;
+  for (let i = 1; i < p.length - 1; i++) {
+    const [a, b, c] = [p[i - 1], p[i], p[i + 1]];
+    d += ` C${(2 * a.x + b.x) / 3},${(2 * a.y + b.y) / 3} ${(a.x + 2 * b.x) / 3},${(a.y + 2 * b.y) / 3} ${(a.x + 4 * b.x + c.x) / 6},${(a.y + 4 * b.y + c.y) / 6}`;
+  }
+  const [y, z] = [p[p.length - 2], p[p.length - 1]];
+  return `${d} C${(2 * y.x + z.x) / 3},${(2 * y.y + z.y) / 3} ${(y.x + 2 * z.x) / 3},${(y.y + 2 * z.y) / 3} ${z.x},${z.y}`;
+}
+
+/** Boxes in lines away from the focus; every other line sits half a box over, so its arrows pass
+ * through the gaps of the line in front. `y(line)` places each line. */
+function rows(ids: string[], per: number, width: number, y: (line: number) => number): Box[] {
+  const cell = W + GAP;
+  const x0 = (width - (per * W + (per - 1) * GAP)) / 2;
+  const out: Box[] = [];
+  let i = 0;
+  for (let line = 0; i < ids.length; line++) {
+    const odd = line % 2 === 1 && per > 1;
+    const cap = odd ? per - 1 : per;
+    const n = Math.min(cap, ids.length - i);
+    const first = Math.floor((cap - n) / 2);
+    for (let j = 0; j < n; j++, i++) {
+      out.push({ id: ids[i], x: x0 + (odd ? cell / 2 : 0) + (first + j) * cell, y: y(line), line });
+    }
+  }
+  return out;
+}
+
+/** How many lines `rows` needs for `n` boxes. */
+function lines(n: number, per: number) {
+  let used = 0;
+  let k = 0;
+  while (used < n) used += k++ % 2 === 1 && per > 1 ? per - 1 : per;
+  return k;
 }
 
 const KIND: Record<string, string> = { http: "HTTP routes", sqs: "Queues", sns: "Topics", s3: "Buckets", table: "Tables" };
@@ -83,305 +119,218 @@ function LinkCard({ l, x, y, width, height }: { l: L; x: number; y: number; widt
   );
 }
 
-/** Repositories laid out left to right, from what starts work to the shared code it ends up in. */
+/** One repository at a time: what uses it above, what it uses below, and the list to move between them. */
 export function OrgNetwork({ org }: { org: Org }) {
   const box = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(900);
-  const [view, setView] = useState({ k: 1, x: 0, y: 0 });
-  const [hover, setHover] = useState<string | null>(null);
-  const [picked, setPicked] = useState<string | null>(null);
-  const pan = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
+  const [width, setWidth] = useState(800);
+  const [tip, setTip] = useState<{ l: L; x: number; y: number } | null>(null);
 
-  const { nodes, links, alone, size } = useMemo(() => {
-    const linked = new Set<string>();
-    const raw: Omit<L, "points">[] = [];
+  const links = useMemo(() => {
     const inCycle = (a: string, b: string) => org.cycles.some((c) => c.includes(a) && c.includes(b));
-    for (const [from, out] of org.uses) {
-      for (const [to, es] of out) {
-        if (from === to) continue;
-        linked.add(from).add(to);
-        raw.push({
+    const out: L[] = [];
+    for (const [from, to] of org.uses) {
+      for (const [dst, es] of to) {
+        if (from === dst) continue;
+        out.push({
           from,
-          to,
+          to: dst,
           weight: es.reduce((n, e) => n + (e.weight || 1), 0),
           code: es.filter((e) => e.kind !== "contract").reduce((n, e) => n + (e.weight || 1), 0),
           contract: es.some((e) => e.kind === "contract"),
-          cycle: inCycle(from, to),
+          cycle: inCycle(from, dst),
           via: [...new Set(es.flatMap((e) => e.via ?? []))],
         });
       }
     }
-    const g = new Graph();
-    g.setGraph({ rankdir: "LR", ranksep: 110, nodesep: 22, marginx: 24, marginy: 24 });
-    g.setDefaultEdgeLabel(() => ({}));
-    for (const r of org.repos) if (linked.has(r)) g.setNode(r, { width: W, height: H });
-    for (const l of raw) g.setEdge(l.from, l.to, { weight: Math.max(1, Math.log2(l.weight + 1)) });
-    layout(g);
-    const nodes = g.nodes().map((id) => {
-      const n = g.node(id);
-      return { id, x: n.x, y: n.y, symbols: org.symbols.get(id) ?? 0 };
-    });
-    // Leave from the middle of the right side; arrive spread down the left side, in the order sources sit.
-    const at = new Map(nodes.map((n) => [n.id, n]));
-    const slot = new Map<string, number>();
-    for (const n of nodes) {
-      const ins = raw.filter((l) => l.to === n.id).sort((a, b) => at.get(a.from)!.y - at.get(b.from)!.y);
-      ins.forEach((l, i) => slot.set(`${l.from}>${l.to}`, ins.length === 1 ? 0 : ((i / (ins.length - 1)) * 2 - 1) * (H / 2 - 10)));
-    }
-    const links: L[] = raw.map((l) => {
-      const a = at.get(l.from)!;
-      const b = at.get(l.to)!;
-      const mid = (g.edge(l.from, l.to)?.points ?? []).slice(1, -1);
-      const forward = b.x > a.x;
-      const start = { x: a.x + (forward ? W / 2 : -W / 2), y: a.y };
-      const end = { x: b.x + (forward ? -W / 2 - 3 : W / 2 + 3), y: b.y + (slot.get(`${l.from}>${l.to}`) ?? 0) };
-      return { ...l, points: [start, ...mid.filter((p: { x: number; y: number }) => (forward ? p.x > start.x && p.x < end.x : true)), end] };
-    });
-    const info = g.graph();
-    return {
-      nodes,
-      links,
-      alone: org.repos.filter((r) => !linked.has(r)),
-      size: { w: info.width ?? 0, h: info.height ?? 0 },
-    };
+    return out;
   }, [org]);
 
-  const height = Math.round(Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, size.h + 48)));
+  const ranked = useMemo(
+    () =>
+      org.repos
+        .map((id) => ({ id, usedBy: org.usedBy.get(id)?.size ?? 0, uses: org.uses.get(id)?.size ?? 0 }))
+        .sort((a, b) => b.usedBy - a.usedBy || b.uses - a.uses || a.id.localeCompare(b.id)),
+    [org],
+  );
+  const [focus, setFocus] = useState<string | null>(null);
+  const current = focus && org.repos.includes(focus) ? focus : ranked[0]?.id;
+  const inCycle = new Set(org.cycles.flat());
 
   useEffect(() => {
     const el = box.current;
     if (!el) return;
-    const ro = new ResizeObserver(([e]) => setWidth(Math.max(320, e.contentRect.width)));
+    const ro = new ResizeObserver(([e]) => setWidth(Math.max(280, e.contentRect.width)));
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
 
-  const fit = () => {
-    if (!size.w) return;
-    const k = Math.min(1.2, (width - 32) / size.w, (height - 32) / size.h);
-    setView({ k, x: (width - size.w * k) / 2, y: (height - size.h * k) / 2 });
-  };
-  useEffect(fit, [size.w, size.h, width, height]);
+  if (!current) return <p className="px-5 py-8 text-sm text-muted-foreground">No repositories in the index yet.</p>;
 
-  const zoom = (f: number) =>
-    setView((v) => {
-      const k = Math.min(3, Math.max(0.25, v.k * f));
-      const cx = width / 2;
-      const cy = height / 2;
-      return { k, x: cx - ((cx - v.x) * k) / v.k, y: cy - ((cy - v.y) * k) / v.k };
-    });
+  const up = links.filter((l) => l.to === current).sort((a, b) => b.weight - a.weight);
+  const down = links.filter((l) => l.from === current).sort((a, b) => b.weight - a.weight);
+  const per = Math.max(1, Math.floor((width - 32 + GAP) / (W + GAP)));
+  const upLines = lines(up.length, per);
+  const top = 28 + (upLines ? 22 : 0);
+  const focusY = top + (upLines ? upLines * ROW : 0);
+  const upBoxes = rows(
+    up.map((l) => l.from),
+    per,
+    width,
+    (k) => focusY - ROW * (k + 1),
+  );
+  const downBoxes = rows(
+    down.map((l) => l.to),
+    per,
+    width,
+    (k) => focusY + ROW * (k + 1),
+  );
+  const me: Box = { id: current, x: (width - W) / 2, y: focusY, line: 0 };
+  const downLines = lines(down.length, per);
+  const height = focusY + H + (downLines ? downLines * ROW + 22 : 0) + 28;
 
-  const focus = hover ?? picked;
-  const near = useMemo(() => {
-    if (!focus) return null;
-    const s = new Set([focus]);
-    for (const l of links) {
-      if (l.from === focus) s.add(l.to);
-      if (l.to === focus) s.add(l.from);
+  // Arrivals and departures spread along the focus box's edges, in the order the other boxes sit.
+  const spread = (n: number, i: number) => (n === 1 ? 0 : ((i / (n - 1)) * 2 - 1) * (W / 2 - 18));
+  const center = (b: Box) => b.x + W / 2;
+  // From a box in a back line, pass every line in front through its gaps, stepping half a box towards the middle.
+  const lane = (b: Box, dir: 1 | -1): P[] => {
+    const out: P[] = [];
+    let x = center(b);
+    let off = b.line % 2;
+    for (let m = b.line - 1; m >= 0; m--) {
+      if (off === m % 2 && per > 1) {
+        x += (x < width / 2 ? 1 : -1) * ((W + GAP) / 2);
+        off ^= 1;
+      }
+      const lineY = focusY + dir * ROW * (m + 1);
+      out.push({ x, y: lineY + (dir === -1 ? -8 : H + 8) }, { x, y: lineY + (dir === -1 ? H + 8 : -8) });
     }
-    return s;
-  }, [focus, links]);
-  const [tip, setTip] = useState<{ l: L; x: number; y: number } | null>(null);
-  const showTip = (l: L, e: React.PointerEvent) => {
+    return out;
+  };
+  const show = (l: L, e: React.PointerEvent) => {
     const r = box.current!.getBoundingClientRect();
     setTip({ l, x: e.clientX - r.left, y: e.clientY - r.top });
   };
 
-  const uses = picked ? links.filter((l) => l.from === picked) : [];
-  const usedBy = picked ? links.filter((l) => l.to === picked) : [];
+  const edge = (l: L, pts: P[]) => {
+    const kind = l.cycle ? "cycle" : l.contract ? "contract" : "code";
+    const hot = tip?.l === l;
+    return (
+      <g key={`${l.from}>${l.to}`}>
+        <path
+          d={curve(pts)}
+          fill="none"
+          stroke={kind === "contract" ? "var(--color-brand)" : kind === "cycle" ? "var(--color-warning)" : "var(--color-muted-foreground)"}
+          strokeWidth={hot ? 2.5 : 1.5}
+          strokeOpacity={hot ? 1 : kind === "code" ? 0.55 : 0.85}
+          strokeDasharray={kind === "cycle" ? "6 4" : undefined}
+          markerEnd={`url(#tip-${kind})`}
+          className="pointer-events-none"
+        />
+        <path
+          d={curve(pts)}
+          fill="none"
+          stroke="transparent"
+          strokeWidth={14}
+          className="cursor-help"
+          onPointerEnter={(e) => show(l, e)}
+          onPointerMove={(e) => show(l, e)}
+          onPointerLeave={() => setTip(null)}
+        />
+      </g>
+    );
+  };
 
-  if (nodes.length === 0) return <p className="px-5 py-8 text-sm text-muted-foreground">No links between the indexed repositories yet.</p>;
+  const node = (b: Box, main = false) => (
+    <g
+      key={`${b.id}@${b.y}`}
+      tabIndex={main ? -1 : 0}
+      role={main ? undefined : "button"}
+      aria-label={main ? undefined : `Focus on ${b.id}`}
+      transform={`translate(${b.x},${b.y})`}
+      className={cn("outline-none [&:focus-visible>rect]:stroke-ring", !main && "cursor-pointer [&:hover>rect]:stroke-muted-foreground")}
+      onClick={() => !main && (setFocus(b.id), setTip(null))}
+      onKeyDown={(e) => !main && (e.key === "Enter" || e.key === " ") && (e.preventDefault(), setFocus(b.id))}
+    >
+      <rect
+        width={W}
+        height={H}
+        rx={8}
+        fill={main ? "var(--color-accent)" : "var(--color-card)"}
+        stroke={main ? "var(--color-brand)" : inCycle.has(b.id) && inCycle.has(current) ? "var(--color-warning)" : "var(--color-input)"}
+        strokeWidth={main ? 1.5 : 1}
+        className="transition-[stroke] duration-100"
+      />
+      <text x={12} y={21} className="fill-foreground text-sm font-semibold">
+        {b.id.length > 20 ? `${b.id.slice(0, 19)}…` : b.id}
+        <title>{b.id}</title>
+      </text>
+      <text x={12} y={38} className="nums fill-muted-foreground text-xs">
+        {short(org.symbols.get(b.id) ?? 0)} symbols
+      </text>
+    </g>
+  );
 
   return (
-    <div>
-      <div
-        ref={box}
-        className="relative touch-none overflow-hidden select-none"
-        style={{ height }}
-        onWheel={(e) => {
-          if (!e.ctrlKey && !e.metaKey) return;
-          e.preventDefault();
-          zoom(e.deltaY < 0 ? 1.1 : 1 / 1.1);
-        }}
-        onPointerDown={(e) => {
-          if ((e.target as Element).closest("[data-node],[data-panel],[data-controls]")) return;
-          pan.current = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y };
-          (e.currentTarget as Element).setPointerCapture(e.pointerId);
-        }}
-        onPointerMove={(e) => {
-          const p = pan.current;
-          if (p) setView((v) => ({ ...v, x: p.vx + e.clientX - p.x, y: p.vy + e.clientY - p.y }));
-        }}
-        onPointerUp={() => (pan.current = null)}
-      >
-        <svg width={width} height={height} className="block" role="img" aria-label="Repositories and the dependencies between them">
+    <div className="grid min-h-[360px] md:grid-cols-[240px_minmax(0,1fr)]">
+      <nav aria-label="Repositories" className="flex max-h-48 flex-col overflow-y-auto overscroll-contain border-b p-2 md:max-h-none md:border-r md:border-b-0">
+        {ranked.map((r) => (
+          <button
+            key={r.id}
+            onClick={() => (setFocus(r.id), setTip(null))}
+            aria-current={r.id === current ? "true" : undefined}
+            className={cn(
+              "flex min-h-8 items-center gap-2 rounded-md px-2 text-left text-sm transition-colors duration-100 hover:bg-muted",
+              r.id === current && "bg-accent font-semibold text-accent-foreground hover:bg-accent",
+            )}
+          >
+            <RepoDot repo={r.id} />
+            <span className="min-w-0 flex-1 truncate">{r.id}</span>
+            {inCycle.has(r.id) && <RefreshCcw className="size-3 text-warning" aria-label="in a cycle" />}
+            <span className="nums text-xs font-normal text-muted-foreground" title={`Used by ${r.usedBy}, uses ${r.uses}`}>
+              {r.usedBy || "–"}
+            </span>
+          </button>
+        ))}
+      </nav>
+      <div ref={box} className="relative min-w-0" style={{ height }}>
+        <svg width={width} height={height} className="block" role="img" aria-label={`${current}: what uses it and what it uses`}>
           <defs>
-            {(["code", "contract", "cycle", "lit"] as const).map((k) => (
+            {(["code", "contract", "cycle"] as const).map((k) => (
               <marker key={k} id={`tip-${k}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto">
                 <path
                   d="M0,1 L9,5 L0,9 z"
-                  fill={k === "contract" ? "var(--color-brand)" : k === "cycle" ? "var(--color-warning)" : k === "lit" ? "var(--color-foreground)" : "var(--color-input)"}
+                  fill={k === "contract" ? "var(--color-brand)" : k === "cycle" ? "var(--color-warning)" : "color-mix(in srgb, var(--color-muted-foreground) 70%, transparent)"}
                 />
               </marker>
             ))}
           </defs>
-          <g transform={`translate(${view.x},${view.y}) scale(${view.k})`}>
-            {links
-              .slice()
-              .sort((a, b) => Number(focus === a.from || focus === a.to) - Number(focus === b.from || focus === b.to))
-              .map((l) => {
-                const lit = !!focus && (l.from === focus || l.to === focus);
-                const kind = l.cycle ? "cycle" : l.contract ? "contract" : "code";
-                const stroke =
-                  kind === "contract" ? "var(--color-brand)" : kind === "cycle" ? "var(--color-warning)" : lit ? "var(--color-foreground)" : "var(--color-input)";
-                const hot = tip?.l === l;
-                return (
-                  <g key={`${l.from}>${l.to}`}>
-                    <path
-                      d={curve(l.points)}
-                      fill="none"
-                      stroke={hot && kind === "code" ? "var(--color-foreground)" : stroke}
-                      strokeWidth={hot ? 2.5 : 1.5}
-                      strokeOpacity={focus && !lit && !hot ? 0.12 : lit || hot || kind === "code" ? 1 : 0.8}
-                      strokeDasharray={kind === "cycle" ? "6 4" : undefined}
-                      strokeLinecap="round"
-                      markerEnd={`url(#tip-${kind === "code" && (lit || hot) ? "lit" : kind})`}
-                      className="pointer-events-none transition-[stroke-opacity] duration-150"
-                    />
-                    <path
-                      d={curve(l.points)}
-                      fill="none"
-                      stroke="transparent"
-                      strokeWidth={14}
-                      className="cursor-help"
-                      onPointerEnter={(e) => showTip(l, e)}
-                      onPointerMove={(e) => showTip(l, e)}
-                      onPointerLeave={() => setTip(null)}
-                    />
-                  </g>
-                );
-              })}
-            {nodes.map((n) => {
-              const on = n.id === picked || n.id === hover;
-              const dim = near && !near.has(n.id);
-              return (
-                <g
-                  key={n.id}
-                  data-node
-                  tabIndex={0}
-                  role="button"
-                  aria-label={`${n.id}, ${n.symbols.toLocaleString()} symbols`}
-                  aria-pressed={n.id === picked}
-                  transform={`translate(${n.x - W / 2},${n.y - H / 2})`}
-                  className={cn("cursor-pointer outline-none transition-opacity duration-150 [&:focus-visible>rect]:stroke-ring", dim && "opacity-25")}
-                  onPointerEnter={() => setHover(n.id)}
-                  onPointerLeave={() => setHover(null)}
-                  onFocus={() => setHover(n.id)}
-                  onBlur={() => setHover(null)}
-                  onClick={() => setPicked((p) => (p === n.id ? null : n.id))}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      setPicked((p) => (p === n.id ? null : n.id));
-                    }
-                    if (e.key === "Escape") setPicked(null);
-                  }}
-                >
-                  <rect
-                    width={W}
-                    height={H}
-                    rx={8}
-                    fill={on ? "var(--color-accent)" : "var(--color-card)"}
-                    stroke={on ? "var(--color-brand)" : "var(--color-input)"}
-                    strokeWidth={on ? 1.5 : 1}
-                    className="transition-[fill,stroke] duration-150"
-                  />
-                  <text x={14} y={22} className="fill-foreground text-sm font-semibold">
-                    {n.id.length > 22 ? `${n.id.slice(0, 21)}…` : n.id}
-                  </text>
-                  <text x={14} y={39} className="nums fill-muted-foreground text-xs">
-                    {short(n.symbols)} symbols
-                  </text>
-                </g>
-              );
-            })}
-          </g>
+          {upLines > 0 && (
+            <text x={16} y={18} className="fill-muted-foreground text-xs font-semibold">
+              Used by {up.length}
+            </text>
+          )}
+          {downLines > 0 && (
+            <text x={16} y={focusY + H + 40} className="fill-muted-foreground text-xs font-semibold">
+              Uses {down.length}
+            </text>
+          )}
+          {up.map((l, i) =>
+            edge(l, [{ x: center(upBoxes[i]), y: upBoxes[i].y + H }, ...lane(upBoxes[i], -1), { x: center(me) + spread(up.length, i), y: me.y - 3 }]),
+          )}
+          {down.map((l, i) =>
+            edge(l, [{ x: center(me) + spread(down.length, i), y: me.y + H }, ...lane(downBoxes[i], 1).reverse(), { x: center(downBoxes[i]), y: downBoxes[i].y - 3 }]),
+          )}
+          {upBoxes.map((b) => node(b))}
+          {downBoxes.map((b) => node(b))}
+          {node(me, true)}
+          {!up.length && !down.length && (
+            <text x={width / 2} y={me.y + H + 32} textAnchor="middle" className="fill-muted-foreground text-xs">
+              No links to other repositories in the index.
+            </text>
+          )}
         </svg>
-
-        <div data-controls className="absolute bottom-3 left-3 flex overflow-hidden rounded-md border bg-popover shadow-float">
-          <Button variant="ghost" size="icon" className="size-8 rounded-none" aria-label="Zoom in" onClick={() => zoom(1.25)}>
-            <Plus />
-          </Button>
-          <Button variant="ghost" size="icon" className="size-8 rounded-none" aria-label="Zoom out" onClick={() => zoom(0.8)}>
-            <Minus />
-          </Button>
-          <Button variant="ghost" size="icon" className="size-8 rounded-none" aria-label="Fit to view" onClick={fit}>
-            <Maximize />
-          </Button>
-        </div>
-
         {tip && <LinkCard l={tip.l} x={tip.x} y={tip.y} width={width} height={height} />}
-
-        {picked && (
-          <div data-panel className="absolute top-3 right-3 bottom-3 flex w-80 max-w-[calc(100%-1.5rem)] flex-col overflow-hidden rounded-lg border bg-popover shadow-float">
-            <div className="flex items-center gap-2 border-b px-4 py-3">
-              <span className="min-w-0 flex-1 truncate font-semibold">{picked}</span>
-              <span className="nums text-xs text-muted-foreground">{(org.symbols.get(picked) ?? 0).toLocaleString()} symbols</span>
-              <Button variant="ghost" size="icon" className="size-7" aria-label="Close" onClick={() => setPicked(null)}>
-                <X />
-              </Button>
-            </div>
-            <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4">
-              {(
-                [
-                  ["Uses", uses, (l: L) => l.to],
-                  ["Used by", usedBy, (l: L) => l.from],
-                ] as const
-              ).map(([title, list, other]) => {
-                const rows = list.slice().sort((a, b) => b.weight - a.weight);
-                return (
-                  <section key={title} className="flex flex-col gap-1.5">
-                    <h3 className="eyebrow">
-                      {title} <span className="nums font-normal">{rows.length}</span>
-                    </h3>
-                    {rows.length === 0 && <p className="text-xs text-muted-foreground">Nothing in the index.</p>}
-                    {rows.map((l) => (
-                      <button
-                        key={other(l)}
-                        onClick={() => setPicked(other(l))}
-                        className="flex flex-col gap-0.5 rounded-md px-2 py-1.5 text-left transition-colors duration-100 hover:bg-muted"
-                      >
-                        <span className="flex items-center gap-2 text-sm">
-                          <span className="min-w-0 flex-1 truncate font-semibold">{other(l)}</span>
-                          <span className="nums text-xs text-muted-foreground">
-                            {l.weight} link{l.weight === 1 ? "" : "s"}
-                          </span>
-                        </span>
-                        {l.via.length > 0 && (
-                          <span className={cn("truncate font-mono text-xs", l.cycle ? "text-warning" : "text-accent-foreground")}>
-                            {l.via.slice(0, 2).join(", ")}
-                            {l.via.length > 2 && <span className="font-sans text-muted-foreground"> and {l.via.length - 2} more</span>}
-                          </span>
-                        )}
-                      </button>
-                    ))}
-                  </section>
-                );
-              })}
-            </div>
-          </div>
-        )}
       </div>
-      {alone.length > 0 && (
-        <p className="flex flex-wrap items-center gap-1.5 border-t px-5 py-3 text-xs text-muted-foreground">
-          <span>No links to the others:</span>
-          {alone.map((r) => (
-            <span key={r} className="flex items-center gap-1.5 rounded-sm bg-muted px-1.5 py-0.5 text-foreground">
-              <RepoDot repo={r} /> {r}
-            </span>
-          ))}
-        </p>
-      )}
     </div>
   );
 }

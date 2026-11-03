@@ -80,8 +80,9 @@ spacing: { base: 4px, component: [4, 8, 12, 16, 24], section: [32, 48] }
 - Tables sit on a surface; rows divide with a tinted 1px line, hover with the step tone.
 - Badges are words in a chip; colour only with a word, never alone.
 - Navigation: a bordered rail with icons; the current page on the accent tint.
-- Org map: a layered left-to-right graph (dagre) of neutral boxes and even, thin arrows; detail on hover
-  (contracts behind an arrow) and on click (what a repository uses and what uses it).
+- Org map: a focus graph, one repository at a time (users above, what it uses below, staggered rows whose
+  arrows pass through the gaps), with the repository list beside it; even thin arrows, contracts on hover.
+  A whole-org drawing tangles on real indexes (one library used by 14, cycles), so it is not offered.
 - Icons: lucide, one stroke weight. No arrows glued to link text, no middle-dot meta strings.
 
 ## Motion

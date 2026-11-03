@@ -364,7 +364,7 @@ export function AccessPage() {
         description="Agents and scripts use comindly as you with a token, sent as Authorization: Bearer …. They stop working if you are removed from the team."
       >
         <form
-          className="flex gap-2"
+          className="flex flex-wrap gap-2"
           onSubmit={(e) => {
             e.preventDefault();
             if (name.trim()) create.mutate();
@@ -374,7 +374,7 @@ export function AccessPage() {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Name, e.g. Claude Code on my laptop"
-            className="flex-1"
+            className="min-w-48 flex-1 basis-60"
           />
           <select className={select} value={days} onChange={(e) => setDays(e.target.value)} aria-label="Expires">
             <option value="30">30 days</option>

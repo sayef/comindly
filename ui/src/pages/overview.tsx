@@ -492,7 +492,7 @@ export function OverviewPage() {
           )}
           <div className="border-t px-5 py-3 text-xs text-muted-foreground">
             {mode === "network"
-              ? "Each arrow points from a repository to what it uses; green goes through a contract, dashed amber is a cycle. Hover an arrow to see the contracts behind it, hover a repository to see its neighbours, click it for details; drag to pan, pinch or Ctrl-scroll to zoom."
+              ? "Pick a repository on the left (the number is how many depend on it) or click a box to move there. Above are the repositories that use it, below the ones it uses. Green arrows go through a contract, dashed amber is a cycle; hover an arrow to see the contracts behind it."
               : "Click a box to open or close it; each line names the contract it goes through. A dashed box is shown elsewhere in the tree; an amber line loops back where repositories depend on each other in a circle."}
           </div>
           {versions.data && versions.data.length > 1 && (

@@ -29,9 +29,9 @@ All notable changes to this project are documented here. The format follows
 - A new theme for the app on its existing layout: pine ink on a cool paper ground with the logo's green as
   the one accent, muted repository colours, and Atkinson Hyperlegible for text and code. Tokens and rules
   are in `ui/DESIGN.md`.
-- The org map is a layered graph of every repository, left to right from where work starts to the shared
-  code it reaches; hovering an arrow lists the contracts and code references behind it, and clicking a
-  repository shows what it uses and what uses it. The previous tree is one click away.
+- The org map shows one repository at a time: what uses it above, what it uses below, with the list of
+  repositories (by how many depend on each) to move between them. Hovering an arrow lists the contracts
+  and code references behind it; cycles are amber. The previous tree is one click away.
 - Overview's figures each show their breakdown: symbols per repository, contracts by type and ledger
   records by status.
 - The ledger opens on the timeline when nothing needs review, and its view is part of the address.
