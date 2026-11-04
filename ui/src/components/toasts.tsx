@@ -21,6 +21,7 @@ export function Toasts() {
     <Toaster
       theme={theme}
       position="bottom-right"
+      offset={{ bottom: 76 }}
       closeButton
       style={
         {
