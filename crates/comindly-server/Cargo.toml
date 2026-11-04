@@ -41,7 +41,8 @@ opentelemetry = { workspace = true, optional = true }
 opentelemetry_sdk = { workspace = true, optional = true }
 opentelemetry-otlp = { workspace = true, optional = true }
 tracing-opentelemetry = { workspace = true, optional = true }
-reqwest = { workspace = true, optional = true }
+reqwest.workspace = true
+openidconnect.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -49,7 +50,8 @@ libc = "0.2"
 [features]
 default = []
 # OTLP trace export when OTEL_EXPORTER_OTLP_ENDPOINT is set; on in the container image and Linux release builds.
-otel = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp", "dep:tracing-opentelemetry", "dep:reqwest"]
+otel = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp", "dep:tracing-opentelemetry"]
 
 [dev-dependencies]
 tower.workspace = true
+rsa = { version = "0.9", features = ["getrandom"] }

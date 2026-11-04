@@ -13,6 +13,7 @@ pub mod doctor;
 pub mod indexer;
 pub mod jobs;
 pub mod mcp;
+pub mod oidc;
 pub mod server;
 pub mod telemetry;
 pub mod ui;

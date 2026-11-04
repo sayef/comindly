@@ -17,7 +17,16 @@ pub enum Me {
         signed_in: bool,
         email: Option<String>,
         role: Option<Role>,
+        /// One way to sign in, for older clients; `sign_in_methods` lists them all.
         sign_in: SignIn,
+        #[serde(default)]
+        sign_in_methods: Vec<SignIn>,
+        /// The provider's name for the sign-in button, when members sign in through one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        oidc_label: Option<String>,
+        /// `microsoft` or `google` when the issuer is theirs, for the button's logo.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        oidc_brand: Option<String>,
         public_url: String,
     },
 }
@@ -71,6 +80,8 @@ pub struct Members {
     pub members: Vec<Member>,
     pub invites: Vec<Invite>,
     pub sign_in: SignIn,
+    #[serde(default)]
+    pub sign_in_methods: Vec<SignIn>,
 }
 
 /// `GET /api/v1/tokens`: your personal access tokens.

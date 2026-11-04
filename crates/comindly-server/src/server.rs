@@ -38,8 +38,13 @@ pub struct ServerConfig {
     pub public_url: String,
     /// Always admins, whatever the database says.
     pub admin_emails: Vec<String>,
-    pub sign_in: SignIn,
+    /// The ways members may sign in, in the order the sign-in page offers them.
+    pub sign_in: Vec<SignIn>,
     pub admin_token: Option<String>,
+    /// Lets a gateway you run name the member behind an `/mcp` call.
+    pub gateway_secret: Option<String>,
+    /// The header such a gateway names the member in.
+    pub gateway_email_header: String,
     pub secret_key: String,
     pub secret_key_previous: Option<String>,
     pub smtp_url: Option<String>,
@@ -48,6 +53,42 @@ pub struct ServerConfig {
     pub trust_proxy: bool,
     /// The deployment's LLM key, which wins over one stored here.
     pub llm_key: Option<String>,
+    pub oidc: Option<OidcConfig>,
+}
+
+/// Sign-in through an OpenID Connect provider, such as the company's identity provider.
+#[derive(Clone)]
+pub struct OidcConfig {
+    pub issuer: String,
+    pub client_id: String,
+    pub client_secret: String,
+    /// The provider's name on the sign-in button.
+    pub label: String,
+    /// Addresses at these domains join as viewers on first sign-in; anyone else needs an invitation.
+    pub allowed_domains: Vec<String>,
+}
+
+impl OidcConfig {
+    fn from_env() -> Result<Option<OidcConfig>> {
+        let Some(issuer) = env_secret("COMINDLY_OIDC_ISSUER") else {
+            return Ok(None);
+        };
+        Ok(Some(OidcConfig {
+            issuer: issuer.trim_end_matches('/').to_string(),
+            client_id: env_secret("COMINDLY_OIDC_CLIENT_ID")
+                .context("COMINDLY_OIDC_ISSUER needs COMINDLY_OIDC_CLIENT_ID")?,
+            client_secret: env_secret("COMINDLY_OIDC_CLIENT_SECRET")
+                .context("COMINDLY_OIDC_ISSUER needs COMINDLY_OIDC_CLIENT_SECRET")?,
+            label: env_secret("COMINDLY_OIDC_LABEL")
+                .unwrap_or_else(|| "your company account".into()),
+            allowed_domains: env_secret("COMINDLY_OIDC_ALLOWED_DOMAINS")
+                .unwrap_or_default()
+                .split([',', ' ', '\n'])
+                .map(|d| normalize(d).trim_start_matches('@').to_string())
+                .filter(|d| !d.is_empty())
+                .collect(),
+        }))
+    }
 }
 
 impl ServerConfig {
@@ -73,25 +114,29 @@ impl ServerConfig {
                 "COMINDLY_ADMIN_TOKEN is too short: use at least 32 random characters (e.g. `openssl rand -base64 32`)"
             );
         }
+        let gateway_secret = env_secret("COMINDLY_GATEWAY_SECRET");
+        if let Some(t) = &gateway_secret {
+            anyhow::ensure!(
+                t.len() >= 32,
+                "COMINDLY_GATEWAY_SECRET is too short: use at least 32 random characters (e.g. `openssl rand -base64 32`)"
+            );
+        }
         let smtp_url = env_secret("COMINDLY_SMTP_URL");
-        let sign_in = match env_secret("COMINDLY_SIGN_IN").as_deref() {
-            Some("email") => {
-                anyhow::ensure!(
-                    smtp_url.is_some(),
-                    "COMINDLY_SIGN_IN=email needs COMINDLY_SMTP_URL"
-                );
-                SignIn::Email
-            }
-            Some("code") => SignIn::Code,
-            Some(other) => bail!("COMINDLY_SIGN_IN is `email` or `code`, not `{other}`"),
-            None if smtp_url.is_some() => SignIn::Email,
-            None => SignIn::Code,
-        };
+        let oidc = OidcConfig::from_env()?;
+        let sign_in = sign_in_methods(
+            env_secret("COMINDLY_SIGN_IN").as_deref(),
+            smtp_url.is_some(),
+            oidc.is_some(),
+        )?;
         Ok(Some(ServerConfig {
             public_url: url.trim_end_matches('/').to_string(),
             admin_emails,
             sign_in,
             admin_token,
+            gateway_secret,
+            gateway_email_header: env_secret("COMINDLY_GATEWAY_EMAIL_HEADER")
+                .unwrap_or_else(|| "x-forwarded-email".into())
+                .to_lowercase(),
             secret_key: env_secret("COMINDLY_SECRET_KEY")
                 .context("server mode needs COMINDLY_SECRET_KEY")?,
             secret_key_previous: env_secret("COMINDLY_SECRET_KEY_PREVIOUS"),
@@ -101,12 +146,63 @@ impl ServerConfig {
             trust_proxy: env_secret("COMINDLY_TRUST_PROXY")
                 .is_some_and(|v| v == "true" || v == "1"),
             llm_key: env_secret("OPENAI_API_KEY"),
+            oidc,
         }))
     }
 
     pub fn https(&self) -> bool {
         self.public_url.starts_with("https://")
     }
+
+    pub fn allows(&self, method: SignIn) -> bool {
+        self.sign_in.contains(&method)
+    }
+
+    /// One method for clients that know only one: email or code when on, else the provider.
+    pub fn main_sign_in(&self) -> SignIn {
+        [SignIn::Email, SignIn::Code]
+            .into_iter()
+            .find(|m| self.allows(*m))
+            .unwrap_or(SignIn::Oidc)
+    }
+}
+
+/// `COMINDLY_SIGN_IN` (e.g. `oidc,email,code`), or by default the provider and email where set up,
+/// else codes.
+fn sign_in_methods(set: Option<&str>, smtp: bool, oidc: bool) -> Result<Vec<SignIn>> {
+    let chosen: Vec<SignIn> = match set {
+        Some(v) => v
+            .split([',', ' '])
+            .filter(|m| !m.is_empty())
+            .map(|m| match m {
+                "email" => Ok(SignIn::Email),
+                "code" => Ok(SignIn::Code),
+                "oidc" => Ok(SignIn::Oidc),
+                other => bail!("COMINDLY_SIGN_IN lists `oidc`, `email` and `code`, not `{other}`"),
+            })
+            .collect::<Result<_>>()?,
+        None if oidc || smtp => [(oidc, SignIn::Oidc), (smtp, SignIn::Email)]
+            .into_iter()
+            .filter_map(|(on, m)| on.then_some(m))
+            .collect(),
+        None => vec![SignIn::Code],
+    };
+    anyhow::ensure!(
+        !chosen.is_empty(),
+        "COMINDLY_SIGN_IN names no way to sign in"
+    );
+    anyhow::ensure!(
+        smtp || !chosen.contains(&SignIn::Email),
+        "email sign-in needs COMINDLY_SMTP_URL"
+    );
+    anyhow::ensure!(
+        oidc || !chosen.contains(&SignIn::Oidc),
+        "oidc sign-in needs COMINDLY_OIDC_ISSUER"
+    );
+    Ok([SignIn::Oidc, SignIn::Email, SignIn::Code]
+        .into_iter()
+        .filter(|m| chosen.contains(m))
+        .collect())
 }
 
 /// A running server: its settings and its backends.
@@ -120,6 +216,8 @@ pub struct Server {
     pub settings: Arc<dyn SettingsStore>,
     pub mailer: Arc<dyn Mailer>,
     pub jobs: Arc<dyn crate::jobs::JobStore>,
+    /// The OpenID Connect provider, when members sign in through one.
+    pub oidc: Option<Arc<crate::oidc::Oidc>>,
 }
 
 impl Server {
@@ -130,6 +228,13 @@ impl Server {
             url: config.smtp_url.clone(),
             from: config.smtp_from.clone(),
         });
+        let oidc = match &config.oidc {
+            Some(c) if config.allows(SignIn::Oidc) => Some(Arc::new(crate::oidc::Oidc::new(
+                c.clone(),
+                &config.public_url,
+            )?)),
+            _ => None,
+        };
         Ok(Server {
             config,
             accounts: store.clone(),
@@ -140,6 +245,7 @@ impl Server {
             settings: store.clone(),
             jobs: store,
             mailer,
+            oidc,
         })
     }
 
@@ -149,13 +255,14 @@ impl Server {
     }
 }
 
-/// How members sign in: everything by email, or everything by codes admins hand out. Email when
-/// the server can send it, else codes; `COMINDLY_SIGN_IN=email|code` decides when set.
+/// A way to sign in: an emailed link, a code, or an OpenID Connect provider; a server offers one or
+/// more, each for invited people only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SignIn {
     Email,
     Code,
+    Oidc,
 }
 
 pub fn normalize(email: &str) -> String {
@@ -1056,7 +1163,7 @@ fn unhex(s: &str) -> Option<Vec<u8>> {
 }
 
 /// Equal without revealing where or how long the values differ.
-fn constant_eq(a: &str, b: &str) -> bool {
+pub(crate) fn constant_eq(a: &str, b: &str) -> bool {
     let (a, b) = (blake3::hash(a.as_bytes()), blake3::hash(b.as_bytes()));
     a.as_bytes()
         .iter()
@@ -1432,6 +1539,48 @@ impl crate::backends::AccountStore for Store {
         }
         self.fail(&from);
         bail!("Wrong email or code")
+    }
+
+    /// A member, someone invited (who joins with the invitation's role) or, with `join`, a
+    /// newcomer who joins as a viewer; the identity provider has already checked who they are.
+    fn sign_in_verified(&self, email: &str, how: &str, join: bool) -> Result<(String, Who)> {
+        let email = normalize(email);
+        anyhow::ensure!(
+            valid_email(&email),
+            "the sign-in did not come with an email address"
+        );
+        if self.member(&email)?.is_some() {
+            self.audit(&email, "sign-in", how);
+            return self.session_for(&email);
+        }
+        let t = now();
+        let _w = self.write_lock();
+        let invites: Vec<(String, Invitation)> = self
+            .state()
+            .invites
+            .iter()
+            .filter(|(_, i)| i.email == email)
+            .map(|(k, i)| (k.clone(), i.clone()))
+            .collect();
+        let role = match invites.iter().find(|(_, i)| i.expires > t) {
+            Some((_, i)) => i.role,
+            None if join => Role::Viewer,
+            None => bail!("The account {email} is not a member here; ask an admin to invite you"),
+        };
+        let mut changes: Vec<Change> = invites.iter().map(|(k, _)| del("invite", k)).collect();
+        changes.push(put(
+            "user",
+            &email,
+            &User {
+                role,
+                created: t,
+                last_seen: None,
+            },
+        ));
+        self.commit(changes)?;
+        drop(_w);
+        self.audit(&email, "join", role.as_str());
+        self.session_for(&email)
     }
 
     /// Give `email` a new sign-in code; their sessions end, except `keep` (the caller's own).
@@ -1927,6 +2076,44 @@ mod tests {
         assert_eq!(back.email, "dev@x.org");
         s.sign_out(&session, false).unwrap();
         assert!(s.authenticate(Some(&session), None).unwrap().is_none());
+    }
+
+    #[test]
+    fn sign_in_methods_combine_and_need_their_setup() {
+        use SignIn::*;
+        let m = |set, smtp, oidc| sign_in_methods(set, smtp, oidc);
+        assert_eq!(m(None, false, false).unwrap(), vec![Code]);
+        assert_eq!(m(None, true, true).unwrap(), vec![Oidc, Email]);
+        assert_eq!(
+            m(Some("code, email,oidc"), true, true).unwrap(),
+            vec![Oidc, Email, Code]
+        );
+        assert!(m(Some("email"), false, true).is_err());
+        assert!(m(Some("oidc,code"), true, false).is_err());
+        assert!(m(Some("password"), true, true).is_err());
+        assert!(m(Some(","), true, true).is_err());
+    }
+
+    #[test]
+    fn a_provider_sign_in_admits_members_the_invited_and_allowed_domains_only() {
+        let (_d, s) = temp_store();
+        assert!(s.sign_in_verified("stranger@x.org", "oidc", false).is_err());
+        assert!(s.member("stranger@x.org").unwrap().is_none());
+
+        let (_, who) = s.sign_in_verified("viewer@x.org", "oidc", true).unwrap();
+        assert_eq!(who.role, Role::Viewer);
+
+        s.invite("admin@x.org", "dev@x.org", Role::Member, true)
+            .unwrap();
+        let (session, who) = s.sign_in_verified("Dev@X.org", "oidc", false).unwrap();
+        assert_eq!((who.email.as_str(), who.role), ("dev@x.org", Role::Member));
+        assert!(s.invites().unwrap().is_empty(), "the invitation is used up");
+        assert!(s.authenticate(Some(&session), None).unwrap().is_some());
+
+        s.set_role("admin@x.org", "dev@x.org", Role::Admin).unwrap();
+        let (_, who) = s.sign_in_verified("dev@x.org", "oidc", false).unwrap();
+        assert_eq!(who.role, Role::Admin, "a member keeps the role given here");
+        assert!(s.sign_in_verified("", "oidc", true).is_err());
     }
 
     #[test]

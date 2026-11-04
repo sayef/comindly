@@ -65,6 +65,27 @@ fn bearer(req: &Request) -> Option<String> {
         .map(|t| t.trim().to_string())
 }
 
+/// The header a trusted gateway proves itself with.
+const GATEWAY_SECRET: &str = "x-gateway-secret";
+
+/// For a request carrying the gateway secret, the member it names (if any); otherwise `None`.
+fn from_gateway(
+    sent: Option<&str>,
+    named: Option<&str>,
+    secret: Option<&str>,
+) -> Option<Option<String>> {
+    let (sent, secret) = (sent?, secret?);
+    if !server::constant_eq(sent, secret) {
+        return None;
+    }
+    Some(
+        named
+            .map(str::trim)
+            .filter(|e| e.contains('@'))
+            .map(server::normalize),
+    )
+}
+
 /// `scheme://host:port` of a URL, lower-case and with the scheme's default port spelled out.
 fn origin_of(url: &str) -> Option<String> {
     let (scheme, rest) = url.split_once("://")?;
@@ -159,6 +180,45 @@ pub(super) async fn guard(
             | "/api/v1/auth/device/token"
     );
     let token = bearer(&req);
+    if path.starts_with("/mcp") {
+        let (sent, named) = {
+            let header = |name: &str| {
+                req.headers()
+                    .get(name)
+                    .and_then(|v| v.to_str().ok())
+                    .map(str::to_string)
+            };
+            (
+                header(GATEWAY_SECRET),
+                header(&server.config.gateway_email_header),
+            )
+        };
+        if let Some(named) = from_gateway(
+            sent.as_deref(),
+            named.as_deref(),
+            server.config.gateway_secret.as_deref(),
+        ) {
+            let Some(email) = named else {
+                return fail(
+                    StatusCode::UNAUTHORIZED,
+                    "The gateway must name the member it acts for",
+                )
+                .into_response();
+            };
+            let member =
+                tokio::task::block_in_place(|| server.accounts.member(&email).unwrap_or(None));
+            let Some(member) = member else {
+                return fail(
+                    StatusCode::FORBIDDEN,
+                    "Not a member here; ask an admin to invite you",
+                )
+                .into_response();
+            };
+            let who = member;
+            req.extensions_mut().insert(who.clone());
+            return by(next.run(req).await, Some(who));
+        }
+    }
     let session = cookie(&req, cookie_name(&server.config));
     let found = tokio::task::block_in_place(|| {
         server
@@ -243,7 +303,14 @@ pub(super) async fn me(
         signed_in: who.is_some(),
         email: who.as_ref().map(|w| w.email.clone()),
         role: who.as_ref().map(|w| w.role),
-        sign_in: server.config.sign_in,
+        sign_in: server.config.main_sign_in(),
+        sign_in_methods: server.config.sign_in.clone(),
+        oidc_label: server.oidc.as_ref().map(|o| o.config.label.clone()),
+        oidc_brand: server
+            .oidc
+            .as_ref()
+            .and_then(|o| o.brand())
+            .map(String::from),
         public_url: server.config.public_url.clone(),
     })
 }
@@ -254,10 +321,10 @@ fn link(cfg: &ServerConfig, path: &str, token: &str) -> String {
 
 /// Email a sign-in link; the answer is the same whether or not the address is a member.
 pub(super) async fn request_link(On(server): On, Json(q): Json<api::EmailRequest>) -> Reply<Done> {
-    if server.config.sign_in != SignIn::Email {
+    if !server.config.allows(SignIn::Email) {
         return Err(fail(
             StatusCode::BAD_REQUEST,
-            "This server signs in with codes",
+            "This server does not sign in by email",
         ));
     }
     let email = server::normalize(&q.email);
@@ -320,6 +387,119 @@ pub(super) async fn redeem(
     }
 }
 
+/// The cookie that ties a return from the sign-in provider to the browser that left for it.
+fn oidc_cookie_name(cfg: &ServerConfig) -> &'static str {
+    if cfg.https() {
+        "__Host-comindly_oidc"
+    } else {
+        "comindly_oidc"
+    }
+}
+
+fn oidc_cookie(cfg: &ServerConfig, state: &str, max_age: i64) -> String {
+    format!(
+        "{}={state}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}{}",
+        oidc_cookie_name(cfg),
+        if cfg.https() { "; Secure" } else { "" }
+    )
+}
+
+/// Back to the sign-in page with a message for the person.
+fn to_sign_in(cfg: &ServerConfig, message: &str) -> Response {
+    let q: String =
+        openidconnect::url::form_urlencoded::byte_serialize(message.as_bytes()).collect();
+    (
+        StatusCode::SEE_OTHER,
+        [
+            (header::LOCATION, format!("/signin?error={q}")),
+            (header::SET_COOKIE, oidc_cookie(cfg, "", 0)),
+        ],
+    )
+        .into_response()
+}
+
+/// Leave for the sign-in provider.
+pub(super) async fn oidc_start(On(server): On) -> Response {
+    let cfg = &server.config;
+    let Some(oidc) = &server.oidc else {
+        return to_sign_in(cfg, "This server does not sign in through a provider");
+    };
+    match oidc.start().await {
+        Ok((url, state)) => (
+            StatusCode::SEE_OTHER,
+            [
+                (header::LOCATION, url),
+                (header::SET_COOKIE, oidc_cookie(cfg, &state, 600)),
+            ],
+        )
+            .into_response(),
+        Err(e) => {
+            crate::ui::warn(&format!("sign-in provider: {e:#}"));
+            to_sign_in(cfg, &e.to_string())
+        }
+    }
+}
+
+#[derive(serde::Deserialize)]
+pub(super) struct OidcReturn {
+    code: Option<String>,
+    state: Option<String>,
+    error: Option<String>,
+    error_description: Option<String>,
+}
+
+/// Back from the sign-in provider: check the answer, then sign the person in.
+pub(super) async fn oidc_callback(
+    On(server): On,
+    axum::extract::Query(q): axum::extract::Query<OidcReturn>,
+    req: Request,
+) -> Response {
+    let cfg = &server.config;
+    let Some(oidc) = &server.oidc else {
+        return to_sign_in(cfg, "This server does not sign in through a provider");
+    };
+    if let Some(e) = q.error {
+        let detail = q.error_description.unwrap_or(e);
+        return to_sign_in(cfg, &format!("The sign-in provider said: {detail}"));
+    }
+    let (Some(code), Some(state)) = (q.code, q.state) else {
+        return to_sign_in(
+            cfg,
+            "The sign-in provider sent an incomplete answer; start again",
+        );
+    };
+    let mine = cookie(&req, oidc_cookie_name(cfg));
+    if !mine.is_some_and(|c| server::constant_eq(&c, &state)) {
+        return to_sign_in(
+            cfg,
+            "This sign-in was started in another browser; start again",
+        );
+    }
+    let email = match oidc.finish(&state, &code).await {
+        Ok(e) => e,
+        Err(e) => return to_sign_in(cfg, &e.to_string()),
+    };
+    let join = oidc.may_join(&email);
+    let signed =
+        tokio::task::block_in_place(|| server.accounts.sign_in_verified(&email, "oidc", join));
+    match signed {
+        Ok((session, _)) => {
+            let mut res = (StatusCode::SEE_OTHER, [(header::LOCATION, "/")]).into_response();
+            let h = res.headers_mut();
+            for c in [
+                session_cookie(cfg, &session, 30 * 86400),
+                oidc_cookie(cfg, "", 0),
+            ] {
+                if let Ok(v) = c.parse() {
+                    h.append(header::SET_COOKIE, v);
+                }
+            }
+            res
+        }
+        Err(e) => to_sign_in(cfg, &e.to_string()),
+    }
+}
+
 /// Where a request comes from: the connecting address, or behind a proxy you run
 /// (`COMINDLY_TRUST_PROXY=true`) the address that proxy added last to `X-Forwarded-For`.
 fn client(
@@ -352,8 +532,12 @@ pub(super) async fn sign_in_code(
     Json(q): Json<api::CodeRequest>,
 ) -> Response {
     let cfg = &server.config;
-    if cfg.sign_in != SignIn::Code {
-        return fail(StatusCode::BAD_REQUEST, "This server signs in by email").into_response();
+    if !cfg.allows(SignIn::Code) {
+        return fail(
+            StatusCode::BAD_REQUEST,
+            "This server does not sign in with codes",
+        )
+        .into_response();
     }
     match server
         .accounts
@@ -382,10 +566,10 @@ pub(super) async fn reset_own_code(
     Extension(who): Extension<Who>,
     req: Request,
 ) -> Reply<api::WithCode> {
-    if server.config.sign_in != SignIn::Code {
+    if !server.config.allows(SignIn::Code) {
         return Err(fail(
             StatusCode::BAD_REQUEST,
-            "This server signs in by email",
+            "This server does not sign in with codes",
         ));
     }
     let mine = cookie(&req, cookie_name(&server.config));
@@ -422,7 +606,8 @@ pub(super) async fn members(On(server): On) -> Reply<api::Members> {
         (Ok(members), Ok(invites)) => Ok(Json(api::Members {
             members,
             invites,
-            sign_in: server.config.sign_in,
+            sign_in: server.config.main_sign_in(),
+            sign_in_methods: server.config.sign_in.clone(),
         })),
         (Err(e), _) | (_, Err(e)) => Err(bad(e)),
     }
@@ -436,15 +621,22 @@ pub(super) async fn invite(
 ) -> Reply<api::Invited> {
     let store = &server.accounts;
     let email = server::normalize(&q.email);
-    let code = server.config.sign_in == SignIn::Code;
+    // Emailed when the server sends mail, else a code to hand over; either also works for the provider.
+    let cfg = &server.config;
+    let by_email = cfg.allows(SignIn::Email);
     let token = store
-        .invite(&who.email, &email, q.role, code)
+        .invite(&who.email, &email, q.role, !by_email)
         .map_err(bad)?;
-    if code {
+    if !by_email {
+        let message = if cfg.allows(SignIn::Code) {
+            format!("Invited {email}; give them this code")
+        } else {
+            format!("Invited {email}; they join when they first sign in")
+        };
         return Ok(Json(api::Invited {
             ok: true,
-            message: format!("Invited {email}; give them this code"),
-            code: Some(token),
+            message,
+            code: cfg.allows(SignIn::Code).then_some(token),
         }));
     }
     let body = format!(
@@ -475,10 +667,10 @@ pub(super) async fn reset_code(
     Extension(who): Extension<Who>,
     Json(q): Json<api::EmailRequest>,
 ) -> Reply<api::WithCode> {
-    if server.config.sign_in != SignIn::Code {
+    if !server.config.allows(SignIn::Code) {
         return Err(fail(
             StatusCode::BAD_REQUEST,
-            "This server signs in by email",
+            "This server does not sign in with codes",
         ));
     }
     let code = server
@@ -767,6 +959,28 @@ pub(super) async fn device_approve(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_gateway_secret_may_name_a_member() {
+        let secret = Some("a-gateway-secret-of-thirty-two-chars");
+        let named = Some(" Alice@Example.com ");
+        assert_eq!(
+            from_gateway(secret, named, None),
+            None,
+            "off unless configured"
+        );
+        assert_eq!(from_gateway(Some("another-secret"), named, secret), None);
+        assert_eq!(from_gateway(None, named, secret), None);
+        assert_eq!(from_gateway(secret, None, secret), Some(None));
+        assert_eq!(
+            from_gateway(secret, Some("not-an-address"), secret),
+            Some(None)
+        );
+        assert_eq!(
+            from_gateway(secret, named, secret),
+            Some(Some("alice@example.com".into()))
+        );
+    }
 
     #[test]
     fn viewers_read_the_terminal_view_and_members_review() {
