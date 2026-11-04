@@ -235,13 +235,6 @@ export function Layout() {
                 </button>
               </div>
             )}
-            {!narrow && (
-              <p className="nums px-2.5 pt-2 text-xs text-muted-foreground">
-                {overview.data
-                  ? `${overview.data.repos.length} repositories, ${overview.data.symbols.toLocaleString()} symbols`
-                  : "Loading the index…"}
-              </p>
-            )}
           </div>
     </>
   );
