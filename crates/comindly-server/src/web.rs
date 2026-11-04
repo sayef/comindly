@@ -342,6 +342,9 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
         state.reload_mcp(&root);
     }
     rt.spawn(repos::watch(state.clone()));
+    if state.server.is_some() {
+        rt.spawn(repos::carry_on(state.clone()));
+    }
     if let Some(s) = state.server.clone() {
         rt.spawn(async move {
             loop {

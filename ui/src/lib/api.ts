@@ -338,7 +338,7 @@ export interface IndexEvent {
   usd?: number;
 }
 
-export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
+export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted" | "paused";
 
 /** A job as the server keeps it; a waiting one carries its `position`, 1 for the next to run. */
 export interface JobRow {

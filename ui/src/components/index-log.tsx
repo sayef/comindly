@@ -102,7 +102,7 @@ function stateOf(s: Step, last: boolean, status: JobStatus): State {
   if (s.errors) return "failed";
   if (last && status === "running") return "running";
   if (last && status === "failed") return "failed";
-  if (last && (status === "cancelled" || status === "interrupted")) return "stopped";
+  if (last && (status === "cancelled" || status === "interrupted" || status === "paused")) return "stopped";
   return s.warnings ? "warning" : "done";
 }
 

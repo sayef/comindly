@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Check, CircleSlash, Clock, Copy, FolderGit2, Loader2, X } from "lucide-react";
+import { AlertTriangle, Check, CircleSlash, Clock, Copy, FolderGit2, Loader2, PauseCircle, X } from "lucide-react";
 import { Link, useParams, useSearchParams } from "react-router";
 import { ConfirmButton } from "@/components/confirm";
 import { duration, IndexLog, shortStatus, useCopy } from "@/components/index-log";
@@ -24,7 +24,7 @@ function when(iso: string): string {
   return `${d.toLocaleDateString([], { day: "numeric", month: "short" })}, ${time}`;
 }
 
-const active = (s: JobStatus) => s === "queued" || s === "running";
+const active = (s: JobStatus) => s === "queued" || s === "running" || s === "paused";
 
 const STATUS: Record<JobStatus, { label: string; badge: "brand" | "warning" | "danger" | "outline" | "default" }> = {
   queued: { label: "Queued", badge: "outline" },
@@ -33,6 +33,7 @@ const STATUS: Record<JobStatus, { label: string; badge: "brand" | "warning" | "d
   failed: { label: "Failed", badge: "danger" },
   cancelled: { label: "Cancelled", badge: "default" },
   interrupted: { label: "Interrupted", badge: "warning" },
+  paused: { label: "Paused for a restart", badge: "outline" },
 };
 
 function StatusIcon({ status, className }: { status: JobStatus; className?: string }) {
@@ -51,6 +52,7 @@ function StatusGlyph({ status, className }: { status: JobStatus; className?: str
   if (status === "succeeded") return <Check className={cn(c, "text-brand")} />;
   if (status === "failed") return <X className={cn(c, "text-danger")} />;
   if (status === "interrupted") return <AlertTriangle className={cn(c, "text-warning")} />;
+  if (status === "paused") return <PauseCircle className={cn(c, "text-muted-foreground")} />;
   return <CircleSlash className={cn(c, "text-muted-foreground")} />;
 }
 

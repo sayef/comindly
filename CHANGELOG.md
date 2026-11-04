@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- A deploy or restart pauses indexing instead of interrupting it: the job continues by itself once a
+  server is back, under the same job and in its order, reusing what was already summarised.
+
 ## [0.5.0-beta.1](https://github.com/sayef/comindly/compare/v0.4.0...v0.5.0-beta.1) - 2026-11-04
 
 ### Added

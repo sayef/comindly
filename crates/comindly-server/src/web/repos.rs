@@ -2,6 +2,7 @@
 //! indexing job whose output the page follows.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::Context as _;
 use axum::extract::State;
@@ -294,64 +295,112 @@ pub(super) async fn begin(
             missing.join(", ")
         );
     }
-    let app = app.clone();
     let key = format!("llm={llm} drop_unlisted={drop_unlisted}");
-    app.clone()
-        .jobs
-        .submit("index", &key, by, request_id, move |job| {
-            Box::pin(async move {
-                if let Some(w) = why {
-                    job.emit(Event::new(Level::Info, Kind::Note, w));
-                }
-                let root = app
-                    .current
-                    .read()
-                    .await
-                    .data
-                    .root
-                    .clone()
-                    .context("read-only UI")?;
-                let team = crate::team::load(&root)
-                    .await
-                    .map(|t| t.settings)
-                    .unwrap_or_default();
-                let llm_key = llm
-                    .then(|| {
-                        crate::credentials::llm_key(team.name.as_deref(), app.server.as_deref()).0
-                    })
-                    .flatten();
-                let git = app
-                    .server
-                    .as_ref()
-                    .map(|s| {
-                        s.secrets
-                            .secret_names()
-                            .into_iter()
-                            .filter_map(|n| {
-                                let host = n.strip_prefix("git:")?.to_string();
-                                Some((host, s.secrets.secret(&n)?))
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                let spec = crate::indexer::Spec {
-                    root: root.clone(),
-                    repos: app.repos(),
-                    llm,
-                    llm_key,
-                    git,
-                };
-                crate::indexer::run(&spec, job.clone()).await?;
-                if let Err(e) = app.reload(&root).await {
-                    job.emit(Event::new(
-                        Level::Error,
-                        Kind::Error,
-                        format!("reload failed: {e:#}"),
-                    ));
-                }
-                Ok(())
-            })
+    let request = serde_json::to_value(IndexRequest { llm, drop_unlisted })?;
+    app.jobs.submit_resumable(
+        "index",
+        &key,
+        by,
+        request_id,
+        Some(request),
+        index_work(app.clone(), llm, why),
+    )
+}
+
+/// What an indexing job needs to run again after a restart.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct IndexRequest {
+    llm: bool,
+    drop_unlisted: bool,
+}
+
+/// Continue the jobs a restart paused, and those of a server that stopped without pausing them.
+pub(super) async fn carry_on(app: Shared) {
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        for job in app.jobs.resumable() {
+            if job.0.kind != "index" {
+                continue;
+            }
+            let Some(r) = job
+                .0
+                .request
+                .clone()
+                .and_then(|r| serde_json::from_value::<IndexRequest>(r).ok())
+            else {
+                continue;
+            };
+            let key = format!("llm={} drop_unlisted={}", r.llm, r.drop_unlisted);
+            if let Err(e) = app
+                .jobs
+                .resume(&key, job, index_work(app.clone(), r.llm, None))
+            {
+                crate::ui::warn(&format!("continuing a paused job: {e:#}"));
+            }
+        }
+    }
+}
+
+/// Index the listed repositories into the loaded index, then load the result.
+fn index_work(
+    app: Shared,
+    llm: bool,
+    why: Option<String>,
+) -> impl FnOnce(Arc<crate::jobs::Running>) -> futures::future::BoxFuture<'static, anyhow::Result<()>>
+       + Send
+       + 'static {
+    move |job| {
+        Box::pin(async move {
+            if let Some(w) = why {
+                job.emit(Event::new(Level::Info, Kind::Note, w));
+            }
+            let root = app
+                .current
+                .read()
+                .await
+                .data
+                .root
+                .clone()
+                .context("read-only UI")?;
+            let team = crate::team::load(&root)
+                .await
+                .map(|t| t.settings)
+                .unwrap_or_default();
+            let llm_key = llm
+                .then(|| crate::credentials::llm_key(team.name.as_deref(), app.server.as_deref()).0)
+                .flatten();
+            let git = app
+                .server
+                .as_ref()
+                .map(|s| {
+                    s.secrets
+                        .secret_names()
+                        .into_iter()
+                        .filter_map(|n| {
+                            let host = n.strip_prefix("git:")?.to_string();
+                            Some((host, s.secrets.secret(&n)?))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let spec = crate::indexer::Spec {
+                root: root.clone(),
+                repos: app.repos(),
+                llm,
+                llm_key,
+                git,
+            };
+            crate::indexer::run(&spec, job.clone()).await?;
+            if let Err(e) = app.reload(&root).await {
+                job.emit(Event::new(
+                    Level::Error,
+                    Kind::Error,
+                    format!("reload failed: {e:#}"),
+                ));
+            }
+            Ok(())
         })
+    }
 }
 
 /// With `auto_index` on, check every `auto_index_minutes` whether a default branch moved on the
