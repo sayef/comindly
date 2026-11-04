@@ -134,7 +134,8 @@ jobs:
   # The container image from the Linux binaries above, for amd64 and arm64, on GitHub's registry.
   image:
     needs: [tag, build]
-    if: needs.tag.outputs.tag != ''
+    # Only the Linux binaries go into the image, so a stuck macOS runner must not hold it back.
+    if: ${{ !cancelled() && needs.tag.outputs.tag != '' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
