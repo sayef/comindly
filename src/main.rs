@@ -1552,15 +1552,20 @@ fn cmd_ui(from: Option<&str>, web: Option<(String, u16)>, open: bool) -> ExitCod
             let listener =
                 std::net::TcpListener::bind(&addr).with_context(|| format!("bind {addr}"))?;
             if let Some(cfg) = comindly::server::ServerConfig::from_env()? {
-                let (url, sign_in) = (cfg.public_url.clone(), cfg.sign_in);
+                let (url, sign_in) = (cfg.public_url.clone(), cfg.sign_in.clone());
                 let server =
                     comindly::server::Server::open(&root, cfg).context("open the server table")?;
                 migrate_server(&server, &root)?;
                 comindly::ui::ok(&format!("comindly server for {url}, listening on {addr}"));
-                comindly::ui::note(match sign_in {
-                    comindly::server::SignIn::Email => "members sign in by email",
-                    comindly::server::SignIn::Code => "members sign in with codes admins hand out",
-                });
+                let ways: Vec<&str> = sign_in
+                    .iter()
+                    .map(|m| match m {
+                        comindly::server::SignIn::Email => "emailed links",
+                        comindly::server::SignIn::Code => "codes admins hand out",
+                        comindly::server::SignIn::Oidc => "the OpenID Connect provider",
+                    })
+                    .collect();
+                comindly::ui::note(&format!("members sign in with {}", ways.join(", ")));
                 return comindly::web::serve(
                     data,
                     listener,

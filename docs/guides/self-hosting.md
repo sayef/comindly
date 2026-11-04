@@ -20,7 +20,11 @@ Secret Manager mounts), so rotating one is a change in your secret store and a r
 | `COMINDLY_SECRET_KEY` | yes | Encrypts tokens and keys saved in the app and signs every account record, so records added to the bucket by anyone else are ignored. Keep it in your secret store. |
 | `COMINDLY_SECRET_KEY_PREVIOUS` | when rotating | The old key: on start, stored secrets and records are re-encrypted and re-signed with the new one. |
 | `COMINDLY_SMTP_URL` | for email sign-in | Mail server, e.g. `smtps://user:password@smtp.example.com`. Without it, members sign in with codes. |
-| `COMINDLY_SIGN_IN` | optional | `email` or `code`; by default email when `COMINDLY_SMTP_URL` is set, else code. |
+| `COMINDLY_SIGN_IN` | optional | The ways to sign in, comma-separated: `oidc`, `email`, `code` (e.g. `oidc,email,code`). By default the provider when `COMINDLY_OIDC_ISSUER` is set and email when `COMINDLY_SMTP_URL` is set, else codes. |
+| `COMINDLY_OIDC_ISSUER` | for provider sign-in | The OpenID Connect issuer, e.g. `https://login.microsoftonline.com/<tenant id>/v2.0`. Setting it turns provider sign-in on. |
+| `COMINDLY_OIDC_CLIENT_ID`, `COMINDLY_OIDC_CLIENT_SECRET` | with the issuer | The app registered at the provider. Keep the secret in your secret store (`COMINDLY_OIDC_CLIENT_SECRET_FILE` reads it from a file). |
+| `COMINDLY_OIDC_LABEL` | optional | The provider's name on the sign-in button, e.g. `Microsoft`. |
+| `COMINDLY_OIDC_ALLOWED_DOMAINS` | optional | Comma-separated email domains whose people join as viewers on first sign-in, without an invitation. |
 | `COMINDLY_SMTP_FROM` | with SMTP | Sender, e.g. `comindly <comindly@example.com>`. |
 | `COMINDLY_INDEX_DIR` | yes | Where the index lives (see [Storage](storage.md)). |
 | `GH_TOKEN`, `GITLAB_TOKEN` | optional | Repository access, if you keep it with the deployment rather than in the app. `GH_TOKEN` is used for github.com, `GITLAB_TOKEN` for gitlab.com. |
@@ -31,6 +35,8 @@ Secret Manager mounts), so rotating one is a change in your secret store and a r
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | optional | Send traces over OTLP/HTTP (protobuf) to this collector, e.g. `http://otel-collector:4318`: a span per request (request id, method, route, status) and per indexing job (job id, the request that started it). Unset: no export. `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` and `OTEL_EXPORTER_OTLP_HEADERS` work as usual. Built into the container image and the Linux release binaries; a build from source needs `--features otel`. An unreachable collector delays shutdown by at most 2 s. |
 | `OTEL_SERVICE_NAME` | optional | The service name on exported traces; `comindly` by default. |
 | `COMINDLY_TRUST_PROXY` | behind a proxy | `true` when a proxy you run sets `X-Forwarded-For`, so sign-in limits apply per client. |
+| `COMINDLY_GATEWAY_SECRET` | no | At least 32 random characters, shared with a gateway you run in front of `/mcp`; see [Agents through a gateway](#agents-through-a-gateway). Off when unset. |
+| `COMINDLY_GATEWAY_EMAIL_HEADER` | no | The header your gateway names the signed-in member in; `X-Forwarded-Email` by default. |
 
 Members, sessions, personal tokens, stored secrets, the repositories the server indexes and the record
 of each indexing job live next to the index, in `_server` at the index location, so a container keeps
@@ -43,21 +49,49 @@ addresses, roles and token names are readable to anyone who can read the bucket,
 
 ## Signing in
 
-A server signs everyone in one way: by email, or by codes. The deployment decides.
+A server offers one or more ways to sign in, all for invited people only: through your identity
+provider, by email, and by codes. The deployment decides with `COMINDLY_SIGN_IN`, and the sign-in page
+shows each one it offers. Invitations are emailed when the server sends mail, else they are a code to
+hand over; an invited person can also join through the provider with that address.
+
+**Through your identity provider** (with `COMINDLY_OIDC_ISSUER`): the sign-in page shows one button,
+"Continue with" the provider, which signs people in with their company account (OpenID Connect,
+authorization code flow with PKCE). The provider checks passwords and MFA; comindly checks the ID
+token's signature, issuer, audience, expiry and nonce, and takes its `email` claim (or
+`preferred_username` when that is an address). Who may get in stays in comindly: members sign in,
+invited addresses join with the invitation's role, and with `COMINDLY_OIDC_ALLOWED_DOMAINS` anyone at
+those domains joins as a viewer. Everyone else is turned away. Register comindly at the provider as a
+web app with the redirect URI `<COMINDLY_PUBLIC_URL>/auth/oidc/callback` and the scopes `openid email
+profile`:
+
+- **Microsoft Entra ID**: App registrations → New registration → Web, that redirect URI; then
+  Certificates & secrets → New client secret. The issuer is
+  `https://login.microsoftonline.com/<tenant id>/v2.0`. Add the optional `email` claim to the ID
+  token, or rely on `preferred_username`.
+- **Google Workspace**: Google Cloud console → Credentials → OAuth client ID → Web application. The
+  issuer is `https://accounts.google.com`.
+- **Okta, Auth0, Keycloak, Cognito**: a confidential web client with that redirect URI; the issuer is
+  the address its `/.well-known/openid-configuration` lives under.
 
 **By email** (with `COMINDLY_SMTP_URL`): invitations are emailed links for one address that work once
 within 7 days; to sign in, members ask for a link that works once, for 15 minutes. Opening a link asks
 for a click, so mail scanners cannot use it up.
 
 **By code**: an admin invites an address and hands over the invitation code it gets (once, for that
-address, within 7 days). With it, the person signs in for the first time and receives their own
+address, within 7 days), or gives an existing member a code with Reset code. With it, the person signs in for the first time and receives their own
 sign-in code, shown once, which they use with their email address from then on. They can make a new
 one under Settings → Your access; an admin can reset it for someone who lost theirs. Each new code
 signs the person out everywhere else. Codes are generated, never chosen; five wrong ones pause that
 address for 15 minutes from the same client only, so nobody can lock someone else out.
 
-**In both**: admins named in `COMINDLY_ADMIN_EMAILS` can always sign in with the admin token too;
-sessions last 30 days; removing a member ends their sessions, codes and tokens.
+**In every mode**: admins named in `COMINDLY_ADMIN_EMAILS` can always sign in with the admin token too;
+sessions last 30 days.
+
+**Offboarding**: remove the person under Settings → Members. That deletes their sessions, personal
+access tokens, sign-in code, invitations and pending sign-in links at once, so every way back in closes
+together, the provider included. People named in `COMINDLY_ADMIN_EMAILS` are removed by changing that
+setting. comindly keeps no keys of their own for members; if they knew the server's git or LLM tokens,
+rotate those under Settings → Secrets.
 
 ## Roles
 
@@ -97,6 +131,18 @@ An expired token stops working and shows as expired under Settings → Your acce
 days later. Through the API, `POST /api/v1/tokens` takes `{"name": "…", "expires_in_days": 90}`
 (`null` for no expiry). Records an agent writes say which member it works for; after each re-index, agents get the new
 index without reconnecting. Ledger records written in the app carry the member's address.
+
+### Agents through a gateway
+
+To keep the server private while an outside service (a code review bot, say) reaches `/mcp`, run a
+gateway that signs people in and forwards their calls: an MCP OAuth proxy, oauth2-proxy, Pomerium or
+similar. Set `COMINDLY_GATEWAY_SECRET`, and have the gateway send it in `X-Gateway-Secret` with the
+signed-in person's address in `X-Forwarded-Email` (or the header set in
+`COMINDLY_GATEWAY_EMAIL_HEADER`). comindly answers only members, each with their own role; anyone
+else is refused, and the address header is ignored without the secret. To keep a client such as a
+review bot read-only, allow it only the read tools. Only the gateway should be able to reach the
+server, and it must drop these headers when a client sends them. Without a gateway, nothing changes:
+agents use personal access tokens as above.
 
 ## The command line
 

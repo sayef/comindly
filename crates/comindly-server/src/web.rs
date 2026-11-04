@@ -418,6 +418,8 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
             .route("/api/v1/auth/link", post(auth::request_link))
             .route("/api/v1/auth/redeem", post(auth::redeem))
             .route("/api/v1/auth/code", post(auth::sign_in_code))
+            .route("/auth/oidc/start", get(auth::oidc_start))
+            .route(crate::oidc::CALLBACK, get(auth::oidc_callback))
             .route("/api/v1/auth/reset-code", post(auth::reset_own_code))
             .route("/api/v1/auth/signout", post(auth::sign_out))
             .route(auth::SELF_REVOKE, post(auth::revoke_self))

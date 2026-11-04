@@ -6,6 +6,21 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Sign-in through your identity provider (OpenID Connect): Microsoft Entra ID, Google Workspace, Okta,
+  Keycloak, Cognito and others. Set `COMINDLY_OIDC_ISSUER`, `COMINDLY_OIDC_CLIENT_ID` and
+  `COMINDLY_OIDC_CLIENT_SECRET`; members, invitations and roles stay in comindly, and
+  `COMINDLY_OIDC_ALLOWED_DOMAINS` lets a company's people join as viewers.
+- A server can offer several ways to sign in at once: `COMINDLY_SIGN_IN=oidc,email,code`.
+- Agents through a gateway you run: with `COMINDLY_GATEWAY_SECRET`, a gateway that signs people in can
+  name the member behind each `/mcp` call, so the server stays private and answers members only, each
+  with their own role.
+
+### Changed
+
+- A new sign-in page: what comindly does, typed out line by line, beside every way the server offers to sign in.
+
 ## [0.4.0](https://github.com/sayef/comindly/compare/v0.4.0-beta.3...v0.4.0) - 2026-11-03
 
 ## [0.4.0-beta.3](https://github.com/sayef/comindly/compare/v0.4.0-beta.2...v0.4.0-beta.3) - 2026-10-27

@@ -419,12 +419,18 @@ export interface Me {
   signed_in?: boolean;
   email?: string | null;
   role?: Role | null;
-  /** Everything by email, or everything by codes admins hand out. */
+  /** One way to sign in, for older clients; `sign_in_methods` lists them all. */
   sign_in?: SignIn;
+  /** Every way this server offers: an OpenID Connect provider, emailed links, codes admins hand out. */
+  sign_in_methods?: SignIn[];
+  /** The provider's name on the sign-in button. */
+  oidc_label?: string;
+  /** The provider's logo on that button, when it is one comindly knows. */
+  oidc_brand?: "microsoft" | "google";
   public_url?: string | null;
 }
 
-export type SignIn = "email" | "code";
+export type SignIn = "email" | "code" | "oidc";
 
 export interface Member {
   email: string;
@@ -480,7 +486,7 @@ export const api = {
   signInCode: (email: string, code: string) => post<Done & { code: string | null }>("/api/v1/auth/code", { email, code }),
   resetOwnCode: () => post<Done & { code: string }>("/api/v1/auth/reset-code", {}),
   signOut: (everywhere = false) => post(`/api/v1/auth/signout${everywhere ? "?everywhere=true" : ""}`, {}),
-  members: () => get<{ members: Member[]; invites: Invite[]; sign_in: SignIn }>("/api/v1/members"),
+  members: () => get<{ members: Member[]; invites: Invite[]; sign_in: SignIn; sign_in_methods?: SignIn[] }>("/api/v1/members"),
   invite: (email: string, role: Role) => post<Done & { code?: string }>("/api/v1/members/invite", { email, role }),
   resetCode: (email: string) => post<Done & { code: string }>("/api/v1/members/reset", { email }),
   setRole: (email: string, role: Role) => post("/api/v1/members/role", { email, role }),

@@ -15,9 +15,9 @@ ignore = [
     { id = "RUSTSEC-2026-0391", reason = "zstd 0.13 via arrow/lance (lancedb pin); trusted storage only" },
     { id = "RUSTSEC-2026-0398", reason = "zstd-safe 7 via arrow/lance; the seekable feature is not built" },
     { id = "RUSTSEC-2026-0403", reason = "zstd-safe 7 via arrow/lance (lancedb pin); trusted storage only" },
-    # rsa (no fixed release) signs Google and Azure credential requests on this machine; the timing
-    # attack needs an attacker measuring many decryptions, which never happen here.
-    { id = "RUSTSEC-2023-0071", reason = "rsa via gcs/azure credential signing only; no decryption oracle" },
+    # rsa (no fixed release) signs Google and Azure credential requests and verifies OpenID Connect
+    # ID tokens; the timing attack needs an attacker measuring many decryptions, which never happen here.
+    { id = "RUSTSEC-2023-0071", reason = "rsa signs credential requests and verifies ID tokens only; no decryption oracle" },
 ]
 
 [licenses]

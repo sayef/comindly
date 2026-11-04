@@ -73,7 +73,9 @@ export function MembersPage() {
     onSuccess: refresh,
   });
   if (!list.data) return <Skeleton className="h-96 rounded-lg" />;
-  const codes = list.data.sign_in === "code";
+  const methods = list.data.sign_in_methods?.length ? list.data.sign_in_methods : [list.data.sign_in];
+  const codes = methods.includes("code");
+  const emailed = methods.includes("email");
 
   return (
     <div className="flex max-w-5xl flex-col gap-4">
@@ -82,9 +84,11 @@ export function MembersPage() {
       <Section
         title="Invite someone"
         description={
-          codes
-            ? "You get an invitation code to pass on. It works once, only with that address, within 7 days; with it they sign in and get their own sign-in code."
-            : "The invitation is emailed to that address and only works for it, once, within 7 days."
+          emailed
+            ? "The invitation is emailed to that address and only works for it, once, within 7 days."
+            : codes
+              ? "You get an invitation code to pass on. It works once, only with that address, within 7 days; with it they sign in and get their own sign-in code."
+              : "They join with this role the first time they sign in with that address, within 7 days."
         }
       >
         <form
@@ -181,7 +185,7 @@ export function MembersPage() {
                       <ConfirmButton
                         variant="ghost"
                         size="sm"
-                        question={`Remove ${m.email}? Their sessions and tokens stop working.`}
+                        question={`Remove ${m.email}? Their sessions, access tokens, sign-in code and invitations are deleted at once.`}
                         confirmLabel="Remove"
                         loading={remove.isPending && remove.variables === m.email}
                         onConfirm={() => remove.mutate(m.email)}
@@ -400,7 +404,7 @@ export function AccessPage() {
     <div className="flex max-w-5xl flex-col gap-4">
       <PageHeader title="Your access">How you sign in, and the personal access tokens your agents and command line use.</PageHeader>
       <SettingsTabs />
-      {me.data?.sign_in === "code" && (
+      {(me.data?.sign_in_methods ?? [me.data?.sign_in]).includes("code") && (
         <Section
           title="Your sign-in code"
           description="You sign in with your email address and this code. A new one replaces it and signs you out everywhere else."

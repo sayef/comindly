@@ -9,19 +9,24 @@ export type Palette = { node: Rgb; near: Rgb; far: Rgb; contract: Rgb; strength:
 
 export const DARK: Palette = { node: [230, 232, 234], near: [176, 202, 238], far: [141, 180, 234], contract: [141, 180, 234], strength: 0.55, lit: 0.35, glow: false };
 export const LIGHT: Palette = { node: [21, 23, 25], near: [64, 112, 176], far: [47, 95, 158], contract: [47, 95, 158], strength: 0.45, lit: 0.35, glow: false };
+export const DARK_PANEL: Palette = { ...DARK, strength: 1, lit: 0.55 };
+export const LIGHT_PANEL: Palette = { ...LIGHT, strength: 1, lit: 0.6 };
 
 const REPOS = ["storefront", "orders", "payments", "catalog", "shipping"];
 const LINKS = [[0, 1], [0, 2], [1, 3], [2, 4], [3, 4], [0, 4], [1, 4]];
 const STEP = 420, HOLD = 1100, FADE = 1500, DEPTH = 5;
 
-/** Draws into `canvas` until the returned function is called. */
-export function rippleGraph(canvas: HTMLCanvasElement, palette: () => Palette, labels = true): () => void {
+/** Draws into `canvas` until the returned function is called; `calm` draws three clusters with slower, softer ripples. */
+export function rippleGraph(canvas: HTMLCanvasElement, palette: () => Palette, labels = true, calm = false): () => void {
+  const step = calm ? STEP * 1.5 : STEP;
+  const links = calm ? [[0, 1], [0, 2], [1, 2]] : LINKS;
   const ctx = canvas.getContext("2d")!;
   const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
   let W = 0, H = 0, wide = true;
   let nodes: { x: number; y: number; phase: number; size: number }[] = [];
   let edges: Edge[] = [], adj: [number, number][][] = [], centers: [number, number][] = [], ripples: Ripple[] = [];
-  let raf = 0, visible = true, nextAt = 0, lastPoke = 0;
+  let raf = 0, onScreen = true, nextAt = 0, lastPoke = 0;
+  const visible = () => onScreen && !document.hidden;
 
   const seeded = (s: number) => () => ((s = (s * 1664525 + 1013904223) >>> 0) / 2 ** 32);
   const mix = (a: Rgb, b: Rgb, t: number) => a.map((v, i) => Math.round(v + (b[i] - v) * t)).join(",");
@@ -36,11 +41,13 @@ export function rippleGraph(canvas: HTMLCanvasElement, palette: () => Palette, l
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const rand = seeded(11);
     wide = W > 760;
-    const spots = wide
-      ? [[0.13, 0.3], [0.86, 0.26], [0.17, 0.78], [0.84, 0.76], [0.5, 0.92]]
-      : [[0.2, 0.1], [0.8, 0.13], [0.15, 0.9], [0.85, 0.88], [0.5, 0.97]];
-    const per = wide ? 26 : 13;
-    const rx = wide ? W * 0.085 : W * 0.16, ry = wide ? H * 0.12 : H * 0.07;
+    const spots = calm
+      ? [[0.48, 0.17], [0.84, 0.42], [0.72, 0.78]]
+      : wide
+        ? [[0.13, 0.3], [0.86, 0.26], [0.17, 0.78], [0.84, 0.76], [0.5, 0.92]]
+        : [[0.2, 0.1], [0.8, 0.13], [0.15, 0.9], [0.85, 0.88], [0.5, 0.97]];
+    const per = calm ? 20 : wide ? 26 : 13;
+    const rx = calm ? W * 0.13 : wide ? W * 0.085 : W * 0.16, ry = calm ? H * 0.1 : wide ? H * 0.12 : H * 0.07;
     centers = spots.map(([x, y]) => [x * W, y * H]);
     nodes = [];
     edges = [];
@@ -66,7 +73,7 @@ export function rippleGraph(canvas: HTMLCanvasElement, palette: () => Palette, l
         .slice(0, 2)
         .forEach(([j]) => link(i, j, false));
     });
-    for (const [r1, r2] of LINKS) for (let k = 0; k < 2; k++) link(r1 * per + Math.floor(rand() * per), r2 * per + Math.floor(rand() * per), true);
+    for (const [r1, r2] of links) for (let k = 0; k < 2; k++) link(r1 * per + Math.floor(rand() * per), r2 * per + Math.floor(rand() * per), true);
     adj = nodes.map(() => []);
     edges.forEach((e, i) => {
       adj[e.a].push([e.b, i]);
@@ -90,7 +97,7 @@ export function rippleGraph(canvas: HTMLCanvasElement, palette: () => Palette, l
         }
       frontier = next;
     }
-    ripples.push({ origin, t0, lit, end: t0 + (DEPTH + 1) * STEP + HOLD + FADE });
+    ripples.push({ origin, t0, lit, end: t0 + (DEPTH + 1) * step + HOLD + FADE });
   }
 
   const crossRepoStart = () => {
@@ -149,10 +156,10 @@ export function rippleGraph(canvas: HTMLCanvasElement, palette: () => Palette, l
     const glow = new Map<number, number>();
     for (const r of ripples) {
       for (const l of r.lit) {
-        const start = r.t0 + l.d * STEP;
-        const prog = Math.min(1, Math.max(0, (t - start) / STEP));
+        const start = r.t0 + l.d * step;
+        const prog = Math.min(1, Math.max(0, (t - start) / step));
         if (prog <= 0) continue;
-        const a = fade(t, start + STEP);
+        const a = fade(t, start + step);
         if (a <= 0) continue;
         const rgb = mix(p.near, p.far, l.d / (DEPTH - 1));
         trace(bend(edges[l.edge], t), edges[l.edge].a !== l.from, prog);
@@ -172,10 +179,10 @@ export function rippleGraph(canvas: HTMLCanvasElement, palette: () => Palette, l
     nodes.forEach((n, i) => {
       const [x, y] = at(i, t);
       const g = glow.get(i) ?? 0;
-      const base = (0.3 + 0.14 * Math.sin(t * 0.0009 + n.phase)) * s;
+      const base = (0.3 + (calm ? 0.05 : 0.14) * Math.sin(t * 0.0009 + n.phase)) * s;
       ctx.fillStyle = g ? `rgba(${mix(p.far, p.near, g)},${Math.max(base, g * s)})` : rgba(p.node, base);
       ctx.beginPath();
-      ctx.arc(x, y, n.size + g * 1.6, 0, Math.PI * 2);
+      ctx.arc(x, y, n.size + g * (calm ? 0.8 : 1.6), 0, Math.PI * 2);
       ctx.fill();
     });
 
@@ -183,7 +190,7 @@ export function rippleGraph(canvas: HTMLCanvasElement, palette: () => Palette, l
       const age = t - r.t0;
       if (age < 0 || age > 1600) continue;
       const [x, y] = at(r.origin, t);
-      ctx.strokeStyle = rgba(p.near, 0.6 * (1 - age / 1600) * s);
+      ctx.strokeStyle = rgba(p.near, (calm ? 0.25 : 0.6) * (1 - age / 1600) * s);
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.arc(x, y, 4 + age / 40, 0, Math.PI * 2);
@@ -200,10 +207,10 @@ export function rippleGraph(canvas: HTMLCanvasElement, palette: () => Palette, l
 
   function frame(t: number) {
     raf = 0;
-    if (!visible) return;
+    if (!visible()) return;
     if (t >= nextAt && !ripples.length) {
       ripple(crossRepoStart(), t);
-      nextAt = t + 5000 + Math.random() * 2000;
+      nextAt = t + (calm ? 6000 : 5000) + Math.random() * 2000;
     }
     ripples = ripples.filter((r) => r.end > t);
     draw(t);
@@ -229,9 +236,9 @@ export function rippleGraph(canvas: HTMLCanvasElement, palette: () => Palette, l
   function show() {
     if (still) {
       ripples = [];
-      ripple(crossRepoStart(), -STEP * DEPTH);
+      ripple(crossRepoStart(), -step * DEPTH);
       draw(0);
-    } else if (!raf && visible) raf = requestAnimationFrame(frame);
+    } else if (!raf && visible()) raf = requestAnimationFrame(frame);
   }
 
   build();
@@ -242,10 +249,11 @@ export function rippleGraph(canvas: HTMLCanvasElement, palette: () => Palette, l
   });
   sizer.observe(canvas);
   const watcher = new IntersectionObserver(([entry]) => {
-    visible = entry.isIntersecting;
+    onScreen = entry.isIntersecting;
     show();
   });
   watcher.observe(canvas);
+  document.addEventListener("visibilitychange", show);
   const host = canvas.parentElement!;
   host.addEventListener("pointermove", poke);
   return () => {
@@ -253,5 +261,6 @@ export function rippleGraph(canvas: HTMLCanvasElement, palette: () => Palette, l
     sizer.disconnect();
     watcher.disconnect();
     host.removeEventListener("pointermove", poke);
+    document.removeEventListener("visibilitychange", show);
   };
 }

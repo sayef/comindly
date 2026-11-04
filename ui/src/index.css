@@ -102,6 +102,23 @@
   color: var(--color-muted-foreground);
 }
 
+/* The typing caret on the sign-in page: on, then off, without fading. */
+@utility caret {
+  animation: caret 1.05s steps(1) infinite;
+}
+
+@keyframes caret {
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .caret {
+    animation: none;
+  }
+}
+
 @utility nums {
   font-variant-numeric: tabular-nums;
 }
