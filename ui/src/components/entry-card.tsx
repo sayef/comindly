@@ -119,6 +119,11 @@ export function EntryCard({
         <Badge variant="outline">{sentence(r.kind)}</Badge>
         {!ROUTINE.has(status) && <Badge variant={STATUS[entry.status] ?? "outline"}>{sentence(status)}</Badge>}
         {entry.trust !== "T3" && <TrustBadge trust={entry.trust} />}
+        {entry.outside?.length ? (
+          <Badge variant="outline" title="Written about another team's code; it counts less until one of that team's members confirms it">
+            From {entry.outside.join(", ")}
+          </Badge>
+        ) : null}
         {challenged && (
           <Badge variant="warning" title="An agent proposed retiring this; a person decides">
             Challenged

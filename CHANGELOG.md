@@ -9,11 +9,16 @@ All notable changes to this project are documented here. The format follows
 ### Added
 
 - Teams: labels on repositories inside one org. A team picker in the header filters the org map,
-  flows, contracts, explorer, ledger, packages, conventions and repositories; other teams' repositories
+  flows, contracts, ledger, packages, conventions and repositories; other teams' repositories
   fold into one node per team at the edge of the org map. Admins label repositories and manage teams;
   everyone picks their own teams. See [Teams](https://comindly.pages.dev/guides/teams/).
 - An existing server gets one team on upgrade, named after the org, with every indexed repository and
   every member.
+- Notes from other teams: ledger notes keep their writer's teams; a note about another team's code
+  counts less until one of its members confirms it, and each team chooses whether such notes count
+  right away, wait for a member, or are refused. The ledger lists the ones waiting for your teams.
+- MCP: `search`, `find`, `repos`, `contracts` and `suggest` take a `team` filter; `repos` lists teams
+  per repository and `ripple` counts the impact per team.
 
 ### Changed
 

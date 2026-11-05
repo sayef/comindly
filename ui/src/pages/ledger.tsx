@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Inbox, ListTree, Plus, Search } from "lucide-react";
+import { Inbox, ListTree, Plus, Search, Users } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { EntryCard } from "@/components/entry-card";
@@ -9,7 +9,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Toggle, ToggleGroup } from "@/components/ui/tabs";
-import { api, attention, when } from "@/lib/api";
+import { api, attention, type Entry, when } from "@/lib/api";
+
+type View = "review" | "timeline" | "outside";
 import { useTeams } from "@/lib/teams";
 
 export function LedgerPage() {
@@ -18,8 +20,11 @@ export function LedgerPage() {
   const overview = useQuery({ queryKey: ["overview"], queryFn: api.overview });
   const [params, setParams] = useSearchParams();
   const pendingCount = (ledger.data ?? []).filter((e) => attention(e) < 3).length;
-  const view: "review" | "timeline" = (params.get("view") as "review" | "timeline" | null) ?? (ledger.data && pendingCount === 0 ? "timeline" : "review");
-  const setView = (v: "review" | "timeline") => setParams((p) => (p.set("view", v), p), { replace: true });
+  // Notes from other teams about code of the teams you belong to (any team's, if you belong to none).
+  const ours = (e: Entry) => !teams.mine.length || e.record.anchors.some((a) => teams.teamsOf(a.repo).some((t) => teams.mine.includes(t)));
+  const fromOthers = (ledger.data ?? []).filter((e) => e.outside?.length && ours(e) && !["superseded", "retracted"].includes(e.status.toLowerCase()));
+  const view: View = (params.get("view") as View | null) ?? (ledger.data && pendingCount === 0 ? "timeline" : "review");
+  const setView = (v: View) => setParams((p) => (p.set("view", v), p), { replace: true });
   const q = params.get("q") ?? "";
   const setQ = (v: string) => setParams((p) => (v ? p.set("q", v) : p.delete("q"), p), { replace: true });
   const [adding, setAdding] = useState(false);
@@ -27,10 +32,11 @@ export function LedgerPage() {
   const rows = useMemo(() => {
     const needle = q.toLowerCase();
     const all = (ledger.data ?? []).filter((e) => !needle || text.get(e.record.id)?.includes(needle));
+    if (view === "outside") return fromOthers.filter((e) => !needle || text.get(e.record.id)?.includes(needle));
     return view === "timeline"
       ? all.slice().sort((a, b) => when(b).localeCompare(when(a)))
       : all.filter((e) => attention(e) < 3).sort((a, b) => attention(a) - attention(b) || b.record.created.localeCompare(a.record.created));
-  }, [ledger.data, text, view, q]);
+  }, [ledger.data, text, view, q, fromOthers]);
   const pending = (ledger.data ?? []).filter((e) => attention(e) < 3).length;
 
   let month = "";
@@ -50,13 +56,18 @@ export function LedgerPage() {
       </PageHeader>
       <RememberDialog open={adding} onOpenChange={setAdding} />
       <div className="flex flex-wrap items-center gap-3">
-        <ToggleGroup label="View" value={view} onValueChange={(v) => setView(v as "review" | "timeline")}>
+        <ToggleGroup label="View" value={view} onValueChange={(v) => setView(v as View)}>
           <Toggle value="review">
             <Inbox className="size-3.5" /> Needs review {pending > 0 && <span className="nums text-xs font-normal text-muted-foreground">{pending}</span>}
           </Toggle>
           <Toggle value="timeline">
             <ListTree className="size-3.5" /> Timeline
           </Toggle>
+          {fromOthers.length > 0 && (
+            <Toggle value="outside">
+              <Users className="size-3.5" /> From other teams <span className="nums text-xs font-normal text-muted-foreground">{fromOthers.length}</span>
+            </Toggle>
+          )}
         </ToggleGroup>
         <div className="relative w-full sm:ml-auto sm:max-w-xs">
           <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
@@ -72,7 +83,9 @@ export function LedgerPage() {
               <code className="font-mono">comindly remember</code>; agents add them through MCP.
             </>
           ) : (
-            view === "review" && !q ? (
+            view === "outside" && !q ? (
+              "No notes from other teams are waiting for your teams."
+            ) : view === "review" && !q ? (
               <>
                 Nothing needs review. Records that go stale, lose their symbol or get disputed land here; the{" "}
                 <button className="font-semibold text-brand hover:underline" onClick={() => setView("timeline")}>

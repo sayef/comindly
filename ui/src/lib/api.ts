@@ -91,7 +91,7 @@ export interface LedgerRecord {
   anchors: Anchor[];
   evidence: string[];
   snippets?: Snippet[];
-  provenance: { author: string; actor: string; source: string; agent: string | null; name?: string };
+  provenance: { author: string; actor: string; source: string; agent: string | null; name?: string; teams?: string[] };
   created: string;
 }
 
@@ -105,6 +105,8 @@ export interface Entry {
   by: string;
   history: LedgerEvent[];
   retired: "outdated" | "wrong" | null;
+  /** The writer's teams, when the note is about another team's code and none of its members confirmed it. */
+  outside?: string[];
 }
 
 export interface LedgerEvent {

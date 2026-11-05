@@ -128,9 +128,14 @@ impl TeamSettings {
     /// Refuses a note from outside when every team owning `repos` is closed to them.
     pub fn accepts(&self, writer: &[String], repos: &[&str]) -> Result<()> {
         if let Some(owners) = self.outside(writer, repos) {
+            let (takes, their) = if owners.len() == 1 {
+                ("takes", "its")
+            } else {
+                ("take", "their")
+            };
             anyhow::ensure!(
                 self.incoming(&owners) != Incoming::Closed,
-                "{} take notes on this code only from their members; ask one of them to record it",
+                "{} {takes} notes on this code only from {their} members; ask one of them to record it",
                 owners.join(" and ")
             );
         }

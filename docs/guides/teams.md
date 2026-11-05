@@ -17,8 +17,8 @@ each team's repositories and members.
 
 ## Choosing what you see
 
-The team picker in the header filters the org map, flows, contracts, explorer, ledger, packages,
-conventions and repositories to the teams you pick: one, several, **Unassigned**, or **Everyone**. The
+The team picker in the header filters the org map, flows, contracts, ledger, packages, conventions
+and repositories to the teams you pick: one, several, **Unassigned**, or **Everyone**. The
 choice is part of the address (`?teams=payments,platform`), so a link opens the same view for a
 colleague. Without one, comindly starts with your own teams.
 
@@ -38,7 +38,26 @@ normal settings version by `comindly upgrade` and runs once; a deployment that l
 does not get it back. Rename the org afterwards if its name was really the team's, and add the next
 team.
 
+## Notes from other teams
+
+Every ledger note remembers the teams its writer belonged to. A note about code that only other
+teams own is marked **From <team>** and counts less until a member of an owning team confirms it:
+an agent's note stays unverified, a person's stays below confirmed. The owning team chooses, in the
+Teams card, how such notes count:
+
+| Setting | Notes from outside |
+|---|---|
+| Count right away | Count like the team's own, still marked |
+| Marked until we confirm (default) | Count less until a member confirms |
+| Not accepted | Refused; the writer is asked to go through a member |
+
+When a repository belongs to several teams, the most open setting wins. Notes written before teams
+existed, and notes by people in no team, count as before. The ledger's **From other teams** view
+lists the notes waiting for your teams.
+
 ## Agents
 
-The MCP tools keep answering across the whole org. Labels let you steer them: a review bot's
-instructions for one repository can say which team to prefer.
+Agents keep seeing the whole org. The MCP tools `search`, `find`, `repos`, `contracts` and `suggest`
+take an optional `team` argument (comma-separated names, `none` for unlabelled repositories);
+`repos` lists the teams of each repository, and `ripple` counts the impact per team next to per
+repository. A review bot's instructions for one repository can say which team to prefer.
