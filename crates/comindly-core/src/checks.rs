@@ -424,6 +424,7 @@ mod tests {
                 agent: None,
                 session: None,
                 name: None,
+                teams: Vec::new(),
             },
         );
         rec.fields.insert("dep".into(), "lance =1.0.1".into());
@@ -437,6 +438,7 @@ mod tests {
             by: String::new(),
             history: Vec::new(),
             retired: None,
+            outside: Vec::new(),
         }];
         assert!(revivals(&e, &[row("1.0.1")]).is_empty());
         assert_eq!(revivals(&e, &[row("1.3.0")]).len(), 1);

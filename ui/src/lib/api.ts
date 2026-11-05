@@ -91,7 +91,7 @@ export interface LedgerRecord {
   anchors: Anchor[];
   evidence: string[];
   snippets?: Snippet[];
-  provenance: { author: string; actor: string; source: string; agent: string | null; name?: string };
+  provenance: { author: string; actor: string; source: string; agent: string | null; name?: string; teams?: string[] };
   created: string;
 }
 
@@ -105,6 +105,8 @@ export interface Entry {
   by: string;
   history: LedgerEvent[];
   retired: "outdated" | "wrong" | null;
+  /** The writer's teams, when the note is about another team's code and none of its members confirmed it. */
+  outside?: string[];
 }
 
 export interface LedgerEvent {
@@ -220,6 +222,16 @@ export interface TeamSettings {
   auto_index_llm?: boolean;
   auto_index_minutes?: number;
   repos?: string[];
+  /** Absent until teams are set up. */
+  teams?: TeamDef[] | null;
+}
+
+/** A team: a label on repositories (by indexed name) and the members who belong to it. */
+export interface TeamDef {
+  name: string;
+  repos: string[];
+  members: string[];
+  incoming: "open" | "review" | "closed";
 }
 
 /** Where your API key comes from: your credentials file (team entry or default) or OPENAI_API_KEY. */
@@ -338,7 +350,7 @@ export interface IndexEvent {
   usd?: number;
 }
 
-export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
+export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted" | "paused";
 
 /** A job as the server keeps it; a waiting one carries its `position`, 1 for the next to run. */
 export interface JobRow {
@@ -519,8 +531,8 @@ export const api = {
       { url, ...auth },
       signal,
     ),
-  addRemoteRepos: (urls: string[], share: boolean) => post("/api/v1/repos/remote/add", { urls, share }),
-  changeRepos: (c: { add?: string[]; remove?: string[] }) => post("/api/v1/repos", c),
+  addRemoteRepos: (urls: string[], share: boolean, teams: string[] = []) => post("/api/v1/repos/remote/add", { urls, share, teams }),
+  changeRepos: (c: { add?: string[]; remove?: string[]; teams?: string[] }) => post("/api/v1/repos", c),
   scanRepos: (dir: string, signal?: AbortSignal) => post<{ ok: boolean; found: ScanHit[] }>("/api/v1/repos/scan", { dir }, signal),
   flows: () => get<FlowRow[]>("/api/v1/flows"),
   flow: (id: string) => get<FlowDetail>(`/api/v1/flow?id=${encodeURIComponent(id)}`),
@@ -537,6 +549,9 @@ export const api = {
   saveKey: (key: string) => post<{ ok: boolean; message: string }>("/api/v1/team/key", { key }),
   join: (index: string) => post("/api/v1/join", { index }),
   createTeam: (name: string, index: string) => post("/api/v1/team/create", { name, index }),
+  saveTeams: (teams: TeamDef[], version: number | null) => post("/api/v1/teams", { teams, version }),
+  labelRepo: (repo: string, teams: string[]) => post("/api/v1/repos/teams", { repo, teams }),
+  saveMyTeams: (teams: string[]) => post("/api/v1/me/teams", { teams }),
   saveSettings: (c: SettingsChange) => post("/api/v1/settings", c),
   testIndex: (index_dir: string) => post("/api/v1/settings/test", { index_dir }),
   context: async (focus: string) => {

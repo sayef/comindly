@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { Toggle, ToggleGroup } from "@/components/ui/tabs";
 import { api, type ContractView } from "@/lib/api";
+import { useTeams } from "@/lib/teams";
 
 const KINDS = ["all", "http", "sqs", "sns", "s3", "table"] as const;
 type Kind = (typeof KINDS)[number];
@@ -45,7 +46,8 @@ function repos(nodes: ContractView["providers"], empty: string) {
 const phoneSelect = "h-9 w-full min-w-0 rounded-md border border-input bg-card px-2 text-sm sm:hidden";
 
 export function ContractsPage() {
-  const contracts = useQuery({ queryKey: ["contracts"], queryFn: api.contracts });
+  const teams = useTeams();
+  const contracts = useQuery({ queryKey: ["contracts"], queryFn: api.contracts, select: (d) => d.filter(teams.contractInView) });
   const [params, setParams] = useSearchParams();
   const kind = (KINDS as readonly string[]).includes(params.get("kind") ?? "") ? (params.get("kind") as Kind) : "all";
   const side = (["linked", "dangling"].includes(params.get("side") ?? "") ? params.get("side") : "all") as Side;

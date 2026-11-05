@@ -31,6 +31,9 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use rmcp::{schemars, tool, tool_router, ServiceExt};
 use serde::{Deserialize, Serialize};
 
+/// The org's teams, shared with the web app so changes reach agents at once.
+pub type Teams = Arc<std::sync::RwLock<crate::team::TeamSettings>>;
+
 /// Ledger records and when they were read.
 type Cached = (std::time::Instant, Vec<crate::ledger::Record>);
 
@@ -67,6 +70,8 @@ pub struct ComindlyServer {
     identity: crate::ledger::Identity,
     /// The agent's name, when set rather than taken from the MCP handshake.
     agent_name: Option<String>,
+    /// The org's teams: labels on repositories, and who belongs to which.
+    pub teams: Teams,
 }
 
 impl ComindlyServer {
@@ -77,6 +82,27 @@ impl ComindlyServer {
             .strip_suffix("/_graph")
             .unwrap_or(&self.uri)
             .to_string()
+    }
+
+    fn team_settings(&self) -> crate::team::TeamSettings {
+        self.teams.read().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Whether `repo` is in the teams a tool's `team` argument names.
+    fn in_team(&self, team: Option<&str>, repo: &str) -> bool {
+        let sel = crate::team::parse_selection(team);
+        sel.is_empty() || self.team_settings().in_view(repo, &sel)
+    }
+
+    /// Status and trust of every record, with notes from outside a team weighed.
+    fn entries(
+        &self,
+        records: &[crate::ledger::Record],
+        symbols: &[Symbol],
+    ) -> Vec<crate::ledger::Entry> {
+        let mut e = crate::ledger::derive(records, symbols, &crate::config::local_verifier());
+        crate::ledger::weigh_teams(&mut e, records, &self.team_settings());
+        e
     }
 
     async fn records(&self) -> Vec<crate::ledger::Record> {
@@ -133,7 +159,11 @@ impl ComindlyServer {
             },
             None => self.identity.clone(),
         };
-        crate::ledger::Provenance::agent("mcp", name, &identity)
+        let mut p = crate::ledger::Provenance::agent("mcp", name, &identity);
+        if let Some(w) = who {
+            p.teams = self.team_settings().teams_of_member(&w.email);
+        }
+        p
     }
 
     /// Trusted (T2+), still-relevant ledger records about these symbols, as compact lines.
@@ -143,8 +173,11 @@ impl ComindlyServer {
             return Vec::new();
         }
         let symbols: Vec<Symbol> = self.symbols.values().cloned().collect();
-        let entries = crate::ledger::derive(&records, &symbols, &crate::config::local_verifier());
-        crate::ledger::about(&entries, ids)
+        let entries = self.entries(&records, &symbols);
+        let mut about = crate::ledger::about(&entries, ids);
+        // The owners' notes first; notes from other teams after them.
+        about.sort_by_key(|e| !e.outside.is_empty());
+        about
             .into_iter()
             .filter(|e| e.trust >= crate::ledger::Trust::T2)
             .filter(|e| {
@@ -183,6 +216,10 @@ impl ComindlyServer {
                 .ok_or_else(|| anyhow::anyhow!("symbol `{id}` not loaded"))?;
             anchors.push(crate::ledger::Anchor::of(s).at(&commits));
         }
+        let repos: Vec<&str> = anchors.iter().map(|a| a.repo.as_str()).collect();
+        let teams = self.team_settings();
+        teams.accepts(&by.teams, &repos)?;
+        let outside = teams.outside(&by.teams, &repos);
         let commit = anchors.first().and_then(|a| a.commit.clone());
         let mut rec = crate::ledger::Record::new(kind, &p.title, anchors, by);
         rec.snippets = p
@@ -207,8 +244,12 @@ impl ComindlyServer {
             .put(&rec)
             .await?;
         self.wrote(&rec).await;
+        let until = match outside {
+            Some(owners) => format!("a member of {} reviews it", owners.join(" or ")),
+            None => "a human reviews it".into(),
+        };
         Ok(format!(
-            "recorded {} `{}` (id `{}`); it is unconfirmed until a human reviews it",
+            "recorded {} `{}` (id `{}`); it is unconfirmed until {until}",
             kind.as_str(),
             rec.title,
             rec.id
@@ -327,6 +368,9 @@ struct HopDto {
 struct RepoCount {
     repo: String,
     symbols: usize,
+    /// Teams labelling the repository.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    teams: Vec<String>,
     /// Packages published by other indexed repos that this repo depends on.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     depends_on: Vec<DepDto>,
@@ -345,6 +389,16 @@ struct DepDto {
 #[derive(Serialize, schemars::JsonSchema)]
 struct ReposDto {
     repos: Vec<RepoCount>,
+    /// The org's teams.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    teams: Vec<String>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct TeamCount {
+    team: String,
+    repos: usize,
+    symbols: usize,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
@@ -417,6 +471,9 @@ struct ContractsParam {
     /// Substring filter on the contract key, e.g. `/courses` or `orders`.
     #[serde(default)]
     query: Option<String>,
+    /// Only repositories of these teams: comma-separated names, `none` for unlabelled ones. Omit for the whole org.
+    #[serde(default)]
+    team: Option<String>,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
@@ -425,6 +482,9 @@ struct RippleDto {
     found: bool,
     total_dependents: usize,
     by_repo: Vec<RepoCount>,
+    /// Dependents per team; unlabelled repositories count under `none`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    by_team: Vec<TeamCount>,
     dependents: Vec<HopDto>,
 }
 
@@ -573,7 +633,11 @@ struct SuggestDto {
 // ---- tool parameters --------------------------------------------------------------------
 
 #[derive(Deserialize, schemars::JsonSchema, Default)]
-struct NoArgs {}
+struct ReposParam {
+    /// Only repositories of these teams: comma-separated names, `none` for unlabelled ones. Omit for the whole org.
+    #[serde(default)]
+    team: Option<String>,
+}
 
 #[derive(Deserialize, schemars::JsonSchema, Default)]
 struct SearchParam {
@@ -581,6 +645,9 @@ struct SearchParam {
     query: String,
     /// Max results (default 12).
     limit: Option<u32>,
+    /// Only repositories of these teams: comma-separated names, `none` for unlabelled ones. Omit for the whole org.
+    #[serde(default)]
+    team: Option<String>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema, Default)]
@@ -589,6 +656,9 @@ struct SuggestParam {
     about: Option<String>,
     /// Max suggestions (default 40).
     limit: Option<u32>,
+    /// Only repositories of these teams: comma-separated names, `none` for unlabelled ones. Omit for the whole org.
+    #[serde(default)]
+    team: Option<String>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema, Default)]
@@ -597,6 +667,9 @@ struct FindParam {
     query: String,
     /// Max results (default 20).
     limit: Option<u32>,
+    /// Only repositories of these teams: comma-separated names, `none` for unlabelled ones. Omit for the whole org.
+    #[serde(default)]
+    team: Option<String>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema, Default)]
@@ -657,10 +730,15 @@ impl ComindlyServer {
             &self.enrichment,
             embedder,
             &p.query,
-            limit,
+            if p.team.is_some() { limit * 5 } else { limit },
         )
         .await
         .unwrap_or_default();
+        let hits: Vec<_> = hits
+            .into_iter()
+            .filter(|h| self.in_team(p.team.as_deref(), &h.repo))
+            .take(limit)
+            .collect();
         let md = crate::search::markdown(&p.query, &hits);
         let dto = SearchDto {
             query: p.query.clone(),
@@ -671,20 +749,24 @@ impl ComindlyServer {
 
     #[tool(
         name = "repos",
-        description = "List indexed repositories and their symbol counts"
+        description = "List indexed repositories with their symbol counts and the teams labelling each; `team` narrows to some teams"
     )]
-    fn repos(&self, _p: Parameters<NoArgs>) -> CallToolResult {
+    fn repos(&self, Parameters(p): Parameters<ReposParam>) -> CallToolResult {
+        let teams = self.team_settings();
         let dto = ReposDto {
             repos: self
                 .graph
                 .repos()
                 .into_iter()
+                .filter(|(repo, _)| self.in_team(p.team.as_deref(), repo))
                 .map(|(repo, symbols)| RepoCount {
                     depends_on: comindly_deps(&self.packages, &repo),
+                    teams: teams.teams_of(&repo),
                     repo,
                     symbols,
                 })
                 .collect(),
+            teams: teams.team_list().iter().map(|t| t.name.clone()).collect(),
         };
         let md = md_repos(&dto);
         self.reply(&dto, md)
@@ -699,6 +781,14 @@ impl ComindlyServer {
         let about = p.about.as_deref().map(str::to_lowercase);
         let mut items: Vec<SuggestItem> = Vec::new();
         for (id, (_, queries)) in self.enrichment.iter() {
+            if p.team.is_some()
+                && !self
+                    .symbols
+                    .get(id)
+                    .is_some_and(|s| self.in_team(p.team.as_deref(), &s.repo.0))
+            {
+                continue;
+            }
             let (symbol, location) = self
                 .symbols
                 .get(id)
@@ -742,8 +832,10 @@ impl ComindlyServer {
         let dto = FindDto {
             results: self
                 .graph
-                .find(&p.query, limit)
+                .find(&p.query, if p.team.is_some() { limit * 5 } else { limit })
                 .into_iter()
+                .filter(|n| self.in_team(p.team.as_deref(), &n.repo))
+                .take(limit)
                 .map(|n| self.node_dto(n))
                 .collect(),
         };
@@ -822,6 +914,13 @@ impl ComindlyServer {
                         .as_deref()
                         .is_none_or(|q| v.contract.name.contains(q))
                 })
+                .filter(|v| {
+                    p.team.is_none()
+                        || v.providers
+                            .iter()
+                            .chain(&v.consumers)
+                            .any(|n| self.in_team(p.team.as_deref(), &n.repo))
+                })
                 .take(200)
                 .map(|v| ContractDto {
                     contract: v.contract.name,
@@ -849,7 +948,7 @@ impl ComindlyServer {
         };
         let records = self.records().await;
         let symbols: Vec<Symbol> = self.symbols.values().cloned().collect();
-        let entries = crate::ledger::derive(&records, &symbols, &crate::config::local_verifier());
+        let entries = self.entries(&records, &symbols);
         let about = crate::ledger::about(&entries, &ids);
         let md = crate::ledger::markdown(&format!("why `{name}`"), &about);
         let dto = LedgerDto {
@@ -891,7 +990,7 @@ impl ComindlyServer {
         }
         let records = self.records().await;
         let symbols: Vec<Symbol> = self.symbols.values().cloned().collect();
-        let entries = crate::ledger::derive(&records, &symbols, &crate::config::local_verifier());
+        let entries = self.entries(&records, &symbols);
         let findings = crate::checks::run(&entries, &symbols, &self.edges, &self.packages);
         let recipes: Vec<crate::conventions::Convention> = self
             .conventions
@@ -911,6 +1010,11 @@ impl ComindlyServer {
                 &recipes,
                 &findings,
                 &changes,
+            ) + &crate::preflight::teams_affected(
+                &self.graph,
+                &symbols,
+                &changes,
+                &self.team_settings(),
             )
         };
         let dto = LedgerDto {
@@ -964,7 +1068,7 @@ impl ComindlyServer {
 
     #[tool(
         name = "ripple",
-        description = "Blast radius (reverse deps): who transitively depends on this symbol, cross-repo, grouped by repo. Use to gauge the impact of changing it. This is the reverse direction of `thread`. Returns dependents with depth + repo counts."
+        description = "Blast radius (reverse deps): who transitively depends on this symbol, cross-repo, grouped by repo and by team. Use to gauge the impact of changing it. This is the reverse direction of `thread`. Returns dependents with depth + repo counts."
     )]
     fn ripple(&self, Parameters(p): Parameters<DepthParam>) -> CallToolResult {
         let depth = p.depth.unwrap_or(4) as usize;
@@ -974,10 +1078,12 @@ impl ComindlyServer {
                 found: false,
                 total_dependents: 0,
                 by_repo: vec![],
+                by_team: vec![],
                 dependents: vec![],
             },
             Some(idx) => {
                 let hops = self.graph.ripple(idx, depth);
+                let teams = self.team_settings();
                 let mut by_repo: std::collections::BTreeMap<String, usize> =
                     std::collections::BTreeMap::new();
                 for h in &hops {
@@ -987,9 +1093,11 @@ impl ComindlyServer {
                     focus: p.focus.clone(),
                     found: true,
                     total_dependents: hops.len(),
+                    by_team: by_team(&teams, &by_repo),
                     by_repo: by_repo
                         .into_iter()
                         .map(|(repo, symbols)| RepoCount {
+                            teams: teams.teams_of(&repo),
                             repo,
                             symbols,
                             depends_on: Vec::new(),
@@ -1213,11 +1321,19 @@ fn node_section(o: &mut String, title: &str, nodes: &[NodeDto]) {
 
 fn md_repos(d: &ReposDto) -> String {
     let mut o = String::from("## Indexed repositories\n\n");
+    if !d.teams.is_empty() {
+        let _ = writeln!(o, "Teams: {}\n", d.teams.join(", "));
+    }
     if d.repos.is_empty() {
         return o + "_none_\n";
     }
     for r in &d.repos {
-        let _ = writeln!(o, "- **{}** — {} symbols", r.repo, r.symbols);
+        let teams = if r.teams.is_empty() {
+            String::new()
+        } else {
+            format!(" · teams: {}", r.teams.join(", "))
+        };
+        let _ = writeln!(o, "- **{}** — {} symbols{teams}", r.repo, r.symbols);
         for dep in &r.depends_on {
             let _ = writeln!(
                 o,
@@ -1375,9 +1491,52 @@ fn md_ripple(d: &RippleDto) -> String {
             .collect();
         let _ = write!(o, " across {}", by.join(", "));
     }
+    if !d.by_team.is_empty() {
+        let by: Vec<String> = d
+            .by_team
+            .iter()
+            .map(|t| {
+                let what = if t.repos == 1 { "repo" } else { "repos" };
+                format!("{} ({} {what}, {} symbols)", t.team, t.repos, t.symbols)
+            })
+            .collect();
+        let _ = write!(o, "\n\nTeams affected: {}", by.join(", "));
+    }
     o.push_str("\n\n");
     md_hop_lines(&mut o, &d.dependents);
     o
+}
+
+/// Dependents per team from per-repo counts; a repository in two teams counts for both.
+fn by_team(
+    teams: &crate::team::TeamSettings,
+    by_repo: &std::collections::BTreeMap<String, usize>,
+) -> Vec<TeamCount> {
+    if teams.team_list().is_empty() {
+        return Vec::new();
+    }
+    let mut out: Vec<TeamCount> = Vec::new();
+    for (repo, n) in by_repo {
+        let mut names = teams.teams_of(repo);
+        if names.is_empty() {
+            names.push(crate::team::UNASSIGNED.to_string());
+        }
+        for name in names {
+            match out.iter_mut().find(|t| t.team == name) {
+                Some(t) => {
+                    t.repos += 1;
+                    t.symbols += n;
+                }
+                None => out.push(TeamCount {
+                    team: name,
+                    repos: 1,
+                    symbols: *n,
+                }),
+            }
+        }
+    }
+    out.sort_by(|a, b| b.symbols.cmp(&a.symbols).then(a.team.cmp(&b.team)));
+    out
 }
 
 fn md_thread(d: &ThreadDto) -> String {
@@ -1491,6 +1650,9 @@ pub async fn serve_stdio(uri: &str, markdown: bool) -> Result<()> {
     server.signer = crate::config::local_signing_key();
     server.identity = crate::config::local_identity();
     server.agent_name = crate::config::env("COMINDLY_AGENT");
+    if let Ok(t) = crate::team::load(&server.ledger_root()).await {
+        server.teams = Arc::new(std::sync::RwLock::new(t.settings));
+    }
     let service = server.serve(rmcp::transport::io::stdio()).await?;
     service.waiting().await?;
     Ok(())
@@ -1578,6 +1740,7 @@ pub async fn load(uri: &str, markdown: bool, fresh: std::time::Duration) -> Resu
         signer: None,
         identity: Default::default(),
         agent_name: None,
+        teams: Default::default(),
     };
     Ok(server)
 }
@@ -1618,4 +1781,37 @@ pub fn tools() -> Vec<(String, String)> {
             )
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn impact_by_team() {
+        let mut teams = crate::team::TeamSettings::default();
+        teams.label("api", &["Backend".into(), "Payments".into()]);
+        teams.label("web", &["Frontend".into()]);
+        let by_repo = [
+            ("api".to_string(), 3),
+            ("web".into(), 1),
+            ("tools".into(), 2),
+        ]
+        .into_iter()
+        .collect();
+        let got: Vec<(String, usize, usize)> = by_team(&teams, &by_repo)
+            .into_iter()
+            .map(|t| (t.team, t.repos, t.symbols))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("Backend".into(), 1, 3),
+                ("Payments".into(), 1, 3),
+                ("none".into(), 1, 2),
+                ("Frontend".into(), 1, 1)
+            ]
+        );
+        assert!(by_team(&Default::default(), &by_repo).is_empty());
+    }
 }

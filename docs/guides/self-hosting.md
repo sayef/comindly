@@ -192,10 +192,12 @@ reason until then).
 
 Indexing runs inside the server as a job, one at a time; starting one while another runs queues it
 (up to 5, and asking again for the same thing returns the job already waiting). On SIGTERM the server
-stops taking requests, lets a running job stop at its next checkpoint and saves its record; a job cut
-off by a crash shows as interrupted after the restart, and queued jobs that never ran are marked
-interrupted too, to be started again. Summaries and walkthroughs already written are kept either way, so the next run continues
-where it stopped. It keeps clones of repositories under `/data`; a volume there saves cloning
+stops taking requests, lets a running job stop at its next checkpoint and marks it and the queued
+jobs paused; once a server is back (the new one, in a rolling or blue/green deploy), it continues them
+in their order under the same job, within about a minute. A server that starts while another still
+runs a job leaves that job alone, and a job whose server stopped without a sign of life for a minute
+is continued the same way. Summaries and walkthroughs already written are kept, so a continued run
+does not pay for them again. It keeps clones of repositories under `/data`; a volume there saves cloning
 them again after a restart but is not required.
 
 ### Docker

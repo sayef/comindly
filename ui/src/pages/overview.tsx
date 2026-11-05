@@ -16,6 +16,7 @@ import { Slider } from "@/components/ui/slider";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { Outcome } from "@/components/notice";
 import { api, attention, isChallenged, type OrgMap } from "@/lib/api";
+import { scopeOrg, UNASSIGNED, useTeams } from "@/lib/teams";
 import { useAccess } from "@/lib/me";
 import { cn, compact, percent } from "@/lib/utils";
 
@@ -104,14 +105,18 @@ function MapKey() {
   );
 }
 
-/** What the org map says first: the repository most others depend on, and any cycles. */
-function finding(org: ReturnType<typeof useOrg>): string | null {
+/** What the org map says first: the repository most others in view depend on. */
+function finding(org: ReturnType<typeof useOrg>, border: Map<string, { team: string; repos: string[] }>): string | null {
   if (org.repos.length < 2) return null;
-  const hub = [...org.usedBy.entries()].sort((a, b) => b[1].size - a[1].size || a[0].localeCompare(b[0]))[0];
-  if (!hub || hub[1].size === 0) return null;
-  return `${hub[1].size} of ${org.repos.length} repositories depend on ${hub[0]}`;
+  const inView = org.repos.filter((r) => !border.has(r));
+  const users = (id: string) => [...(org.usedBy.get(id)?.keys() ?? [])].filter((r) => !border.has(r));
+  const hub = [...org.usedBy.keys()].map((id) => [id, users(id)] as const).sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))[0];
+  if (!hub || hub[1].length === 0) return null;
+  const box = border.get(hub[0]);
+  const target = box ? `${box.repos.length} ${box.team} ${box.repos.length === 1 ? "repository" : "repositories"}` : hub[0];
+  if (hub[1].length === 1 && inView.length === 1) return `${hub[1][0]} depends on ${target}`;
+  return `${hub[1].length} of ${inView.length} repositories depend on ${target}`;
 }
-
 
 function linkDiff(then: OrgMap, now: OrgMap) {
   const key = (e: OrgMap["edges"][number]) => `${e.src} → ${e.dst} (${e.kind})`;
@@ -129,7 +134,7 @@ function FormCard({ onSubmit, children }: { onSubmit: () => void; children: Reac
   );
 }
 
-/** Where a team's index lives: a folder or a bucket location. */
+/** Where an org's index lives: a folder or a bucket location. */
 function Location({ index, setIndex }: { index: string; setIndex: (v: string) => void }) {
   return (
     <Input
@@ -144,16 +149,16 @@ function Location({ index, setIndex }: { index: string; setIndex: (v: string) =>
   );
 }
 
-/** First run: use the team's index. */
+/** First run: use the org's index. */
 function JoinTeam() {
   const qc = useQueryClient();
   const [index, setIndex] = useState("");
   const join = useMutation({ mutationFn: () => api.join(index), meta: { inline: true }, onSuccess: () => qc.invalidateQueries() });
   return (
     <FormCard onSubmit={() => index.trim() && join.mutate()}>
-      <h2 className="font-semibold">Join a team</h2>
+      <h2 className="font-semibold">Join an org</h2>
       <p className="mt-1 text-xs text-muted-foreground">
-        Where your team's index lives. Bucket access uses the credentials this machine already has.
+        Where your org's index lives. Bucket access uses the credentials this machine already has.
       </p>
       <div className="mt-3 flex flex-1 flex-col gap-2">
         <Location index={index} setIndex={setIndex} />
@@ -168,7 +173,7 @@ function JoinTeam() {
   );
 }
 
-/** First run: start a team at an empty folder or bucket location; colleagues then join it. */
+/** First run: start an org at an empty folder or bucket location; colleagues then join it. */
 /** `at`: the location a server's deployment set; then only the name is asked. */
 function CreateTeam({ at }: { at?: string }) {
   const qc = useQueryClient();
@@ -182,18 +187,18 @@ function CreateTeam({ at }: { at?: string }) {
   });
   return (
     <FormCard onSubmit={() => name.trim() && index.trim() && create.mutate()}>
-      <h2 className="font-semibold">Create a team</h2>
+      <h2 className="font-semibold">Create an org</h2>
       <p className="mt-1 text-xs text-muted-foreground">
         {at
           ? "The index lives where the deployment set it. You add repositories next."
           : "Pick an empty folder or bucket location everyone can reach. You add repositories next; colleagues join with the same location."}
       </p>
       <div className="mt-3 flex flex-1 flex-col gap-2">
-        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Team name, e.g. Platform" aria-label="Team name" autoComplete="off" />
+        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Org name, e.g. Acme" aria-label="Org name" autoComplete="off" />
         {!at && <Location index={index} setIndex={setIndex} />}
         <div className="mt-auto">
           <Button type="submit" variant="brand" disabled={!name.trim() || !index.trim()} loading={create.isPending}>
-            Create team
+            Create org
           </Button>
         </div>
         <Outcome error={create.error} />
@@ -204,9 +209,14 @@ function CreateTeam({ at }: { at?: string }) {
 
 export function OverviewPage() {
   const { server, admin } = useAccess();
-  const overview = useQuery({ queryKey: ["overview"], queryFn: api.overview });
-  const ledger = useQuery({ queryKey: ["ledger"], queryFn: api.ledger });
-  const flows = useQuery({ queryKey: ["flows"], queryFn: api.flows });
+  const teams = useTeams();
+  const overview = useQuery({
+    queryKey: ["overview"],
+    queryFn: api.overview,
+    select: (d) => ({ ...d, repos: d.repos.filter((r) => teams.inView(r.repo)) }),
+  });
+  const ledger = useQuery({ queryKey: ["ledger"], queryFn: api.ledger, select: (d) => d.filter(teams.entryInView) });
+  const flows = useQuery({ queryKey: ["flows"], queryFn: api.flows, select: (d) => d.filter(teams.flowInView) });
   const latest = useQuery({ queryKey: ["orgmap"], queryFn: () => api.orgmap() });
   const versions = useQuery({ queryKey: ["versions"], queryFn: api.versions });
   const last = (versions.data?.length ?? 1) - 1;
@@ -218,7 +228,12 @@ export function OverviewPage() {
   });
   const map = at !== null && at !== last ? past.data : latest.data;
   const [selected, setSelected] = useState<string | null>(null);
-  const org = useOrg(map);
+  const scoped = useMemo(() => scopeOrg(map, teams), [map, teams.inView, teams.selected]);
+  const org = useOrg(scoped.map);
+  const addTeam = (id: string) => {
+    const b = scoped.border.get(id);
+    if (b) teams.select([...teams.selected, b.team === "Unassigned" ? UNASSIGNED : b.team]);
+  };
   const [start, setStart] = useState(() => remembered("comindly.org.start", "*"));
   const [dir, setDir] = useState<Direction>(() => (remembered("comindly.org.dir", "uses") === "usedBy" ? "usedBy" : "uses"));
   const [open, setOpen] = useState<Set<string> | null>(null);
@@ -231,7 +246,7 @@ export function OverviewPage() {
       // storage may be unavailable
     }
   }, [mode]);
-  const contracts = useQuery({ queryKey: ["contracts"], queryFn: api.contracts });
+  const contracts = useQuery({ queryKey: ["contracts"], queryFn: api.contracts, select: (d) => d.filter(teams.contractInView) });
   useEffect(() => {
     try {
       localStorage.setItem("comindly.org.start", start);
@@ -257,7 +272,7 @@ export function OverviewPage() {
   const diff = at !== null && at !== last && past.data && latest.data ? linkDiff(past.data, latest.data) : null;
   const o = overview.data;
   const team = useQuery({ queryKey: ["team"], queryFn: api.team, retry: false });
-  const teamName = team.data?.version != null ? (team.data.settings.name ?? "your team") : null;
+  const teamName = team.data?.version != null ? (team.data.settings.name ?? "your org") : null;
   const [switching, setSwitching] = useState(false);
 
   if (o?.problem && server && !(admin && !teamName)) {
@@ -266,8 +281,8 @@ export function OverviewPage() {
         <h1 className="text-[26px] font-semibold tracking-[-0.02em]">{teamName ? `You're in ${teamName}` : "Welcome to comindly"}</h1>
         <p className="text-sm text-muted-foreground">
           {admin
-            ? "Nothing is indexed yet. Add the team's repositories and index them; everyone signed in here then sees the same graph."
-            : "Nothing is indexed yet. An admin adds the team's repositories under Settings → Repositories; this page fills in once they are indexed."}
+            ? "Nothing is indexed yet. Add the org's repositories and index them; everyone signed in here then sees the same graph."
+            : "Nothing is indexed yet. An admin adds the org's repositories under Settings → Repositories; this page fills in once they are indexed."}
         </p>
         {admin && (
           <Button variant="brand" asChild>
@@ -282,7 +297,7 @@ export function OverviewPage() {
     return (
       <Welcome>
         <h1 className="text-[26px] font-semibold tracking-[-0.02em]">Welcome to comindly</h1>
-        <p className="text-sm text-muted-foreground">Name the team; then add its repositories and index them.</p>
+        <p className="text-sm text-muted-foreground">Name the org; then add its repositories and index them.</p>
         <div className="w-full max-w-sm">
           <CreateTeam at={o.root ?? undefined} />
         </div>
@@ -295,18 +310,18 @@ export function OverviewPage() {
       <Welcome>
         <h1 className="text-[26px] font-semibold tracking-[-0.02em]">You're in {teamName}</h1>
         <p className="text-sm text-muted-foreground">
-          Nothing is indexed yet. Add the team's repositories and index them; everyone in {teamName} then sees the same graph.
+          Nothing is indexed yet. Add the org's repositories and index them; everyone in {teamName} then sees the same graph.
         </p>
         <div className="flex flex-wrap justify-center gap-2">
           <Button variant="brand" asChild>
             <Link to="/settings/repositories">Add repositories</Link>
           </Button>
           <Button variant="outline" asChild>
-            <Link to="/settings">Team settings</Link>
+            <Link to="/settings">Org settings</Link>
           </Button>
         </div>
         <button className="text-xs text-muted-foreground underline underline-offset-2" onClick={() => setSwitching(true)}>
-          Join or create a different team
+          Join or create a different org
         </button>
       </Welcome>
     );
@@ -316,7 +331,7 @@ export function OverviewPage() {
     return (
       <Welcome wide>
         <h1 className="text-[26px] font-semibold tracking-[-0.02em]">Welcome to comindly</h1>
-        <p className="text-sm text-muted-foreground">Join your team, start one, or index just for yourself.</p>
+        <p className="text-sm text-muted-foreground">Join your org, start one, or index just for yourself.</p>
         <div className="grid w-full gap-3 sm:grid-cols-2">
           <JoinTeam />
           <CreateTeam />
@@ -346,8 +361,20 @@ export function OverviewPage() {
   const totalRecords = o ? Object.values(o.ledger).reduce((a, b) => a + b, 0) : 0;
   const needs = (ledger.data ?? []).filter((e) => attention(e) < 3).sort((a, b) => attention(a) - attention(b));
 
-  const said = finding(org);
+  const said = finding(org, scoped.border);
   const bySize = (o?.repos ?? []).slice().sort((a, b) => b.symbols - a.symbols);
+  // With a team selection: code links touching the repositories in view, and how many of them cross to other teams.
+  const links = teams.selected.length && map
+    ? map.edges.reduce(
+        (n, e) => {
+          const a = teams.inView(e.src);
+          const b = teams.inView(e.dst);
+          if (e.kind !== "code" || !(a || b)) return n;
+          return { all: n.all + e.weight, out: n.out + (a !== b ? e.weight : 0) };
+        },
+        { all: 0, out: 0 },
+      )
+    : null;
   const kinds = Object.entries(
     (contracts.data ?? []).reduce<Record<string, number>>((m, v) => {
       const k = v.contract.name.split(":")[0];
@@ -358,7 +385,7 @@ export function OverviewPage() {
 
   return (
     <div className="flex flex-col gap-5">
-      <PageHeader title="Overview">How the team's repositories depend on each other, in code and through service contracts.</PageHeader>
+      <PageHeader title="Overview">How the org's repositories depend on each other, in code and through service contracts.</PageHeader>
 
       {o ? (
         <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border bg-border lg:grid-cols-4">
@@ -372,18 +399,28 @@ export function OverviewPage() {
               label: r.repo,
               color: `color-mix(in srgb, var(--color-brand) ${Math.max(18, 100 - i * 14)}%, var(--color-muted))`,
             }))}
-            hint={`${compact(o.symbols)} symbols${bySize.length > 1 ? `, most in ${bySize[0].repo} and ${bySize[1].repo}` : ""}`}
+            hint={`${compact(bySize.reduce((n, r) => n + r.symbols, 0))} symbols${bySize.length > 1 ? `, most in ${bySize[0].repo} and ${bySize[1].repo}` : ""}`}
           />
-          <Stat
-            label="Links across repositories"
-            value={o.cross_repo_edges.toLocaleString()}
-            parts={[{ key: "cross", value: o.cross_repo_edges, label: "Across repositories", color: "var(--color-brand)" }]}
-            total={o.edges}
-            hint={`${percent(o.cross_repo_edges, o.edges)} of ${o.edges.toLocaleString()} dependencies cross a repository`}
-          />
+          {links ? (
+            <Stat
+              label="Links across repositories"
+              value={links.all.toLocaleString()}
+              parts={[{ key: "out", value: links.out, label: "To or from other teams", color: "var(--color-brand)" }]}
+              total={links.all}
+              hint={`${links.out.toLocaleString()} to or from other teams' repositories`}
+            />
+          ) : (
+            <Stat
+              label="Links across repositories"
+              value={o.cross_repo_edges.toLocaleString()}
+              parts={[{ key: "cross", value: o.cross_repo_edges, label: "Across repositories", color: "var(--color-brand)" }]}
+              total={o.edges}
+              hint={`${percent(o.cross_repo_edges, o.edges)} of ${o.edges.toLocaleString()} dependencies cross a repository`}
+            />
+          )}
           <Stat
             label="Contracts"
-            value={o.contracts.toLocaleString()}
+            value={(teams.selected.length && contracts.data ? contracts.data.length : o.contracts).toLocaleString()}
             to="/contracts"
             parts={kinds.map(([k, n]) => ({
               key: k,
@@ -535,7 +572,7 @@ export function OverviewPage() {
           {!map ? (
             <Skeleton className="h-[420px] rounded-none" />
           ) : mode === "network" && org.repos.length > 1 ? (
-            <OrgNetwork org={org} />
+            <OrgNetwork org={org} border={scoped.border} onBorder={addTeam} />
           ) : roots.length === 0 ? (
             <p className="px-5 py-8 text-sm text-muted-foreground">No links between the indexed repositories yet.</p>
           ) : (

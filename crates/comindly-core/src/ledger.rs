@@ -114,6 +114,9 @@ pub struct Provenance {
     /// The person's name, or the person an agent works for; absent with `record_names = false`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// The writer's teams when it was written; empty for older records and outside teams.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub teams: Vec<String>,
 }
 
 /// Who writes records: a pseudonymous actor id and, when names are kept, a name.
@@ -132,6 +135,7 @@ impl Provenance {
             agent: None,
             session: None,
             name: who.name.clone(),
+            teams: Vec::new(),
         }
     }
 
@@ -774,6 +778,9 @@ pub struct Entry {
     pub history: Vec<Event>,
     /// Why it was retracted: `outdated` (archived) or `wrong` (invalidated).
     pub retired: Option<String>,
+    /// The writer's teams, when the note is about another team's code and none of its members confirmed it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outside: Vec<String>,
 }
 
 /// One review of a record.
@@ -913,9 +920,55 @@ pub fn derive(
                 by: r.provenance.who(),
                 history,
                 retired,
+                outside: Vec::new(),
             }
         })
         .collect()
+}
+
+/// Notes on another team's code count less until one of its members confirms them, unless that
+/// team takes notes openly.
+pub fn weigh_teams(entries: &mut [Entry], records: &[Record], teams: &crate::team::TeamSettings) {
+    if teams.team_list().is_empty() {
+        return;
+    }
+    let by_id: HashMap<&str, &Record> = records.iter().map(|r| (r.id.as_str(), r)).collect();
+    for e in entries.iter_mut() {
+        let repos: Vec<&str> = e.record.anchors.iter().map(|a| a.repo.as_str()).collect();
+        let Some(owners) = teams.outside(&e.record.provenance.teams, &repos) else {
+            continue;
+        };
+        let by_owner = |id: &String| {
+            by_id.get(id.as_str()).is_some_and(|c| {
+                c.provenance
+                    .teams
+                    .iter()
+                    .any(|t| owners.iter().any(|o| o.eq_ignore_ascii_case(t)))
+            })
+        };
+        if e.related
+            .iter()
+            .any(|(k, id)| *k == RelationKind::Confirms && by_owner(id))
+        {
+            continue;
+        }
+        e.outside = e.record.provenance.teams.clone();
+        if teams.incoming(&owners) != crate::team::Incoming::Open {
+            let cap = match e.record.provenance.author {
+                AuthorKind::Human => Trust::T2,
+                _ => Trust::T1,
+            };
+            e.trust = e.trust.min(cap);
+        }
+    }
+}
+
+fn from_label(e: &Entry) -> String {
+    if e.outside.is_empty() {
+        String::new()
+    } else {
+        format!(" · from {}, unconfirmed", e.outside.join(", "))
+    }
 }
 
 fn anchor_status(
@@ -1022,10 +1075,11 @@ pub fn markdown(title: &str, entries: &[&Entry]) -> String {
     for e in entries {
         let r = &e.record;
         o.push_str(&format!(
-            "\n### [{} · {:?} · {}] {}\n",
+            "\n### [{} · {:?} · {}{}] {}\n",
             r.kind.as_str(),
             e.trust,
             status_label(e.status),
+            from_label(e),
             r.title
         ));
         if !r.body.is_empty() {
@@ -1125,10 +1179,11 @@ pub fn line(e: &Entry) -> String {
         format!(" · evidence {}", r.evidence.join(", "))
     };
     format!(
-        "[{} · {:?} · {}] {}{at}{ev} · by {}, {} · id `{}`",
+        "[{} · {:?} · {}{}] {}{at}{ev} · by {}, {} · id `{}`",
         r.kind.as_str(),
         e.trust,
         status_label(e.status),
+        from_label(e),
         r.title,
         e.by,
         r.created.get(..10).unwrap_or(&r.created),
@@ -1196,7 +1251,87 @@ mod tests {
             agent: None,
             session: None,
             name: None,
+            teams: Vec::new(),
         }
+    }
+
+    #[test]
+    fn notes_from_other_teams_wait_for_the_owners() {
+        let s = sym("charge", 1, 1);
+        let mut teams = crate::team::TeamSettings::default();
+        teams.label("r", &["Payments".into()]);
+        teams.label("q", &["Search".into()]);
+        let from = |author, team: &str| Provenance {
+            teams: vec![team.into()],
+            ..prov(author)
+        };
+        let mut note = Record::new(
+            Kind::Gotcha,
+            "retries double charge",
+            vec![Anchor::of(&s)],
+            from(AuthorKind::Agent, "Search"),
+        );
+        note.evidence = vec!["test:t::retry".into()];
+        let weigh = |records: &[Record], teams: &crate::team::TeamSettings| {
+            let mut e = derive(
+                records,
+                std::slice::from_ref(&s),
+                &crate::signing::Verifier::default(),
+            );
+            weigh_teams(&mut e, records, teams);
+            e.into_iter().next().unwrap()
+        };
+
+        let e = weigh(std::slice::from_ref(&note), &teams);
+        assert_eq!(
+            (e.trust, e.outside.clone()),
+            (Trust::T1, vec!["Search".to_string()])
+        );
+        assert!(line(&e).contains("from Search, unconfirmed"));
+
+        // A person outside confirming it changes nothing; an owner does.
+        let outsider = Record::relation(
+            RelationKind::Confirms,
+            &note,
+            "",
+            from(AuthorKind::Human, "Search"),
+        );
+        let e = weigh(&[note.clone(), outsider.clone()], &teams);
+        assert_eq!(e.trust, Trust::T1);
+        let owner = Record::relation(
+            RelationKind::Confirms,
+            &note,
+            "",
+            from(AuthorKind::Human, "Payments"),
+        );
+        let e = weigh(&[note.clone(), owner], &teams);
+        assert_eq!((e.trust, e.outside.is_empty()), (Trust::T3, true));
+
+        // Owners' own notes, notes without teams and open teams are not capped.
+        let inside = Record::new(
+            Kind::Gotcha,
+            "x",
+            vec![Anchor::of(&s)],
+            from(AuthorKind::Human, "payments"),
+        );
+        assert_eq!(weigh(&[inside], &teams).trust, Trust::T3);
+        let legacy = Record::new(
+            Kind::Gotcha,
+            "x",
+            vec![Anchor::of(&s)],
+            prov(AuthorKind::Human),
+        );
+        assert_eq!(weigh(&[legacy], &teams).trust, Trust::T3);
+        let human = Record::new(
+            Kind::Gotcha,
+            "x",
+            vec![Anchor::of(&s)],
+            from(AuthorKind::Human, "Search"),
+        );
+        assert_eq!(weigh(std::slice::from_ref(&human), &teams).trust, Trust::T2);
+        teams.teams.as_mut().unwrap()[0].incoming = crate::team::Incoming::Open;
+        let e = weigh(&[human], &teams);
+        assert_eq!((e.trust, e.outside.len()), (Trust::T3, 1));
     }
 
     #[test]

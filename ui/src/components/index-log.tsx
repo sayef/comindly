@@ -53,9 +53,15 @@ export function currentProgress(events: IndexEvent[]): IndexEvent | null {
 
 /** A short status for the header: the current step, with its count when there is one. */
 export function shortStatus(events: IndexEvent[]): string {
+  const { label, count } = statusParts(events);
+  return count ? `${label} ${count}` : label;
+}
+
+/** The current step and, while it counts, how far it got, kept apart so the count is never cut off. */
+export function statusParts(events: IndexEvent[]): { label: string; count?: string } {
   const p = currentProgress(events);
-  if (p && p.total) return `${p.step ?? p.message} ${fmt(p.done ?? 0)}/${fmt(p.total)}`;
-  return [...events].reverse().find((e) => e.kind === "step")?.message ?? "";
+  if (p && p.total) return { label: p.step ?? p.message, count: `${fmt(p.done ?? 0)}/${fmt(p.total)}` };
+  return { label: [...events].reverse().find((e) => e.kind === "step")?.message ?? "" };
 }
 
 type Step = {
@@ -102,7 +108,7 @@ function stateOf(s: Step, last: boolean, status: JobStatus): State {
   if (s.errors) return "failed";
   if (last && status === "running") return "running";
   if (last && status === "failed") return "failed";
-  if (last && (status === "cancelled" || status === "interrupted")) return "stopped";
+  if (last && (status === "cancelled" || status === "interrupted" || status === "paused")) return "stopped";
   return s.warnings ? "warning" : "done";
 }
 

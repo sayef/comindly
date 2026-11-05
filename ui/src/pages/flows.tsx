@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, type FlowStep, type Node } from "@/lib/api";
+import { useTeams } from "@/lib/teams";
 import { cn } from "@/lib/utils";
 
 /** Repositories in the order a flow first reaches them. */
@@ -223,7 +224,8 @@ function FlowView({ id }: { id: string }) {
 export function FlowsPage() {
   const [params, setParams] = useSearchParams();
   const id = params.get("id");
-  const flows = useQuery({ queryKey: ["flows"], queryFn: api.flows, enabled: !id });
+  const teams = useTeams();
+  const flows = useQuery({ queryKey: ["flows"], queryFn: api.flows, enabled: !id, select: (d) => d.filter(teams.flowInView) });
   const filter = params.get("q") ?? "";
   const across = params.get("within") !== "1";
   const set = (k: string, v: string) => setParams((p) => (v ? p.set(k, v) : p.delete(k), p), { replace: true });

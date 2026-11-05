@@ -44,7 +44,7 @@ index location, the repositories your machine indexes, your name and signing.
 The team settings hold no secrets. Anyone who can read the index can see them; access to the index is
 the trust boundary.
 
-Set them once, in the app (Settings → General, the Team card) or from the terminal:
+Set them once, in the app (Settings → General, the Org card) or from the terminal:
 
 ```sh
 comindly team set name="Platform" llm_model=gpt-6-luna enrich=true
@@ -103,7 +103,7 @@ CI sets `OPENAI_API_KEY` from its secret store.
 
 ### Starting a team
 
-In the app, **Create a team** on the first screen takes a team name and an empty location everyone can
+In the app, **Create an org** on the first screen takes a name and an empty location everyone can
 reach: a shared folder, or a bucket location (`s3://`, `gs://`, `az://`). comindly writes the team settings
 there (which also checks you can write to it), switches to it and opens **Settings → Repositories** to add
 and index the first repositories. It refuses a location that already has a team or an index; join that
@@ -117,7 +117,7 @@ A colleague needs only the index location and their own access to it ([Storage](
 comindly join s3://bucket/comindly
 ```
 
-or, in the app, **Join a team** on the first screen; this works as soon as
+or, in the app, **Join an org** on the first screen; this works as soon as
 the team exists, before anything is indexed. For LLM steps they add
 their own API key as above.
 

@@ -1,0 +1,134 @@
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Check, ChevronDown, Users } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router";
+import { Button } from "@/components/ui/button";
+import { api } from "@/lib/api";
+import { UNASSIGNED, useTeams } from "@/lib/teams";
+import { cn } from "@/lib/utils";
+
+/** Which teams' repositories every page shows; signed-in members also join and leave teams here. */
+export function TeamPicker({ admin, wide = false }: { admin: boolean; wide?: boolean }) {
+  const t = useTeams();
+  const qc = useQueryClient();
+  const [open, setOpen] = useState<{ top: number; left: number } | null>(null);
+  const root = useRef<HTMLDivElement>(null);
+  const before = useRef<string[]>([]);
+  const join = useMutation({
+    mutationFn: api.saveMyTeams,
+    meta: { quiet: true },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["team"] }),
+  });
+
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: PointerEvent) => root.current?.contains(e.target as Node) || setOpen(null);
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && (t.select(before.current), setOpen(null));
+    const close = () => setOpen(null);
+    document.addEventListener("pointerdown", away);
+    document.addEventListener("keydown", esc);
+    window.addEventListener("resize", close);
+    return () => (
+      document.removeEventListener("pointerdown", away), document.removeEventListener("keydown", esc), window.removeEventListener("resize", close)
+    );
+  }, [open, t.select]);
+
+  if (!t.teams.length) {
+    if (!admin) return null;
+    return (
+      <Link to="/settings#teams" className={cn("shrink-0 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline", wide && "px-2.5")}>
+        Set up teams
+      </Link>
+    );
+  }
+
+  const isOn = (n: string) => t.selected.some((s) => s.toLowerCase() === n.toLowerCase());
+  const toggle = (n: string) => t.select(isOn(n) ? t.selected.filter((s) => s.toLowerCase() !== n.toLowerCase()) : [...t.selected, n]);
+  const label = !t.selected.length
+    ? "Everyone"
+    : t.selected.length === 1
+      ? t.selected[0] === UNASSIGNED
+        ? "Unassigned"
+        : t.selected[0]
+      : `${t.selected.length} teams`;
+
+  return (
+    <div ref={root} className={cn("relative", wide ? "w-full" : "min-w-0 shrink")}>
+      <button
+        onClick={(e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          before.current = t.selected;
+          setOpen((o) => (o ? null : { top: r.bottom + 6, left: r.left }));
+        }}
+        aria-haspopup="true"
+        aria-expanded={!!open}
+        title="Which teams' repositories to show"
+        className={cn(
+          "flex items-center gap-1.5 text-sm transition-colors duration-100",
+          wide ? "min-h-10 w-full rounded-lg border bg-card px-2.5 hover:border-input" : "h-8 max-w-52 rounded-md px-2 hover:bg-muted",
+        )}
+      >
+        <Users className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className={cn("truncate", wide && "flex-1 text-left")}>{label}</span>
+        <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+      </button>
+      {open && (
+        <div role="group" aria-label="Teams in view" style={open} className="fixed z-50 w-64 rounded-lg border bg-popover p-1.5 text-sm shadow-float">
+          <Option on={!t.selected.length} onClick={() => t.select([])}>
+            Everyone
+          </Option>
+          {t.teams.map((team) => (
+            <Option key={team.name} on={isOn(team.name)} onClick={() => toggle(team.name)}>
+              <span className="flex-1 truncate">{team.name}</span>
+              <span className="nums text-xs text-muted-foreground">{team.repos.length}</span>
+            </Option>
+          ))}
+          <Option on={isOn(UNASSIGNED)} onClick={() => toggle(UNASSIGNED)}>
+            <span className="flex-1 text-muted-foreground">Unassigned</span>
+          </Option>
+          {t.server && (
+            <div className="mt-1.5 border-t px-2 pt-2 pb-1">
+              <p className="text-xs text-muted-foreground">Your teams</p>
+              <div className="mt-1.5 flex flex-wrap gap-1">
+                {t.teams.map((team) => {
+                  const member = t.mine.includes(team.name);
+                  return (
+                    <button
+                      key={team.name}
+                      disabled={join.isPending}
+                      onClick={() => join.mutate(member ? t.mine.filter((m) => m !== team.name) : [...t.mine, team.name])}
+                      aria-pressed={member}
+                      className={cn(
+                        "rounded-sm border px-1.5 py-0.5 text-xs transition-colors duration-100 hover:border-input",
+                        member ? "bg-accent font-semibold text-accent-foreground" : "text-muted-foreground",
+                      )}
+                    >
+                      {team.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          <div className="mt-1.5 flex justify-end gap-1.5 border-t px-1 pt-1.5">
+            <Button variant="ghost" size="sm" onClick={() => (t.select(before.current), setOpen(null))}>
+              Cancel
+            </Button>
+            <Button variant="brand" size="sm" onClick={() => setOpen(null)}>
+              Done
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Option({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button role="menuitemcheckbox" aria-checked={on} onClick={onClick} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-muted">
+      <Check className={cn("size-3.5 shrink-0", on ? "text-brand" : "invisible")} />
+      {children}
+    </button>
+  );
+}

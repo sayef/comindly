@@ -3,7 +3,7 @@ import { Clock, Loader2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
-import { shortStatus } from "@/components/index-log";
+import { shortStatus, statusParts } from "@/components/index-log";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -64,14 +64,16 @@ export function Activity() {
   }, [j, qc]);
 
   const step = shortStatus(j?.events ?? []);
+  const parts = statusParts(j?.events ?? []);
   if (j?.running)
     return (
-      <div className="flex items-center gap-2">
+      <div className="flex flex-col items-end gap-2">
         <Pill>
           <Link to={j.id ? `/activity/${j.id}` : "/activity"} className="flex min-w-0 items-center gap-2" title={step ? `Indexing: ${step}` : "Indexing"}>
             <Loader2 className="size-3.5 shrink-0 animate-spin text-brand" />
-            <span className="font-medium">Indexing</span>
-            <span className="hidden max-w-44 truncate text-muted-foreground 2xl:inline">{step}</span>
+            <span className="shrink-0 font-medium">Indexing</span>
+            <span className="min-w-0 truncate text-muted-foreground">{parts.label}</span>
+            {parts.count && <span className="nums shrink-0 text-muted-foreground">{parts.count}</span>}
           </Link>
           <Stop
             label="Stop indexing"
@@ -96,7 +98,11 @@ export function Activity() {
 }
 
 function Pill({ children }: { children: React.ReactNode }) {
-  return <div className="flex h-8 max-w-sm items-center gap-2 rounded-md bg-card px-3 text-xs shadow-[0_1px_2px_var(--shadow-ink)]">{children}</div>;
+  return (
+    <div className="flex h-10 max-w-[min(26rem,calc(100vw-2rem))] items-center gap-2.5 rounded-lg border bg-popover px-3.5 text-sm text-popover-foreground shadow-float">
+      {children}
+    </div>
+  );
 }
 
 function Stop({ label, question, confirm, pending, onClick }: { label: string; question: string; confirm: string; pending: boolean; onClick: () => void }) {
@@ -107,7 +113,7 @@ function Stop({ label, question, confirm, pending, onClick }: { label: string; q
   }, [asking]);
   if (asking)
     return (
-      <span role="group" aria-label={question} className="flex items-center gap-1.5" onKeyDown={(e) => e.key === "Escape" && setAsking(false)}>
+      <span role="group" aria-label={question} className="flex shrink-0 items-center gap-1.5" onKeyDown={(e) => e.key === "Escape" && setAsking(false)}>
         <span className="whitespace-nowrap text-muted-foreground">{question}</span>
         <button className="rounded-sm px-1.5 py-0.5 font-medium hover:bg-muted" onClick={() => setAsking(false)}>
           Keep
@@ -120,7 +126,7 @@ function Stop({ label, question, confirm, pending, onClick }: { label: string; q
   return (
     <button
       className={cn(
-        "-mr-1 flex size-6 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground",
+        "-mr-1 flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground",
         pending && "opacity-50",
       )}
       disabled={pending}

@@ -14,6 +14,7 @@ import {
   Users,
 } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { TeamChips, TeamsField } from "@/components/team-chips";
 import { RepoDot } from "@/components/symbol";
 import { Link } from "react-router";
 import { IndexLog } from "@/components/index-log";
@@ -31,6 +32,7 @@ import { ago, bytes, compact, date } from "@/lib/utils";
 import { useAbort } from "@/lib/abort";
 import { useAccess } from "@/lib/me";
 import { ApiError, api, type NeedsToken, pickFolder, type ScanHit, type TeamSettings } from "@/lib/api";
+import { useTeams } from "@/lib/teams";
 
 const field = "flex flex-col gap-1.5 text-sm font-semibold";
 
@@ -61,10 +63,11 @@ function Message({ error, data }: { error: Error | null; data?: { message: strin
 function AddDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const qc = useQueryClient();
   const [path, setPath] = useState("");
+  const [teams, setTeams] = useState<string[]>([]);
   const add = useMutation({
-    mutationFn: () => api.changeRepos({ add: [path] }),
+    mutationFn: () => api.changeRepos({ add: [path], teams }),
     meta: { inline: true },
-    onSuccess: () => (qc.invalidateQueries({ queryKey: ["repos"] }), setPath(""), onOpenChange(false)),
+    onSuccess: () => (qc.invalidateQueries({ queryKey: ["repos"] }), qc.invalidateQueries({ queryKey: ["team"] }), setPath(""), setTeams([]), onOpenChange(false)),
   });
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -76,6 +79,7 @@ function AddDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bo
             Folder
             <FolderInput value={path} onChange={setPath} placeholder="~/dev/my-service" />
           </label>
+          <TeamsField value={teams} onChange={setTeams} />
           <Message error={add.error} />
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => onOpenChange(false)}>
@@ -97,6 +101,7 @@ function ScanDialog({ open, onOpenChange, indexed }: { open: boolean; onOpenChan
   const [found, setFound] = useState<ScanHit[] | null>(null);
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState("");
+  const [teams, setTeams] = useState<string[]>([]);
   const abort = useAbort();
   const scan = useMutation({
     mutationFn: () => api.scanRepos(dir, abort.next()),
@@ -113,8 +118,9 @@ function ScanDialog({ open, onOpenChange, indexed }: { open: boolean; onOpenChan
       api.changeRepos({
         add: (found ?? []).filter((f) => checked.has(f.path) && !f.listed).map((f) => f.path),
         remove: (found ?? []).filter((f) => !checked.has(f.path) && f.listed).map((f) => f.path),
+        teams,
       }),
-    onSuccess: () => (qc.invalidateQueries({ queryKey: ["repos"] }), onOpenChange(false), setFound(null)),
+    onSuccess: () => (qc.invalidateQueries({ queryKey: ["repos"] }), qc.invalidateQueries({ queryKey: ["team"] }), onOpenChange(false), setFound(null), setTeams([])),
   });
   const shown = (found ?? []).filter((f) => !filter || f.name.toLowerCase().includes(filter.toLowerCase()));
   const toggle = (p: string) =>
@@ -184,6 +190,7 @@ function ScanDialog({ open, onOpenChange, indexed }: { open: boolean; onOpenChan
                   </label>
                 ))}
               </div>
+              {adds > 0 && <TeamsField value={teams} onChange={setTeams} />}
               <Message error={apply.error} />
               <div className="flex items-center justify-end gap-2">
                 <span className="mr-auto text-xs text-muted-foreground">
@@ -386,6 +393,7 @@ function OrgDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bo
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState("");
   const [share, setShare] = useState(true);
+  const [teams, setTeams] = useState<string[]>([]);
   const abort = useAbort();
   const list = useMutation({
     mutationFn: () => api.remoteRepos(url, asked && token.trim() ? { username, token } : undefined, abort.next()),
@@ -398,7 +406,7 @@ function OrgDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bo
   });
   const close = (o: boolean) => (o || (abort.abort(), list.reset()), onOpenChange(o));
   const add = useMutation({
-    mutationFn: () => api.addRemoteRepos([...checked], hasTeam && share),
+    mutationFn: () => api.addRemoteRepos([...checked], hasTeam && share, teams),
     meta: { inline: true },
     onSuccess: () => (qc.invalidateQueries({ queryKey: ["repos"] }), qc.invalidateQueries({ queryKey: ["team"] }), close(false)),
   });
@@ -519,11 +527,12 @@ function OrgDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bo
                 </label>
               ))}
             </div>
+            {picked > 0 && <TeamsField value={teams} onChange={setTeams} />}
             <div className="mt-1 flex flex-wrap items-center justify-between gap-3">
               {hasTeam ? (
                 <label className="flex items-center gap-2 text-sm">
                   <input type="checkbox" checked={share} onChange={(e) => setShare(e.target.checked)} />
-                  Share with the team
+                  Share with the org
                 </label>
               ) : (
                 <span />
@@ -549,7 +558,21 @@ function Symbols({ n }: { n: number }) {
 }
 
 /** One repository: name and status, then what is indexed, then where it lives; actions at the end. */
-function RepoRow({ name, status, meta, where, actions }: { name: string; status: ReactNode; meta: ReactNode; where?: string | null; actions?: ReactNode }) {
+function RepoRow({
+  name,
+  status,
+  meta,
+  where,
+  actions,
+  teams,
+}: {
+  name: string;
+  status: ReactNode;
+  meta: ReactNode;
+  where?: string | null;
+  actions?: ReactNode;
+  teams?: ReactNode;
+}) {
   return (
     <div className="flex flex-wrap items-start gap-x-3 gap-y-2 border-b px-5 py-3 last:border-0 max-sm:px-4">
       <div className="min-w-0 flex-1 basis-48">
@@ -566,6 +589,7 @@ function RepoRow({ name, status, meta, where, actions }: { name: string; status:
             {where}
           </div>
         )}
+        {teams}
       </div>
       {actions && <div className="ml-auto flex flex-wrap justify-end gap-1.5">{actions}</div>}
     </div>
@@ -576,6 +600,9 @@ export function RepositoriesPage() {
   const qc = useQueryClient();
   const { server, admin } = useAccess();
   const repos = useQuery({ queryKey: ["repos"], queryFn: api.repos });
+  const teams = useTeams();
+  const shown = (repos.data?.repos ?? []).filter((r) => teams.inView(r.name));
+  const hidden = (repos.data?.repos.length ?? 0) - shown.length;
   const [dialog, setDialog] = useState<"add" | "scan" | "org" | null>(null);
   const teamMissing = repos.data?.team_missing ?? [];
   const addTeam = useMutation({
@@ -629,7 +656,7 @@ export function RepositoriesPage() {
         <div className="flex flex-wrap items-center gap-3 rounded-md bg-accent px-4 py-3 text-sm">
           <Users className="size-4 shrink-0 text-brand" />
           <span className="min-w-0 flex-1">
-            The team has {teamMissing.length === 1 ? "a repository" : `${teamMissing.length} repositories`} you don't have here yet.
+            The org has {teamMissing.length === 1 ? "a repository" : `${teamMissing.length} repositories`} you don't have here yet.
           </span>
           <Button variant="outline" size="sm" loading={addTeam.isPending} onClick={() => addTeam.mutate()}>
             Add {teamMissing.length === 1 ? "it" : "them"}
@@ -678,10 +705,19 @@ export function RepositoriesPage() {
                 : "No repositories yet. Add a folder, scan one, or add from GitHub or GitLab."}
           </p>
         )}
-        {repos.data?.repos.map((r) => (
+        {hidden > 0 && (
+          <p className="flex flex-wrap items-center gap-2 border-b px-5 py-2.5 text-xs text-muted-foreground max-sm:px-4">
+            {hidden === 1 ? "One repository is" : `${hidden} repositories are`} outside the teams in view.
+            <button className="underline underline-offset-2 hover:text-foreground" onClick={() => teams.select([])}>
+              Show everyone's
+            </button>
+          </p>
+        )}
+        {shown.map((r) => (
           <RepoRow
             key={r.path}
             name={r.name}
+            teams={teams.setUp || admin ? <TeamChips repo={r.name} admin={admin} /> : undefined}
             status={
               <>
                 {r.managed && !r.cloned && !r.indexed_commit && <Badge variant="outline">Cloned when indexing</Badge>}
@@ -728,6 +764,7 @@ export function RepositoriesPage() {
           <RepoRow
             key={r.name}
             name={r.name}
+            teams={teams.setUp || admin ? <TeamChips repo={r.name} admin={admin} /> : undefined}
             status={
               (repos.data?.repos.length ?? 0) > 0 && <span className="text-xs whitespace-nowrap text-muted-foreground">{server ? "Not on this server" : "Not on this machine"}</span>
             }

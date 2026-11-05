@@ -118,7 +118,12 @@ export function EntryCard({
       <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
         <Badge variant="outline">{sentence(r.kind)}</Badge>
         {!ROUTINE.has(status) && <Badge variant={STATUS[entry.status] ?? "outline"}>{sentence(status)}</Badge>}
-        {entry.trust !== "T3" && <TrustBadge trust={entry.trust} />}
+        {entry.trust !== "T3" && !entry.outside?.length && <TrustBadge trust={entry.trust} />}
+        {entry.outside?.length ? (
+          <Badge variant="outline" title="Written about another team's code; it counts less until one of that team's members confirms it">
+            From {entry.outside.join(", ")}
+          </Badge>
+        ) : null}
         {challenged && (
           <Badge variant="warning" title="An agent proposed retiring this; a person decides">
             Challenged

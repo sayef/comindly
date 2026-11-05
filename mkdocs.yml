@@ -105,6 +105,7 @@ nav:
   - Guides:
       - Using comindly with agents: guides/agents.md
       - Team setup: guides/team-setup.md
+      - Teams: guides/teams.md
       - Storage: guides/storage.md
       - Self-hosting: guides/self-hosting.md
       - Using comindly as a library: guides/library.md

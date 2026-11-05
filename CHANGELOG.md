@@ -6,6 +6,27 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Teams: labels on repositories inside one org. A team picker in the header filters the org map,
+  flows, contracts, ledger, packages, conventions and repositories; other teams' repositories
+  fold into one node per team at the edge of the org map. Admins label repositories and manage teams;
+  everyone picks their own teams. See [Teams](https://comindly.pages.dev/guides/teams/).
+- An existing server gets one team on upgrade, named after the org, with every indexed repository and
+  every member.
+- Notes from other teams: ledger notes keep their writer's teams; a note about another team's code
+  counts less until one of its members confirms it, and each team chooses whether such notes count
+  right away, wait for a member, or are refused. The ledger lists the ones waiting for your teams.
+- MCP: `search`, `find`, `repos`, `contracts` and `suggest` take a `team` filter; `repos` lists teams
+  per repository and `ripple` counts the impact per team.
+
+### Changed
+
+- The app says "org" for the whole index and its people; "team" now means a team inside it.
+
+- A deploy or restart pauses indexing instead of interrupting it: the job continues by itself once a
+  server is back, under the same job and in its order, reusing what was already summarised.
+
 ## [0.5.0-beta.1](https://github.com/sayef/comindly/compare/v0.4.0...v0.5.0-beta.1) - 2026-11-04
 
 ### Added

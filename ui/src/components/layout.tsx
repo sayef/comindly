@@ -1,7 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import {
   BookText,
-  ChevronsUpDown,
   Boxes,
   Compass,
   History,
@@ -16,7 +15,6 @@ import {
   Search,
   Settings,
   Sun,
-  Users,
   Waypoints,
   Workflow,
   X,
@@ -27,9 +25,11 @@ import { Link, NavLink, Outlet, useLocation } from "react-router";
 import { Activity } from "@/components/activity";
 import { CommandPalette } from "@/components/command-palette";
 import { useTheme } from "@/components/theme";
+import { TeamPicker } from "@/components/team-picker";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
+import { useAccess } from "@/lib/me";
 import { ago, cn } from "@/lib/utils";
 
 const NAV: { to: string; label: string; icon: LucideIcon }[] = [
@@ -110,6 +110,7 @@ export function Layout() {
   const versions = useQuery({ queryKey: ["versions"], queryFn: api.versions });
   const team = useQuery({ queryKey: ["team"], queryFn: api.team, retry: false });
   const me = useQuery({ queryKey: ["me"], queryFn: api.me, staleTime: Infinity });
+  const { admin } = useAccess();
   const teamName = team.data?.version != null ? (team.data.settings.name ?? null) : null;
   const signOut = () => api.signOut().finally(() => window.location.replace("/"));
   const { pathname } = useLocation();
@@ -179,28 +180,7 @@ export function Layout() {
             )}
           </div>
 
-          {narrow ? (
-            <Link
-              to="/settings"
-              className="flex size-11 items-center justify-center self-center rounded-lg border bg-card text-sm font-semibold transition-colors duration-100 hover:border-input"
-              title={`Team: ${teamName ?? "no team yet"}`}
-              aria-label={`Team settings: ${teamName ?? "no team yet"}`}
-            >
-              {teamName ? teamName.slice(0, 1).toUpperCase() : <Users className="size-4 text-muted-foreground" />}
-            </Link>
-          ) : (
-            <Link
-              to="/settings"
-              className="flex min-h-11 items-center justify-between gap-2 rounded-lg border bg-card px-2.5 py-1.5 transition-colors duration-100 hover:border-input"
-              title="Team settings"
-            >
-              <span className="flex min-w-0 flex-col">
-                <span className="eyebrow">Team</span>
-                <span className="truncate text-sm font-semibold">{teamName ?? "No team yet"}</span>
-              </span>
-              <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
-            </Link>
-          )}
+          {drawer && <TeamPicker admin={admin} wide />}
 
           <nav className="flex flex-col gap-0.5" aria-label="Main">
             {NAV.map((n) => (
@@ -234,13 +214,6 @@ export function Layout() {
                   <LogOut className="size-3.5" />
                 </button>
               </div>
-            )}
-            {!narrow && (
-              <p className="nums px-2.5 pt-2 text-xs text-muted-foreground">
-                {overview.data
-                  ? `${overview.data.repos.length} repositories, ${overview.data.symbols.toLocaleString()} symbols`
-                  : "Loading the index…"}
-              </p>
             )}
           </div>
     </>
@@ -294,7 +267,19 @@ export function Layout() {
               <Menu />
             </Button>
           </div>
-          <div className="hidden md:block" />
+          <div className="hidden min-w-0 items-center gap-1 text-sm md:flex">
+            {teamName && (
+              <>
+                <span className="truncate font-semibold" title={teamName}>
+                  {teamName}
+                </span>
+                <span className="text-muted-foreground" aria-hidden>
+                  /
+                </span>
+              </>
+            )}
+            <TeamPicker admin={admin} />
+          </div>
           <button
             onClick={() => setPalette(true)}
             className="flex h-10 w-full min-w-0 items-center gap-2.5 rounded-lg border bg-card pointer-coarse:h-11 px-3 text-sm text-muted-foreground transition-colors duration-100 hover:border-input hover:text-foreground"
@@ -305,10 +290,9 @@ export function Layout() {
           </button>
           {/* Equal side columns keep the search centred whatever shows up here. */}
           <div className="flex min-w-0 items-center justify-end gap-3 overflow-hidden">
-            <Activity />
             {overview.data && !overview.data.writable && <Badge variant="outline">Read-only</Badge>}
             {version > 0 && (
-              <span className="nums hidden whitespace-nowrap text-xs text-muted-foreground xl:inline" title={latest ?? undefined}>
+              <span className="nums hidden shrink-0 whitespace-nowrap text-xs text-muted-foreground xl:inline" title={latest ?? undefined}>
                 Index version {version}, {ago(latest)}
               </span>
             )}
@@ -322,6 +306,10 @@ export function Layout() {
             <Outlet />
           </div>
         </main>
+      </div>
+      {/* Running and queued indexing, out of the header's way. */}
+      <div className="pointer-events-none fixed right-[max(1rem,env(safe-area-inset-right))] bottom-[max(1rem,env(safe-area-inset-bottom))] z-40 [&>*]:pointer-events-auto">
+        <Activity />
       </div>
       <CommandPalette open={palette} onOpenChange={setPalette} />
     </div>

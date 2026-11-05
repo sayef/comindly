@@ -60,6 +60,7 @@ fn bench(c: &mut Criterion) {
                     agent: None,
                     session: None,
                     name: None,
+                    teams: Vec::new(),
                 },
             );
             rec.body = "Lookups must stay scoped to the customer.".into();

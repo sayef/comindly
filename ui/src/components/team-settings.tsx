@@ -24,7 +24,7 @@ export function useUnsavedWarning(dirty: boolean) {
 export const Unsaved = () => <span className="text-xs text-muted-foreground">Unsaved changes</span>;
 
 const sources: Record<KeySource, string> = {
-  team: "From your credentials file, for this team",
+  team: "From your credentials file, for this org",
   default: "From your credentials file",
   environment: "From OPENAI_API_KEY in the environment",
   server: "Stored on this server (Settings → Integrations)",
@@ -118,7 +118,7 @@ export function TeamSection() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Team</CardTitle>
+        <CardTitle>Org</CardTitle>
         <CardDescription>
           {server
             ? "Stored with the index and used by everyone on it: the same LLM and embedding model for all, with the key from Integrations. Empty fields use comindly's default, shown as the placeholder. Only admins change them."
@@ -143,8 +143,8 @@ export function TeamSection() {
           <fieldset disabled={!admin} className="contents">
             <div className="grid gap-3 sm:grid-cols-2">
               <label className={field}>
-                Team name
-                <Input value={form.name ?? ""} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Platform team" autoComplete="off" />
+                Org name
+                <Input value={form.name ?? ""} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Acme" autoComplete="off" />
               </label>
               <label className={field}>
                 Embedding model
@@ -267,7 +267,7 @@ export function TeamSection() {
             {admin && (
               <div className="flex flex-wrap items-center gap-2">
                 <Button type="submit" variant="outline" loading={save.isPending}>
-                  Save for the team
+                  Save for the org
                 </Button>
                 {dirty && <Unsaved />}
               </div>

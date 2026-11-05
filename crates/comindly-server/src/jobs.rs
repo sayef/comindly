@@ -22,11 +22,13 @@ pub enum Status {
     Cancelled,
     /// The process stopped while it ran; what was saved stays, and it can run again.
     Interrupted,
+    /// Stopped by a restart; it continues by itself once a server is back.
+    Paused,
 }
 
 impl Status {
     pub fn finished(self) -> bool {
-        !matches!(self, Status::Queued | Status::Running)
+        !matches!(self, Status::Queued | Status::Running | Status::Paused)
     }
 }
 
@@ -44,6 +46,28 @@ pub struct JobRecord {
     /// The request that started it, as in its `X-Request-Id`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request_id: Option<String>,
+    /// What to run again after a restart; a job without it cannot continue.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request: Option<serde_json::Value>,
+    /// The running job's last sign of life, so a starting server leaves a live one alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub beat: Option<String>,
+}
+
+/// A running job without a sign of life for this long belongs to a server that is gone.
+const STALE_SECONDS: i64 = 60;
+
+/// Running, and its server wrote a sign of life recently.
+fn alive(job: &JobRecord) -> bool {
+    job.status == Status::Running
+        && job
+            .beat
+            .as_deref()
+            .and_then(|b| chrono::DateTime::parse_from_rfc3339(b).ok())
+            .is_some_and(|b| {
+                chrono::Utc::now() - b.with_timezone(&chrono::Utc)
+                    < chrono::Duration::seconds(STALE_SECONDS)
+            })
 }
 
 /// Events kept per job.
@@ -192,16 +216,27 @@ pub struct Jobs {
 }
 
 impl Jobs {
-    /// Jobs left running or queued by a stopped process are marked interrupted.
+    /// Jobs a stopped server left are paused when they can continue, else interrupted; while
+    /// another server still runs one (a deploy), they are its to pause.
     pub fn new(store: Arc<dyn JobStore>, out: Arc<dyn EventSink>) -> Jobs {
-        for job in store.list(MAX_JOBS) {
-            if !job.status.finished() {
+        let left: Vec<JobRecord> = store
+            .list(MAX_JOBS)
+            .into_iter()
+            .filter(|j| matches!(j.status, Status::Queued | Status::Running))
+            .collect();
+        if !left.iter().any(alive) {
+            for job in left {
                 if let Some((mut job, events)) = store.get(&job.id) {
-                    if job.status == Status::Queued {
-                        job.error = Some(NOT_RUN.into());
+                    if job.request.is_some() {
+                        job.status = Status::Paused;
+                        job.beat = None;
+                    } else {
+                        if job.status == Status::Queued {
+                            job.error = Some(NOT_RUN.into());
+                        }
+                        job.status = Status::Interrupted;
+                        job.finished = Some(now());
                     }
-                    job.status = Status::Interrupted;
-                    job.finished = Some(now());
                     let _ = store.save(&job, &events);
                 }
             }
@@ -265,7 +300,10 @@ impl Jobs {
 
     /// The running or waiting job `id`, to follow its events.
     pub fn live(&self, id: &str) -> Option<Arc<Running>> {
-        let line = self.line();
+        self.live_in(&self.line(), id)
+    }
+
+    fn live_in(&self, line: &Line, id: &str) -> Option<Arc<Running>> {
         line.current
             .iter()
             .chain(line.queue.iter().map(|w| &w.job))
@@ -287,7 +325,20 @@ impl Jobs {
         request_id: Option<String>,
         work: impl FnOnce(Arc<Running>) -> BoxFuture<'static, Result<()>> + Send + 'static,
     ) -> Result<Submitted> {
-        let mut line = self.line();
+        self.submit_resumable(kind, key, started_by, request_id, None, work)
+    }
+
+    /// [`Jobs::submit`], keeping `request` so a restart can continue the job.
+    pub fn submit_resumable(
+        &self,
+        kind: &str,
+        key: &str,
+        started_by: Option<String>,
+        request_id: Option<String>,
+        request: Option<serde_json::Value>,
+        work: impl FnOnce(Arc<Running>) -> BoxFuture<'static, Result<()>> + Send + 'static,
+    ) -> Result<Submitted> {
+        let line = self.line();
         anyhow::ensure!(!line.closed, "the server is stopping");
         if let Some(i) = line
             .queue
@@ -300,12 +351,94 @@ impl Jobs {
                 coalesced: true,
             });
         }
-        let busy = line.current.is_some();
         anyhow::ensure!(
-            !busy || line.queue.len() < MAX_QUEUED,
+            line.current.is_none() || line.queue.len() < MAX_QUEUED,
             "{MAX_QUEUED} jobs are already waiting; try again when one has run"
         );
-        let id = uuid::Uuid::new_v4().simple().to_string();
+        let record = JobRecord {
+            id: uuid::Uuid::new_v4().simple().to_string(),
+            kind: kind.to_string(),
+            started_by,
+            status: Status::Queued,
+            created: now(),
+            started: None,
+            finished: None,
+            error: None,
+            request_id,
+            request,
+            beat: None,
+        };
+        Ok(self.add(line, key, record, Vec::new(), Box::new(work)))
+    }
+
+    /// Continue `job`, which a restart paused, under its own id: it runs now or waits its turn.
+    pub fn resume(
+        &self,
+        key: &str,
+        (mut job, mut events): (JobRecord, Vec<Event>),
+        work: impl FnOnce(Arc<Running>) -> BoxFuture<'static, Result<()>> + Send + 'static,
+    ) -> Result<Submitted> {
+        let line = self.line();
+        anyhow::ensure!(!line.closed, "the server is stopping");
+        anyhow::ensure!(
+            self.live_in(&line, &job.id).is_none(),
+            "job {} already runs here",
+            job.id
+        );
+        (job.finished, job.error, job.beat) = (None, None, None);
+        events.push(Event::new(
+            crate::events::Level::Info,
+            Kind::Note,
+            "Continues after a restart",
+        ));
+        Ok(self.add(line, key, job, events, Box::new(work)))
+    }
+
+    /// Jobs a restart paused, and running ones whose server went quiet, oldest first: the ones
+    /// this server should continue.
+    pub fn resumable(&self) -> Vec<(JobRecord, Vec<Event>)> {
+        let line = self.line();
+        if line.closed {
+            return Vec::new();
+        }
+        let mut jobs: Vec<JobRecord> = self
+            .inner
+            .store
+            .list(MAX_JOBS)
+            .into_iter()
+            .filter(|j| j.request.is_some() && self.live_in(&line, &j.id).is_none())
+            .filter(|j| j.status == Status::Paused || (j.status == Status::Running && !alive(j)))
+            .collect();
+        drop(line);
+        jobs.sort_by(|a, b| a.created.cmp(&b.created));
+        jobs.into_iter()
+            .filter_map(|j| self.inner.store.get(&j.id))
+            .collect()
+    }
+
+    /// Queue `record` or start it now; the line is held so nothing slips in between.
+    fn add(
+        &self,
+        mut line: std::sync::MutexGuard<'_, Line>,
+        key: &str,
+        mut record: JobRecord,
+        events: Vec<Event>,
+        work: Work,
+    ) -> Submitted {
+        let busy = line.current.is_some();
+        if !busy {
+            record.status = Status::Running;
+            record.started = Some(now());
+        } else {
+            record.status = Status::Queued;
+        }
+        let (id, kind, request_id) = (
+            record.id.clone(),
+            record.kind.clone(),
+            record.request_id.clone(),
+        );
+        let kind = kind.as_str();
+        let request_id = request_id.as_deref();
         // Its own trace, linked to the request that started it.
         let span = tracing::info_span!(
             parent: None,
@@ -313,35 +446,20 @@ impl Jobs {
             otel.name = %format!("job {kind}"),
             job_id = %id,
             kind,
-            request_id = request_id.as_deref(),
+            request_id,
             status = tracing::field::Empty,
             otel.status_code = tracing::field::Empty,
         );
         span.follows_from(tracing::Span::current());
         let job = Arc::new(Running {
-            record: Mutex::new(JobRecord {
-                id,
-                kind: kind.to_string(),
-                started_by,
-                status: if busy {
-                    Status::Queued
-                } else {
-                    Status::Running
-                },
-                created: now(),
-                started: (!busy).then(now),
-                finished: None,
-                error: None,
-                request_id,
-            }),
-            events: Default::default(),
+            record: Mutex::new(record),
+            events: Mutex::new(events),
             live: broadcast::channel(256).0,
             cancel: CancellationToken::new(),
             done: CancellationToken::new(),
             out: self.inner.out.clone(),
             span: Mutex::new(span),
         });
-        let work: Work = Box::new(work);
         let position = if busy {
             line.queue.push_back(Waiting {
                 job: job.clone(),
@@ -357,11 +475,11 @@ impl Jobs {
             launch(self.inner.clone(), job.clone(), work);
             None
         };
-        Ok(Submitted {
+        Submitted {
             job,
             position,
             coalesced: false,
-        })
+        }
     }
 
     /// Cancel job `id`: the running one stops at its next check, a waiting one leaves the queue.
@@ -383,7 +501,8 @@ impl Jobs {
         Some(Status::Queued)
     }
 
-    /// Stop starting jobs; the waiting ones are marked interrupted. Returns the running one.
+    /// Stop starting jobs; the waiting ones are paused, or interrupted when they cannot continue.
+    /// Returns the running one, which pauses too when it stops at its next check.
     pub fn shutdown(&self) -> Option<Arc<Running>> {
         let waiting: Vec<Waiting> = {
             let mut line = self.line();
@@ -391,12 +510,16 @@ impl Jobs {
             line.queue.drain(..).collect()
         };
         for w in waiting {
-            end(
-                &self.inner.store,
-                &w.job,
-                Status::Interrupted,
-                Some(NOT_RUN.into()),
-            );
+            if w.job.record().request.is_some() {
+                pause(&self.inner.store, &w.job);
+            } else {
+                end(
+                    &self.inner.store,
+                    &w.job,
+                    Status::Interrupted,
+                    Some(NOT_RUN.into()),
+                );
+            }
         }
         self.running()
     }
@@ -413,12 +536,14 @@ fn launch(inner: Arc<Inner>, job: Arc<Running>, work: Work) {
     let run = span.in_scope(|| work(job.clone()));
     let task = async move {
         let s = inner.store.clone();
+        beat(&job);
         save(&s, &job);
         let ticker = tokio::spawn({
             let (j, s) = (job.clone(), s.clone());
             async move {
                 loop {
                     tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+                    beat(&j);
                     let (j, s) = (j.clone(), s.clone());
                     let _ = tokio::task::spawn_blocking(move || save(&s, &j)).await;
                 }
@@ -426,17 +551,29 @@ fn launch(inner: Arc<Inner>, job: Arc<Running>, work: Work) {
         });
         let result = run.await;
         ticker.abort();
-        {
+        let stopping = inner.line.lock().unwrap_or_else(|e| e.into_inner()).closed;
+        let paused = {
             let mut r = job.record.lock().unwrap_or_else(|e| e.into_inner());
             r.finished = Some(now());
             r.status = match &result {
                 Ok(()) => Status::Succeeded,
+                // Stopped by the server going down: it continues after the restart.
+                Err(e)
+                    if e.is::<crate::context::Cancelled>() && stopping && r.request.is_some() =>
+                {
+                    (r.finished, r.beat) = (None, None);
+                    Status::Paused
+                }
                 Err(e) if e.is::<crate::context::Cancelled>() => Status::Cancelled,
                 Err(e) => {
                     r.error = Some(crate::storage::explain(&format!("{e:#}")));
                     Status::Failed
                 }
             };
+            r.status == Status::Paused
+        };
+        if paused {
+            job.emit(Event::new(crate::events::Level::Info, Kind::Note, PAUSED));
         }
         close(&job);
         let saved = job.clone();
@@ -478,6 +615,24 @@ fn next(inner: Arc<Inner>) {
     line.current = Some(w.job.clone());
     drop(line);
     launch(inner.clone(), w.job, w.work);
+}
+
+/// Pause a waiting job until a server is back.
+fn pause(store: &Arc<dyn JobStore>, job: &Running) {
+    {
+        let mut r = job.record.lock().unwrap_or_else(|e| e.into_inner());
+        (r.status, r.beat) = (Status::Paused, None);
+    }
+    job.emit(Event::new(crate::events::Level::Info, Kind::Note, PAUSED));
+    close(job);
+    save(store, job);
+    job.done.cancel();
+}
+
+const PAUSED: &str = "Paused: the server is restarting; this continues once it is back";
+
+fn beat(job: &Running) {
+    job.record.lock().unwrap_or_else(|e| e.into_inner()).beat = Some(now());
 }
 
 /// Finish a job that never ran.
@@ -675,6 +830,8 @@ mod tests {
                 finished: None,
                 error: None,
                 request_id: None,
+                request: None,
+                beat: None,
             };
             store.save(&rec, &[]).unwrap();
         }
@@ -686,5 +843,127 @@ mod tests {
         );
         assert!(a.error.is_none() && b.error.as_deref() == Some(NOT_RUN));
         assert!(jobs.queued().is_empty() && jobs.running().is_none());
+    }
+
+    fn left(id: &str, status: Status, beat: Option<String>) -> JobRecord {
+        JobRecord {
+            id: id.into(),
+            kind: "index".into(),
+            started_by: None,
+            status,
+            created: format!("2026-01-01T00:00:0{}Z", id.len()),
+            started: None,
+            finished: None,
+            error: None,
+            request_id: None,
+            request: Some(serde_json::json!({ "llm": true })),
+            beat,
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_restart_pauses_jobs_that_can_continue_and_the_next_server_resumes_them() {
+        let store = Arc::new(MemoryJobs::default());
+        let jobs = jobs(store.clone());
+        let ran = Arc::new(Mutex::new(Vec::new()));
+        let request = Some(serde_json::json!({ "llm": true }));
+        let a = jobs
+            .submit_resumable(
+                "index",
+                "a",
+                None,
+                None,
+                request.clone(),
+                blocking(ran.clone(), "a"),
+            )
+            .unwrap();
+        let b = jobs
+            .submit_resumable(
+                "index",
+                "b",
+                None,
+                None,
+                request,
+                blocking(ran.clone(), "b"),
+            )
+            .unwrap();
+        let plain = jobs
+            .submit("index", "c", None, None, blocking(ran.clone(), "c"))
+            .unwrap();
+        until(|| ran.lock().unwrap().len() == 1).await;
+        let (a, b, plain) = (a.job.record().id, b.job.record().id, plain.job.record().id);
+        if let Some(r) = jobs.shutdown() {
+            r.cancel.cancel();
+            r.wait().await;
+        }
+        assert_eq!(
+            (status(&jobs, &a), status(&jobs, &b), status(&jobs, &plain)),
+            (Status::Paused, Status::Paused, Status::Interrupted)
+        );
+        assert!(jobs.get(&a).unwrap().1.iter().any(|e| e.message == PAUSED));
+        assert!(
+            jobs.resumable().is_empty(),
+            "a stopping server continues nothing"
+        );
+
+        let next = Jobs::new(store, Arc::new(crate::events::Discard));
+        let waiting: Vec<String> = next.resumable().iter().map(|(j, _)| j.id.clone()).collect();
+        assert_eq!(waiting, [a.clone(), b.clone()]);
+        let again = Arc::new(Mutex::new(Vec::new()));
+        for job in next.resumable() {
+            let name = job.0.id.clone();
+            next.resume("x", job, blocking(again.clone(), &name))
+                .unwrap();
+        }
+        assert!(
+            next.resumable().is_empty(),
+            "a resumed job is not offered twice"
+        );
+        until(|| again.lock().unwrap().len() == 1).await;
+        assert_eq!(status(&next, &a), Status::Running);
+        assert_eq!(status(&next, &b), Status::Queued);
+        assert!(next
+            .get(&a)
+            .unwrap()
+            .1
+            .iter()
+            .any(|e| e.message == "Continues after a restart"));
+        next.cancel(&a);
+        until(|| status(&next, &b) == Status::Running).await;
+        next.cancel(&b);
+        until(|| next.running().is_none()).await;
+        assert_eq!(*again.lock().unwrap(), [a, b]);
+    }
+
+    #[test]
+    fn a_starting_server_leaves_another_servers_live_job_alone() {
+        let store = Arc::new(MemoryJobs::default());
+        store
+            .save(&left("a", Status::Running, Some(now())), &[])
+            .unwrap();
+        store.save(&left("bb", Status::Queued, None), &[]).unwrap();
+        let jobs = jobs(store);
+        assert_eq!(
+            (status(&jobs, "a"), status(&jobs, "bb")),
+            (Status::Running, Status::Queued)
+        );
+        assert!(jobs.resumable().is_empty(), "its server is still alive");
+    }
+
+    #[test]
+    fn jobs_of_a_server_that_went_quiet_are_paused_and_offered() {
+        let store = Arc::new(MemoryJobs::default());
+        let old = (chrono::Utc::now() - chrono::Duration::seconds(STALE_SECONDS + 5)).to_rfc3339();
+        store
+            .save(&left("a", Status::Running, Some(old)), &[])
+            .unwrap();
+        store.save(&left("bb", Status::Queued, None), &[]).unwrap();
+        let jobs = jobs(store);
+        assert_eq!(
+            (status(&jobs, "a"), status(&jobs, "bb")),
+            (Status::Paused, Status::Paused)
+        );
+        let ids: Vec<String> = jobs.resumable().into_iter().map(|(j, _)| j.id).collect();
+        assert_eq!(ids, ["a", "bb"]);
     }
 }

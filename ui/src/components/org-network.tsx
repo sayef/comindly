@@ -123,7 +123,16 @@ function LinkCard({ l, x, y, width, height }: { l: L; x: number; y: number; widt
 }
 
 /** One repository at a time: what uses it above, what it uses below, and the list to move between them. */
-export function OrgNetwork({ org }: { org: Org }) {
+export function OrgNetwork({
+  org,
+  border,
+  onBorder,
+}: {
+  org: Org;
+  /** Boxes standing for another team's repositories; clicking one brings that team into view. */
+  border?: Map<string, { team: string; repos: string[] }>;
+  onBorder?: (id: string) => void;
+}) {
   const box = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(800);
   const [tip, setTip] = useState<{ l: L; x: number; y: number } | null>(null);
@@ -151,9 +160,10 @@ export function OrgNetwork({ org }: { org: Org }) {
   const ranked = useMemo(
     () =>
       org.repos
+        .filter((id) => !border?.has(id))
         .map((id) => ({ id, usedBy: org.usedBy.get(id)?.size ?? 0, uses: org.uses.get(id)?.size ?? 0 }))
         .sort((a, b) => b.usedBy - a.usedBy || b.uses - a.uses || a.id.localeCompare(b.id)),
-    [org],
+    [org, border],
   );
   const [focus, setFocus] = useState<string | null>(null);
   const current = focus && org.repos.includes(focus) ? focus : ranked[0]?.id;
@@ -251,35 +261,40 @@ export function OrgNetwork({ org }: { org: Org }) {
     );
   };
 
-  const node = (b: Box, main = false) => (
+  const pick = (id: string) => (border?.has(id) ? onBorder?.(id) : setFocus(id), setTip(null));
+  const node = (b: Box, main = false) => {
+    const team = border?.get(b.id);
+    return (
     <g
       key={`${b.id}@${b.y}`}
       tabIndex={main ? -1 : 0}
       role={main ? undefined : "button"}
-      aria-label={main ? undefined : `Focus on ${b.id}`}
+      aria-label={main ? undefined : team ? `Show ${team.team}` : `Focus on ${b.id}`}
       transform={`translate(${b.x},${b.y})`}
       className={cn("outline-none [&:focus-visible>rect]:stroke-ring", !main && "cursor-pointer [&:hover>rect]:stroke-muted-foreground")}
-      onClick={() => !main && (setFocus(b.id), setTip(null))}
-      onKeyDown={(e) => !main && (e.key === "Enter" || e.key === " ") && (e.preventDefault(), setFocus(b.id))}
+      onClick={() => !main && pick(b.id)}
+      onKeyDown={(e) => !main && (e.key === "Enter" || e.key === " ") && (e.preventDefault(), pick(b.id))}
     >
       <rect
         width={W}
         height={H}
         rx={8}
-        fill={main ? "var(--color-accent)" : "var(--color-card)"}
+        fill={main ? "var(--color-accent)" : team ? "var(--color-muted)" : "var(--color-card)"}
+        strokeDasharray={team ? "4 3" : undefined}
         stroke={main ? "var(--color-brand)" : inCycle.has(b.id) && inCycle.has(current) ? "var(--color-warning)" : "var(--color-input)"}
         strokeWidth={main ? 1.5 : 1}
         className="transition-[stroke] duration-100"
       />
-      <text x={12} y={21} className="fill-foreground text-sm font-semibold">
+      <text x={12} y={21} className={cn("text-sm font-semibold", team ? "fill-muted-foreground" : "fill-foreground")}>
         {b.id.length > 20 ? `${b.id.slice(0, 19)}…` : b.id}
         <title>{b.id}</title>
       </text>
       <text x={12} y={38} className="nums fill-muted-foreground text-xs">
-        {compact(org.symbols.get(b.id) ?? 0)} symbols
+        {team ? "Not in view, select to add" : `${compact(org.symbols.get(b.id) ?? 0)} symbols`}
       </text>
     </g>
-  );
+    );
+  };
 
   return (
     <div className="grid min-h-[360px] md:grid-cols-[240px_minmax(0,1fr)]">

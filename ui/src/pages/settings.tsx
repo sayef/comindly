@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Notice } from "@/components/notice";
 import { ApiKey, TeamSection, Unsaved, useUnsavedWarning } from "@/components/team-settings";
+import { TeamsCard } from "@/components/teams-card";
 import { api, type SettingsChange } from "@/lib/api";
 
 const field = "flex flex-col gap-1.5 text-sm font-semibold";
@@ -116,6 +117,8 @@ export function SettingsPage() {
       )}
 
       <TeamSection />
+
+      <TeamsCard />
 
       {!server && (
         <Section title="You" description="Shown on the ledger records you write and review.">
