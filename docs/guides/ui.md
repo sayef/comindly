@@ -178,7 +178,7 @@ runs and waits. Finished actions appear as toasts in the bottom-right corner.
 
 **View as agent**, on the overview, contracts, flows, conventions, repositories and every symbol,
 shows the answer an agent gets from the matching MCP tool for what the page shows, with the page's
-team and filters applied. The small robot icon on each contract, ledger record and repository does
+team and filters applied. The eye icon on each contract, ledger record and repository does
 the same for that one item. Copy it into an agent that is not connected to comindly, or
 use it to see what a connected one is told.
 

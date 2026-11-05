@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Bot, Check, Copy } from "lucide-react";
+import { Check, Copy, Eye } from "lucide-react";
 import { useState } from "react";
 import { useCopy } from "@/components/index-log";
 import { Button } from "@/components/ui/button";
@@ -38,11 +38,11 @@ export function AgentView({ asks, className, icon = false }: { asks: AgentAsk[];
           aria-label="View as agent"
           title="View as agent: what comindly's MCP tools tell an agent about this"
         >
-          <Bot />
+          <Eye />
         </Button>
       ) : (
         <Button size="sm" variant="outline" className={className} onClick={() => setOpen(true)} title="What comindly's MCP tools tell an agent about what this page shows">
-          <Bot /> View as agent
+          <Eye /> View as agent
         </Button>
       )}
       <Dialog open={open} onOpenChange={setOpen}>
