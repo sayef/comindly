@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronDown, Users } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
+import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { UNASSIGNED, useTeams } from "@/lib/teams";
 import { cn } from "@/lib/utils";
@@ -12,6 +13,7 @@ export function TeamPicker({ admin, wide = false }: { admin: boolean; wide?: boo
   const qc = useQueryClient();
   const [open, setOpen] = useState<{ top: number; left: number } | null>(null);
   const root = useRef<HTMLDivElement>(null);
+  const before = useRef<string[]>([]);
   const join = useMutation({
     mutationFn: api.saveMyTeams,
     meta: { quiet: true },
@@ -21,7 +23,7 @@ export function TeamPicker({ admin, wide = false }: { admin: boolean; wide?: boo
   useEffect(() => {
     if (!open) return;
     const away = (e: PointerEvent) => root.current?.contains(e.target as Node) || setOpen(null);
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(null);
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && (t.select(before.current), setOpen(null));
     const close = () => setOpen(null);
     document.addEventListener("pointerdown", away);
     document.addEventListener("keydown", esc);
@@ -29,7 +31,7 @@ export function TeamPicker({ admin, wide = false }: { admin: boolean; wide?: boo
     return () => (
       document.removeEventListener("pointerdown", away), document.removeEventListener("keydown", esc), window.removeEventListener("resize", close)
     );
-  }, [open]);
+  }, [open, t.select]);
 
   if (!t.teams.length) {
     if (!admin) return null;
@@ -55,6 +57,7 @@ export function TeamPicker({ admin, wide = false }: { admin: boolean; wide?: boo
       <button
         onClick={(e) => {
           const r = e.currentTarget.getBoundingClientRect();
+          before.current = t.selected;
           setOpen((o) => (o ? null : { top: r.bottom + 6, left: r.left }));
         }}
         aria-haspopup="true"
@@ -107,6 +110,14 @@ export function TeamPicker({ admin, wide = false }: { admin: boolean; wide?: boo
               </div>
             </div>
           )}
+          <div className="mt-1.5 flex justify-end gap-1.5 border-t px-1 pt-1.5">
+            <Button variant="ghost" size="sm" onClick={() => (t.select(before.current), setOpen(null))}>
+              Cancel
+            </Button>
+            <Button variant="brand" size="sm" onClick={() => setOpen(null)}>
+              Done
+            </Button>
+          </div>
         </div>
       )}
     </div>
