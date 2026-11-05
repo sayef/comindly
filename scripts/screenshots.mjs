@@ -97,6 +97,9 @@ for (const theme of mode === "server" ? [] : ["light", "dark"]) {
   if (focus) {
     await go(`/explorer?focus=${encodeURIComponent(focus)}`, 3500);
     await shot(`explorer${suffix}`);
+    await evaluate(`[...document.querySelectorAll("button")].find((b) => b.textContent.includes("As an agent sees it"))?.click()`);
+    await sleep(2500);
+    await shot(`agent-view${suffix}`);
   }
   for (const [page, path] of [["contracts", "contracts"], ["ledger", "ledger"], ["packages", "packages"], ["conventions", "conventions"], ["repositories", "settings/repositories"], ["setup", "setup"]]) {
     await go(`/${path}`);
