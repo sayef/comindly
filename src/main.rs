@@ -367,6 +367,12 @@ enum Cmd {
         /// (plain markdown on stdout; the edited file is found in the payload or `COMINDLY_HOOK_FILE`)
         agent: String,
     },
+    /// Print when and how agents should use comindly's tools, for a repository's AGENTS.md or CLAUDE.md
+    InitAgents {
+        /// Print a Claude Code skill for `.claude/skills/comindly/SKILL.md` instead
+        #[arg(long)]
+        skill: bool,
+    },
     /// Coding conventions per repo and org-wide: measured from the code, plus the team's own
     Conventions {
         #[command(subcommand)]
@@ -717,6 +723,7 @@ fn main() -> ExitCode {
             index_dir,
         } => cmd_hook(&agent, &event, index_dir.as_deref()),
         Cmd::InitHooks { agent } => cmd_init_hooks(&agent),
+        Cmd::InitAgents { skill } => cmd_init_agents(skill),
         Cmd::Doctor { index_dir } => cmd_doctor(
             index_dir.as_deref(),
             remote::client(cli.server.as_deref(), cli.local),
@@ -2148,14 +2155,16 @@ fn cmd_hook(agent: &str, event: &str, from: Option<&str>) -> ExitCode {
     let Some((symbols, records)) = hook_data(&cfg, from) else {
         return ExitCode::SUCCESS;
     };
-    if records.is_empty() {
+    if records.is_empty() && event != "session-start" {
         return ExitCode::SUCCESS;
     }
     let entries = comindly::ledger::derive(&records, &symbols, &comindly::config::local_verifier());
+    let mut indexed = false;
     let (hook_event, ids): (&str, Vec<String>) = match event {
         "session-start" => {
             // Every symbol of the repo this session works in.
             let repo = repo_at(&symbols, &cwd);
+            indexed = repo.is_some();
             let ids = symbols
                 .iter()
                 .filter(|s| Some(&s.repo.0) == repo.as_ref())
@@ -2201,13 +2210,17 @@ fn cmd_hook(agent: &str, event: &str, from: Option<&str>) -> ExitCode {
         .filter(|e| !seen.contains(&e.record.id))
         .take(if hook_event == "SessionStart" { 8 } else { 4 })
         .collect();
-    if fresh.is_empty() {
+    if fresh.is_empty() && !indexed {
         return ExitCode::SUCCESS;
     }
-    let mut text = comindly::ledger::markdown(
-        "comindly ledger: reasoning recorded about this code",
-        &fresh,
-    );
+    let mut text = if fresh.is_empty() {
+        String::new()
+    } else {
+        comindly::ledger::markdown(
+            "comindly ledger: reasoning recorded about this code",
+            &fresh,
+        )
+    };
     if text.len() > 9_000 {
         let cut = (0..=9_000)
             .rev()
@@ -2219,6 +2232,9 @@ fn cmd_hook(agent: &str, event: &str, from: Option<&str>) -> ExitCode {
     let mut lines: Vec<String> = seen.into_iter().collect();
     lines.extend(fresh.iter().map(|e| e.record.id.clone()));
     let _ = std::fs::write(&seen_file, lines.join("\n"));
+    if indexed {
+        text = format!("# Using comindly\n\n{}\n{text}", comindly::agents::GUIDE);
+    }
     if !claude {
         println!("{text}");
         return ExitCode::SUCCESS;
@@ -2243,8 +2259,16 @@ fn repo_at(symbols: &[Symbol], cwd: &Path) -> Option<String> {
 }
 
 fn cmd_init_hooks(agent: &str) -> ExitCode {
+    if matches!(agent, "generic" | "cursor" | "gemini" | "codex") {
+        comindly::ui::note(&format!(
+            "run these from {agent}'s hooks; each prints markdown to add to the agent's context:"
+        ));
+        println!("session start:   comindly hook {agent} session-start");
+        println!("before an edit:  comindly hook {agent} pre-edit   (the file comes from the hook's JSON on stdin, or COMINDLY_HOOK_FILE)");
+        return ExitCode::SUCCESS;
+    }
     if agent != "claude" {
-        comindly::ui::err("only `claude` is supported so far");
+        comindly::ui::err("agent must be claude, cursor, gemini, codex or generic");
         return ExitCode::FAILURE;
     }
     let snippet = serde_json::json!({
@@ -2263,6 +2287,17 @@ fn cmd_init_hooks(agent: &str) -> ExitCode {
         "{}",
         serde_json::to_string_pretty(&snippet).unwrap_or_default()
     );
+    ExitCode::SUCCESS
+}
+
+fn cmd_init_agents(skill: bool) -> ExitCode {
+    if skill {
+        eprintln!("save as .claude/skills/comindly/SKILL.md in a repository, or in ~/.claude/skills/comindly/ for all:");
+        print!("{}", comindly::agents::skill());
+    } else {
+        eprintln!("add to AGENTS.md or CLAUDE.md at the root of a repository:");
+        print!("{}", comindly::agents::agents_md());
+    }
     ExitCode::SUCCESS
 }
 

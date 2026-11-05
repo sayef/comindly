@@ -7,7 +7,7 @@ import { shortStatus, statusParts } from "@/components/index-log";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-/** What is running right now, in the header's corner, with a way to stop it; and a toast when indexing ends. */
+/** What is running right now, as tabs under the header's corner, with a way to stop it; and a toast when indexing ends. */
 export function Activity() {
   const qc = useQueryClient();
   const job = useQuery({
@@ -67,7 +67,8 @@ export function Activity() {
   const parts = statusParts(j?.events ?? []);
   if (j?.running)
     return (
-      <div className="flex flex-col items-end gap-2">
+      <div className="flex items-start gap-2">
+        {queued}
         <Pill>
           <Link to={j.id ? `/activity/${j.id}` : "/activity"} className="flex min-w-0 items-center gap-2" title={step ? `Indexing: ${step}` : "Indexing"}>
             <Loader2 className="size-3.5 shrink-0 animate-spin text-brand" />
@@ -83,7 +84,6 @@ export function Activity() {
             onClick={() => stopIndex.mutate()}
           />
         </Pill>
-        {queued}
       </div>
     );
   if (queued) return queued;
@@ -99,7 +99,8 @@ export function Activity() {
 
 function Pill({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex h-10 max-w-[min(26rem,calc(100vw-2rem))] items-center gap-2.5 rounded-lg border bg-popover px-3.5 text-sm text-popover-foreground shadow-float">
+    // 28px tall, so it fits the gap above page actions instead of covering them.
+    <div className="flex h-7 max-w-[min(26rem,calc(100vw-2rem))] items-center gap-2 rounded-b-lg border border-t-0 bg-background px-3 text-xs">
       {children}
     </div>
   );

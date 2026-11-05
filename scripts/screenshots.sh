@@ -71,6 +71,7 @@ remember "Web team" question --on Cart.checkout \
 COMINDLY_AUTHOR_NAME="Checkout team" "$BIN" review "$idem" confirm --index-dir "$INDEX" >/dev/null
 "$BIN" conventions add --index-dir "$INDEX" --dimension money "Amounts are acme_common.Money in integer cents; no floats for money" >/dev/null
 "$BIN" conventions add --index-dir "$INDEX" --repo payments --dimension queues "Every queue handler is idempotent per message" >/dev/null
+"$BIN" team set name=Acme --index-dir "$INDEX" >/dev/null
 
 PORT=$(( 20000 + RANDOM % 20000 ))
 "$BIN" ui --web --port "$PORT" --index-dir "$INDEX" > "$WORK/ui.log" 2>&1 &

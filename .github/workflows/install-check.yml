@@ -15,6 +15,10 @@ on:
       tag:
         description: Release tag to install, e.g. v0.1.0
         required: true
+      macos:
+        description: Also install on macOS
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -44,7 +48,7 @@ jobs:
 
   # Skipped when the release's Mac binaries are uploaded by hand after publishing.
   install-macos:
-    if: inputs.macos != false
+    if: inputs.macos
     name: macOS arm64
     runs-on: macos-latest
     steps:

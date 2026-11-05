@@ -44,13 +44,6 @@ export function LedgerPage() {
     <div className="flex flex-col gap-5">
       <PageHeader
         title="Ledger"
-        actions={
-          overview.data?.writable && (
-            <Button variant="brand" onClick={() => setAdding(true)}>
-              <Plus /> Add record
-            </Button>
-          )
-        }
       >
         What the code does not say: failed attempts, decisions and constraints, anchored to the symbols they are about.
       </PageHeader>
@@ -73,6 +66,11 @@ export function LedgerPage() {
           <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter records" aria-label="Filter records" className="pl-8" />
         </div>
+        {overview.data?.writable && (
+          <Button variant="brand" onClick={() => setAdding(true)} className="max-sm:w-full">
+            <Plus /> Add record
+          </Button>
+        )}
       </div>
       {ledger.isLoading && [0, 1, 2].map((i) => <Skeleton key={i} className="h-32 rounded-lg" />)}
       {ledger.data && rows.length === 0 && (

@@ -1,10 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDownRight, ArrowLeftRight, ArrowUpRight, Check, ClipboardCopy, Layers, Network, Plus, Radar, Route } from "lucide-react";
+import { ArrowDownRight, ArrowLeftRight, ArrowUpRight, Layers, Network, Plus, Radar, Route } from "lucide-react";
 import { useMemo, useState } from "react";
 import { withCode } from "@/components/code-text";
 import { Navigate, useNavigate, useSearchParams } from "react-router";
 import { EntryCard } from "@/components/entry-card";
 import { GraphView } from "@/components/graph-view";
+import { AgentView } from "@/components/agent-view";
 import { RememberDialog } from "@/components/remember-dialog";
 import { RepoDot, SymbolLink } from "@/components/symbol";
 import { Badge } from "@/components/ui/badge";
@@ -12,7 +13,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, type Node } from "@/lib/api";
-import { toast } from "sonner";
 import { sentence } from "@/lib/utils";
 
 function NodeList({ title, icon: Icon, nodes }: { title: string; icon: typeof Layers; nodes: Node[] }) {
@@ -33,36 +33,6 @@ function NodeList({ title, icon: Icon, nodes }: { title: string; icon: typeof La
     </Card>
   );
 }
-
-/** Copies the context pack (what to read before changing this) as markdown for an agent. */
-function CopyContext({ focus }: { focus: string }) {
-  const [done, setDone] = useState(false);
-  const [busy, setBusy] = useState(false);
-  return (
-    <Button
-      size="sm"
-      variant="outline"
-      title="What to read before changing this, plus what the team recorded, as markdown"
-      loading={busy}
-      onClick={async () => {
-        setBusy(true);
-        try {
-          await navigator.clipboard?.writeText(await api.context(focus));
-          setDone(true);
-          toast.success("Context copied; paste it into your agent");
-          setTimeout(() => setDone(false), 1500);
-        } catch (e) {
-          toast.error(sentence((e as Error).message));
-        } finally {
-          setBusy(false);
-        }
-      }}
-    >
-      {!busy && (done ? <Check /> : <ClipboardCopy />)} {done ? "Copied" : "Copy context for an agent"}
-    </Button>
-  );
-}
-
 
 export function ExplorerPage() {
   const [params] = useSearchParams();
@@ -109,7 +79,14 @@ export function ExplorerPage() {
           {detail.data.summary && <p className="mt-2 max-w-3xl text-sm text-muted-foreground">{withCode(detail.data.summary)}</p>}
           {f.repo !== "_contracts" && (
             <div className="mt-3 flex flex-wrap gap-2">
-              <CopyContext focus={f.id} />
+              <AgentView
+                asks={[
+                  { label: "Before a change", tool: "context_pack", args: { focus: f.id } },
+                  { label: "Neighbourhood", tool: "zoom", args: { focus: f.id } },
+                  { label: "Blast radius", tool: "ripple", args: { focus: f.id } },
+                  { label: "Records", tool: "why", args: { focus: f.id } },
+                ]}
+              />
               {overview.data?.writable && (
                 <Button size="sm" variant="outline" onClick={() => setAdding(true)}>
                   <Plus /> Add to the ledger

@@ -18,6 +18,7 @@ import { TeamChips, TeamsField } from "@/components/team-chips";
 import { RepoDot } from "@/components/symbol";
 import { Link } from "react-router";
 import { IndexLog } from "@/components/index-log";
+import { AgentView } from "@/components/agent-view";
 import { PageHeader } from "@/components/page-header";
 import { SettingsTabs } from "@/pages/settings";
 import { Badge } from "@/components/ui/badge";
@@ -627,7 +628,7 @@ export function RepositoriesPage() {
 
   return (
     <div className="flex flex-col gap-5">
-      <PageHeader title="Repositories">
+      <PageHeader title="Repositories" actions={<AgentView asks={[{ label: "Repositories", tool: "repos", args: { team: teams.selected.join(",") || undefined } }]} />}>
         What comindly indexes. Each repository is indexed at its default branch from comindly's own checkout
         {server ? "." : ", so your folders and branches are never touched."}
       </PageHeader>
@@ -742,21 +743,24 @@ export function RepositoriesPage() {
             }
             where={r.managed ? r.remote : r.path}
             actions={
-              admin && (
-                <ConfirmButton
-                  variant="ghost"
-                  size="icon"
-                  className="size-8"
-                  aria-label={`Remove ${r.name}`}
-                  title="Remove from the list (your folder stays)"
-                  question={`Remove ${r.name}?`}
-                  confirmLabel="Remove"
-                  loading={remove.isPending && remove.variables === r.path}
-                  onConfirm={() => remove.mutate(r.path)}
-                >
-                  {!(remove.isPending && remove.variables === r.path) && <Trash2 />}
-                </ConfirmButton>
-              )
+              <>
+                <AgentView icon asks={[{ label: "Conventions", tool: "guide", args: { focus: r.name } }]} />
+                {admin && (
+                  <ConfirmButton
+                    variant="ghost"
+                    size="icon"
+                    className="size-8"
+                    aria-label={`Remove ${r.name}`}
+                    title="Remove from the list (your folder stays)"
+                    question={`Remove ${r.name}?`}
+                    confirmLabel="Remove"
+                    loading={remove.isPending && remove.variables === r.path}
+                    onConfirm={() => remove.mutate(r.path)}
+                  >
+                    {!(remove.isPending && remove.variables === r.path) && <Trash2 />}
+                  </ConfirmButton>
+                )}
+              </>
             }
           />
         ))}

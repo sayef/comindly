@@ -3,6 +3,7 @@ import { ArrowDownUp, ChevronDown, ChevronRight, Code2, ExternalLink, GitCommitH
 import { Fragment, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { RepoDot } from "@/components/symbol";
+import { AgentView } from "@/components/agent-view";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -343,13 +344,6 @@ export function ConventionsPage() {
     <div className="flex flex-col gap-5">
       <PageHeader
         title="Conventions"
-        actions={
-          writable && (
-            <Button variant="brand" onClick={() => setAdding(true)}>
-              <Plus /> Add convention
-            </Button>
-          )
-        }
       >
         Measured from the code, plus the team's own: how each repository names, structures, logs, configures and tests things.
       </PageHeader>
@@ -391,6 +385,12 @@ export function ConventionsPage() {
           <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
           <Input value={query} onChange={(e) => set("q", e.target.value)} placeholder="Filter rules" aria-label="Filter rules" className="pl-8" />
         </div>
+        <AgentView asks={[{ label: "Conventions", tool: "guide", args: { focus: scope && scope !== ORG ? scope : undefined } }]} className="h-9" />
+        {writable && (
+          <Button variant="brand" onClick={() => setAdding(true)} className="max-sm:col-span-2">
+            <Plus /> Add convention
+          </Button>
+        )}
       </div>
       <Card>
         {all.isLoading ? (

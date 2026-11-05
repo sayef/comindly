@@ -3,6 +3,7 @@ import { ArrowRight, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { SymbolLink } from "@/components/symbol";
+import { AgentView } from "@/components/agent-view";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -77,7 +78,20 @@ export function ContractsPage() {
   const all = contracts.data ?? [];
   return (
     <div className="flex flex-col gap-5">
-      <PageHeader title="Service contracts">
+      <PageHeader
+        title="Service contracts"
+        actions={
+          <AgentView
+            asks={[
+              {
+                label: "Contracts",
+                tool: "contracts",
+                args: { kind: kind === "all" ? undefined : kind, dangling: side === "dangling" || undefined, query: q, team: teams.selected.join(",") || undefined },
+              },
+            ]}
+          />
+        }
+      >
         Routes, queues, topics, buckets and tables, with the code that provides them and the code that uses them.
       </PageHeader>
       <div className="grid grid-cols-2 items-center gap-2 sm:flex sm:flex-wrap sm:gap-3">
@@ -146,6 +160,11 @@ export function ContractsPage() {
                           {k === "table" ? "Table" : k.toUpperCase()}
                         </Badge>
                         <SymbolLink node={{ ...v.contract, name: v.contract.name.split(":").slice(1).join(":") }} />
+                        <AgentView
+                          icon
+                          className="ml-auto"
+                          asks={[{ label: "Contract", tool: "contracts", args: { kind: k, query: v.contract.name.split(":").slice(1).join(":") } }]}
+                        />
                       </div>
                     </Td>
                     <Td slot="desktop">

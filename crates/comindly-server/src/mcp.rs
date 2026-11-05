@@ -696,15 +696,6 @@ struct PackParam {
 
 // ---- tools ------------------------------------------------------------------------------
 
-/// First-contact orientation shown to the agent as MCP server `instructions`.
-const INSTRUCTIONS: &str = "Deterministic code intelligence over an indexed codebase.\n\
-New here? Call `repos` to see what's indexed and `suggest` for ready-made questions.\n\
-Workflow: `find`/`search` return a symbol `id` → pass that id to `zoom` (360° view), \
-`ripple` (who breaks if I change this — crosses service contracts too), `thread` (forward call \
-trace), `context_pack` (minimal safe edit read-set), or `flow` (narrated walkthrough). \
-`contracts` lists HTTP routes, queues, topics, buckets and tables with providers and consumers. `search` needs embeddings \
-(on by default unless the index was built with --no-embed); the graph tools always work.";
-
 #[tool_router(vis = "pub(crate)")]
 impl ComindlyServer {
     #[tool(
@@ -1256,6 +1247,40 @@ impl ComindlyServer {
     }
 }
 
+impl ComindlyServer {
+    /// The markdown a read-only tool gives an agent for these arguments, for the app's agent view.
+    pub async fn as_agent(&self, tool: &str, args: serde_json::Value) -> Result<String> {
+        let me = Self {
+            markdown: true,
+            ..self.clone()
+        };
+        macro_rules! args {
+            () => {
+                Parameters(serde_json::from_value(args)?)
+            };
+        }
+        let r = match tool {
+            "repos" => me.repos(args!()),
+            "contracts" => me.contracts(args!()),
+            "guide" => me.guide(args!()),
+            "find" => me.find(args!()),
+            "suggest" => me.suggest(args!()),
+            "ripple" => me.ripple(args!()),
+            "thread" => me.thread(args!()),
+            "flow" => me.flow(args!()),
+            "zoom" => me.zoom(args!()).await,
+            "why" => me.why(args!()).await,
+            "context_pack" => me.context_pack(args!()).await,
+            _ => anyhow::bail!("`{tool}` is not a read-only tool"),
+        };
+        Ok(r.content
+            .iter()
+            .filter_map(|c| c.as_text().map(|t| t.text.as_str()))
+            .collect::<Vec<_>>()
+            .join("\n"))
+    }
+}
+
 #[rmcp::tool_handler(router = Self::tool_router())]
 impl rmcp::ServerHandler for ComindlyServer {
     fn get_info(&self) -> rmcp::model::ServerConfig {
@@ -1265,7 +1290,7 @@ impl rmcp::ServerHandler for ComindlyServer {
                 .build(),
         )
         .with_server_info(rmcp::model::Implementation::from_build_env())
-        .with_instructions(INSTRUCTIONS)
+        .with_instructions(crate::agents::GUIDE)
     }
 }
 

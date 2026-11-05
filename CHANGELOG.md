@@ -6,6 +6,27 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Guidance for agents on when to use each comindly tool, in one place: the MCP server sends it when an
+  agent connects, the session-start hook adds it when the repository is indexed,
+  `comindly init-agents` prints it for a repository's `AGENTS.md` (`--skill` for a Claude Code
+  skill), and the Get started page shows both to copy.
+
+- **View as agent** on the overview, contracts, flows, conventions, repositories and every symbol,
+  and on each contract, ledger record and repository: the answer the matching MCP tool gives an
+  agent, to read or copy. It replaces the symbol page's "Copy context for an agent".
+
+### Changed
+
+- Indexing status hangs under the header's right corner instead of floating at the bottom; the
+  ledger's and conventions' add buttons moved into their filter rows.
+
+### Fixed
+
+- `comindly init-hooks cursor`, `gemini`, `codex` and `generic` print the hook commands to run, as
+  documented, instead of refusing.
+
 ## [0.5.0-beta.2](https://github.com/sayef/comindly/compare/v0.5.0-beta.1...v0.5.0-beta.2) - 2026-11-05
 
 ### Added

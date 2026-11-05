@@ -159,11 +159,15 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      - uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ needs.tag.outputs.tag }}
-          prerelease: ${{ contains(needs.tag.outputs.tag, '-') }}
-          files: dist/comindly-*
+      # Uploads to the tag's release (release-plz usually creates it), also when this run was started by hand.
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.tag.outputs.tag }}
+        run: |
+          pre=(); [[ "$TAG" == *-* ]] && pre=(--prerelease)
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$TAG" -R "$GITHUB_REPOSITORY" --verify-tag --generate-notes "${pre[@]}"
+          gh release upload "$TAG" dist/comindly-* -R "$GITHUB_REPOSITORY" --clobber
 
   # The container image from the Linux binaries above, for amd64 and arm64, on GitHub's registry.
   image:

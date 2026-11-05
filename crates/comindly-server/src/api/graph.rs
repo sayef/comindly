@@ -165,6 +165,15 @@ pub struct Package {
     pub skewed: bool,
 }
 
+/// `GET /api/v1/agent?tool=&args=`: what a read-only MCP tool answers an agent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentQuery {
+    pub tool: String,
+    /// The tool's arguments as JSON.
+    #[serde(default)]
+    pub args: Option<String>,
+}
+
 /// `GET /api/v1/setup`: the index, its checks and how to connect agents.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Setup {
@@ -174,6 +183,9 @@ pub struct Setup {
     pub checks: Vec<Check>,
     pub tools: Vec<Tool>,
     pub agents: Vec<String>,
+    /// When to use comindly's tools: a section for AGENTS.md, and the same as a Claude Code skill.
+    pub agents_md: String,
+    pub skill: String,
 }
 
 /// An MCP tool.

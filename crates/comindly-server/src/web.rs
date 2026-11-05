@@ -340,6 +340,10 @@ impl AppState {
         let Some(mcp) = self.mcp.clone() else {
             return;
         };
+        // Locally the tools load on the first agent view, then follow the index from there on.
+        if self.server.is_none() && mcp.read().map(|m| m.is_none()).unwrap_or(true) {
+            return;
+        }
         let uri = format!("{}/_graph", root.trim_end_matches('/'));
         let generation = self
             .mcp_generation
@@ -406,7 +410,7 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
             Arc::new(crate::ui::Terminal::new()),
         ),
         watch: Default::default(),
-        mcp: server.as_ref().map(|_| Default::default()),
+        mcp: Some(Default::default()),
         server,
         mcp_generation: Default::default(),
     });
@@ -461,6 +465,7 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
         .route("/api/v1/node", get(node))
         .route("/api/v1/search", get(search))
         .route("/api/v1/context", get(context))
+        .route("/api/v1/agent", get(agent_view))
         .route("/api/v1/packages", get(packages))
         .route("/api/v1/flows", get(flows::list))
         .route("/api/v1/flow", get(flows::one))
@@ -1295,6 +1300,36 @@ async fn search(Cur(s): Cur, Query(q): Query<api::SearchQuery>) -> Reply<Vec<api
     run.await.map(Json).map_err(bad)
 }
 
+/// What a read-only MCP tool answers an agent, as markdown; plain text, not JSON.
+async fn agent_view(
+    State(app): State<Shared>,
+    Cur(s): Cur,
+    Query(q): Query<api::AgentQuery>,
+) -> std::result::Result<String, Failure> {
+    let args = match q.args.as_deref().filter(|a| !a.is_empty()) {
+        Some(a) => serde_json::from_str(a).map_err(|e| bad(e.into()))?,
+        None => serde_json::json!({}),
+    };
+    let slot = app.mcp.clone().unwrap_or_default();
+    let loaded = slot.read().ok().and_then(|m| m.clone());
+    let server = match loaded {
+        Some(server) => server,
+        None => {
+            let root = s.data.root.clone().unwrap_or_default();
+            let uri = format!("{}/_graph", root.trim_end_matches('/'));
+            let mut server = crate::mcp::load(&uri, true, app.config().fresh())
+                .await
+                .map_err(|e| failure(StatusCode::SERVICE_UNAVAILABLE, error_text(&e)))?;
+            server.teams = app.team.clone();
+            if let Ok(mut m) = slot.write() {
+                m.get_or_insert_with(|| server.clone());
+            }
+            server
+        }
+    };
+    server.as_agent(&q.tool, args).await.map_err(bad)
+}
+
 /// The context pack for a symbol as markdown, ready to paste into an agent; plain text, not JSON.
 async fn context(Cur(s): Cur, Query(q): Query<api::FocusQuery>) -> impl IntoResponse {
     let g = &s.data.graph;
@@ -1381,6 +1416,8 @@ async fn setup(State(app): State<Shared>, Cur(s): Cur) -> Json<api::Setup> {
         checks,
         tools,
         agents,
+        agents_md: crate::agents::agents_md(),
+        skill: crate::agents::skill(),
     })
 }
 

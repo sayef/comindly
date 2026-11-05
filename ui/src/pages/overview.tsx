@@ -6,6 +6,7 @@ import { type Direction, TreeView, useOrg } from "@/components/org-views";
 import { Backdrop } from "@/components/backdrop";
 import { OrgNetwork } from "@/components/org-network";
 import { RepoDot } from "@/components/symbol";
+import { AgentView } from "@/components/agent-view";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -385,7 +386,8 @@ export function OverviewPage() {
 
   return (
     <div className="flex flex-col gap-5">
-      <PageHeader title="Overview">How the org's repositories depend on each other, in code and through service contracts.</PageHeader>
+      <PageHeader title="Overview" actions={<AgentView asks={[{ label: "Repositories", tool: "repos", args: { team: teams.selected.join(",") || undefined } }]} />}>
+        How the org's repositories depend on each other, in code and through service contracts.</PageHeader>
 
       {o ? (
         <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border bg-border lg:grid-cols-4">

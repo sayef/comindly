@@ -415,6 +415,8 @@ export interface Setup {
   checks: { ok: boolean; optional: boolean; message: string }[];
   tools: { name: string; description: string }[];
   agents: string[];
+  agents_md: string;
+  skill: string;
 }
 
 async function get<T>(path: string): Promise<T> {
@@ -556,6 +558,12 @@ export const api = {
   testIndex: (index_dir: string) => post("/api/v1/settings/test", { index_dir }),
   context: async (focus: string) => {
     const path = `/api/v1/context?focus=${encodeURIComponent(focus)}`;
+    const r = await fetch(path);
+    if (!r.ok) throw await failure(path, r);
+    return r.text();
+  },
+  agent: async (tool: string, args: Record<string, unknown>) => {
+    const path = `/api/v1/agent?tool=${encodeURIComponent(tool)}&args=${encodeURIComponent(JSON.stringify(args))}`;
     const r = await fetch(path);
     if (!r.ok) throw await failure(path, r);
     return r.text();

@@ -25,6 +25,7 @@
 | `comindly erase <id…> \| --actor <id\|me> [--yes]` | Erase ledger records (and relations about them) for good, including old snapshot versions; dry run without `--yes` |
 | `comindly doctor` | Check this machine's setup: index and ledger reachable, local mirror, hooks, LLM key, signing, SCIP indexers, and the server sign-in |
 | `comindly hook <agent> <event>` / `comindly init-hooks <claude\|cursor\|gemini\|codex\|generic>` | Agent hook adapter / config snippet |
+| `comindly init-agents [--skill]` | When to use comindly's tools, for a repository's AGENTS.md or a Claude Code skill |
 | `comindly eval graph [--scip <dir>]` | Graph quality on the gold fixture (precision/recall per edge kind) |
 | `comindly repos [add <folders or clone URLs…> \| remove <names…> \| scan <dir>]` | Indexed repositories, and the list `comindly link` indexes when given no folders |
 | `comindly app [--index-dir <dir>]` | The UI in its own window on macOS; in the browser on Linux and Windows |

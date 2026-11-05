@@ -151,6 +151,10 @@ comindly init-hooks claude     # prints settings to merge into ~/.claude/setting
 
 `comindly init-hooks cursor`, `gemini`, `codex` and `generic` print the equivalent for other agents.
 
+To tell agents when to use comindly in a repository's own instructions, append
+`comindly init-agents` to its `AGENTS.md` or `CLAUDE.md`; see
+[Telling agents when to use it](guides/agents.md#telling-agents-when-to-use-it).
+
 ## 6. Check your setup
 
 ```sh

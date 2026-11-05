@@ -45,16 +45,34 @@ Names in answers are the ones you see in the UI: methods as `Class.method`, cont
 To nudge an agent that does not reach for comindly, name it: "use comindly to check what depends on
 this first".
 
+## Telling agents when to use it
+
+comindly sends agents guidance on when to reach for each tool: as the MCP server's instructions when
+they connect, and at the start of each session through the [hooks](#hooks). To put the same guidance
+in a repository, where agents read it before they look at their tools and your team can adjust it:
+
+```sh
+comindly init-agents >> AGENTS.md          # or CLAUDE.md
+comindly init-agents --skill               # a Claude Code skill for .claude/skills/comindly/SKILL.md
+```
+
+The app's Get started page shows both, ready to copy.
+
+![Get started: the guidance for agents, as an AGENTS.md section or a Claude Code skill](../assets/screenshots/setup-agents.webp#only-light)
+![Get started: the guidance for agents, as an AGENTS.md section or a Claude Code skill](../assets/screenshots/setup-agents-dark.webp#only-dark)
+
 ## Hooks
 
 `comindly init-hooks claude` prints two hooks for Claude Code:
 
-- **Session start**: up to eight trusted records about the repository you are working in.
+- **Session start**: when the repository you are working in is indexed, the guidance on when to use
+  comindly's tools, then up to eight trusted records about the repository.
 - **Before an edit** (`Edit`, `MultiEdit`, `Write`): up to four trusted records about that file.
 
 A record is shown once per session. Hooks read a local mirror of a remote index, refreshed every
-five minutes (`cache_ttl_secs`), so they add about 60 ms. `comindly init-hooks cursor`, `gemini`,
-`codex` and `generic` print the same as plain-text hooks for other agents.
+five minutes (`cache_ttl_secs`), so they add about 60 ms. For other agents, `comindly init-hooks
+cursor`, `gemini`, `codex` or `generic` prints the two commands to run from the agent's own hooks;
+they print the same context as plain markdown.
 
 ## The ledger, from an agent's side
 

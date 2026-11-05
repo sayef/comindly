@@ -169,10 +169,21 @@ Activity: indexing runs grouped by day, one opened as a timeline of its steps
 Get started: register the MCP server with your agent
 ///
 
-What is running shows in the header's corner (indexing with its current step, or any action in
-progress), with **Cancel** where it can be stopped; indexing stops at its next checkpoint and keeps
+What is running hangs under the header's right corner (indexing with its current step, a queued run
+beside it, or any action in progress), with **Cancel** where it can be stopped; indexing stops at its next checkpoint and keeps
 what it already saved. Clicking it opens the run under **Activity**, whose sidebar entry counts what
 runs and waits. Finished actions appear as toasts in the bottom-right corner.
+
+![A run indexing and another queued, under the header's right corner](../assets/screenshots/indexing.webp)
+
+**View as agent**, on the overview, contracts, flows, conventions, repositories and every symbol,
+shows the answer an agent gets from the matching MCP tool for what the page shows, with the page's
+team and filters applied. The eye icon on each contract, ledger record and repository does
+the same for that one item. Copy it into an agent that is not connected to comindly, or
+use it to see what a connected one is told.
+
+![Agent context: the context pack an agent gets before changing a symbol](../assets/screenshots/agent-view.webp#only-light)
+![Agent context: the context pack an agent gets before changing a symbol](../assets/screenshots/agent-view-dark.webp#only-dark)
 
 Press <kbd>⌘K</kbd> (<kbd>Ctrl K</kbd>) anywhere to search: by name, and by describing what you are
 looking for ("where do we retry HTTP calls"), which uses the same hybrid search as the MCP `search`

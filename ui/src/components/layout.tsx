@@ -307,8 +307,8 @@ export function Layout() {
           </div>
         </main>
       </div>
-      {/* Running and queued indexing, out of the header's way. */}
-      <div className="pointer-events-none fixed right-[max(1rem,env(safe-area-inset-right))] bottom-[max(1rem,env(safe-area-inset-bottom))] z-40 [&>*]:pointer-events-auto">
+      {/* Running and queued indexing, hanging from the header's lower edge on the right. */}
+      <div className="pointer-events-none fixed top-[60px] right-[max(1rem,env(safe-area-inset-right))] z-40 md:right-7 [&>*]:pointer-events-auto">
         <Activity />
       </div>
       <CommandPalette open={palette} onOpenChange={setPalette} />
