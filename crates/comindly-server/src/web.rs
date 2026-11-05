@@ -389,6 +389,22 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
     if let Some(root) = root {
         let _guard = rt.enter();
         state.reload_mcp(&root);
+        let s = state.clone();
+        rt.block_on(async move {
+            let stored = crate::team::load(&root).await.unwrap_or_default();
+            let repos: Vec<String> = s
+                .current
+                .read()
+                .await
+                .data
+                .graph
+                .repos()
+                .into_iter()
+                .map(|(r, _)| r)
+                .collect();
+            let team = s.backfill_teams(&root, stored, &repos).await;
+            s.set_team(team);
+        });
     }
     rt.spawn(repos::watch(state.clone()));
     if state.server.is_some() {
