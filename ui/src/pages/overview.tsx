@@ -16,6 +16,7 @@ import { Slider } from "@/components/ui/slider";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { Outcome } from "@/components/notice";
 import { api, attention, isChallenged, type OrgMap } from "@/lib/api";
+import { scopeOrg, UNASSIGNED, useTeams } from "@/lib/teams";
 import { useAccess } from "@/lib/me";
 import { cn, compact, percent } from "@/lib/utils";
 
@@ -204,9 +205,14 @@ function CreateTeam({ at }: { at?: string }) {
 
 export function OverviewPage() {
   const { server, admin } = useAccess();
-  const overview = useQuery({ queryKey: ["overview"], queryFn: api.overview });
-  const ledger = useQuery({ queryKey: ["ledger"], queryFn: api.ledger });
-  const flows = useQuery({ queryKey: ["flows"], queryFn: api.flows });
+  const teams = useTeams();
+  const overview = useQuery({
+    queryKey: ["overview"],
+    queryFn: api.overview,
+    select: (d) => ({ ...d, repos: d.repos.filter((r) => teams.inView(r.repo)) }),
+  });
+  const ledger = useQuery({ queryKey: ["ledger"], queryFn: api.ledger, select: (d) => d.filter(teams.entryInView) });
+  const flows = useQuery({ queryKey: ["flows"], queryFn: api.flows, select: (d) => d.filter(teams.flowInView) });
   const latest = useQuery({ queryKey: ["orgmap"], queryFn: () => api.orgmap() });
   const versions = useQuery({ queryKey: ["versions"], queryFn: api.versions });
   const last = (versions.data?.length ?? 1) - 1;
@@ -218,7 +224,12 @@ export function OverviewPage() {
   });
   const map = at !== null && at !== last ? past.data : latest.data;
   const [selected, setSelected] = useState<string | null>(null);
-  const org = useOrg(map);
+  const scoped = useMemo(() => scopeOrg(map, teams), [map, teams.inView, teams.selected]);
+  const org = useOrg(scoped.map);
+  const addTeam = (id: string) => {
+    const b = scoped.border.get(id);
+    if (b) teams.select([...teams.selected, b.team === "Unassigned" ? UNASSIGNED : b.team]);
+  };
   const [start, setStart] = useState(() => remembered("comindly.org.start", "*"));
   const [dir, setDir] = useState<Direction>(() => (remembered("comindly.org.dir", "uses") === "usedBy" ? "usedBy" : "uses"));
   const [open, setOpen] = useState<Set<string> | null>(null);
@@ -231,7 +242,7 @@ export function OverviewPage() {
       // storage may be unavailable
     }
   }, [mode]);
-  const contracts = useQuery({ queryKey: ["contracts"], queryFn: api.contracts });
+  const contracts = useQuery({ queryKey: ["contracts"], queryFn: api.contracts, select: (d) => d.filter(teams.contractInView) });
   useEffect(() => {
     try {
       localStorage.setItem("comindly.org.start", start);
@@ -535,7 +546,7 @@ export function OverviewPage() {
           {!map ? (
             <Skeleton className="h-[420px] rounded-none" />
           ) : mode === "network" && org.repos.length > 1 ? (
-            <OrgNetwork org={org} />
+            <OrgNetwork org={org} border={scoped.border} onBorder={addTeam} />
           ) : roots.length === 0 ? (
             <p className="px-5 py-8 text-sm text-muted-foreground">No links between the indexed repositories yet.</p>
           ) : (

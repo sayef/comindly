@@ -10,9 +10,11 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Toggle, ToggleGroup } from "@/components/ui/tabs";
 import { api, attention, when } from "@/lib/api";
+import { useTeams } from "@/lib/teams";
 
 export function LedgerPage() {
-  const ledger = useQuery({ queryKey: ["ledger"], queryFn: api.ledger });
+  const teams = useTeams();
+  const ledger = useQuery({ queryKey: ["ledger"], queryFn: api.ledger, select: (d) => d.filter(teams.entryInView) });
   const overview = useQuery({ queryKey: ["overview"], queryFn: api.overview });
   const [params, setParams] = useSearchParams();
   const pendingCount = (ledger.data ?? []).filter((e) => attention(e) < 3).length;

@@ -15,6 +15,7 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { ConfirmButton } from "@/components/confirm";
 import { withCode } from "@/components/code-text";
 import { api, type Convention, type ConventionChange } from "@/lib/api";
+import { useTeams } from "@/lib/teams";
 import { cn, percent, sentence } from "@/lib/utils";
 
 const ORG = "*";
@@ -293,8 +294,17 @@ function AddDialog({ open, onOpenChange, scopes, scope, dimensions }: { open: bo
 type Sort = "scope" | "topic" | "strength";
 
 export function ConventionsPage() {
-  const all = useQuery({ queryKey: ["conventions"], queryFn: api.conventions });
-  const overview = useQuery({ queryKey: ["overview"], queryFn: api.overview });
+  const teams = useTeams();
+  const all = useQuery({
+    queryKey: ["conventions"],
+    queryFn: api.conventions,
+    select: (d) => ({ ...d, conventions: d.conventions.filter((c) => c.repo === ORG || teams.inView(c.repo)) }),
+  });
+  const overview = useQuery({
+    queryKey: ["overview"],
+    queryFn: api.overview,
+    select: (d) => ({ ...d, repos: d.repos.filter((r) => teams.inView(r.repo)) }),
+  });
   const writable = overview.data?.writable ?? false;
   const change = useChange();
   const items = all.data?.conventions ?? [];

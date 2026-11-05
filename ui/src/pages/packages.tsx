@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { Toggle, ToggleGroup } from "@/components/ui/tabs";
 import { api, type Package } from "@/lib/api";
+import { useTeams } from "@/lib/teams";
 import { cn } from "@/lib/utils";
 
 /** Numeric comparison of dotted versions: negative when `a` is older. */
@@ -41,7 +42,8 @@ function Pin({ p }: { p: Package }) {
 }
 
 export function PackagesPage() {
-  const rows = useQuery({ queryKey: ["packages"], queryFn: api.packages });
+  const teams = useTeams();
+  const rows = useQuery({ queryKey: ["packages"], queryFn: api.packages, select: (d) => d.filter(teams.packageInView) });
   const [params, setParams] = useSearchParams();
   const only: "all" | "skew" = params.get("only") === "skew" ? "skew" : "all";
   const setOnly = (v: string) => setParams((p) => (v === "skew" ? p.set("only", v) : p.delete("only"), p), { replace: true });
