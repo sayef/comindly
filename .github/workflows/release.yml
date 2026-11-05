@@ -19,6 +19,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # Which releases build their Mac binaries here: `all`, or `stable` (betas get theirs uploaded by hand).
+  MACOS_BUILDS: stable
+
 jobs:
   tag:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
@@ -26,6 +30,7 @@ jobs:
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
       ref: ${{ steps.tag.outputs.ref }}
+      macos: ${{ steps.tag.outputs.macos }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -45,6 +50,7 @@ jobs:
           esac
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "ref=${tag:-$(git rev-parse HEAD)}" >> "$GITHUB_OUTPUT"
+          [[ "$MACOS_BUILDS" == all || "$tag" != *-* ]] && echo "macos=true" >> "$GITHUB_OUTPUT" || echo "macos=false" >> "$GITHUB_OUTPUT"
           echo "Release tag: ${tag:-none}"
 
   ui:
@@ -111,10 +117,9 @@ jobs:
           name: comindly-${{ matrix.target }}
           path: comindly-${{ matrix.target }}.tar.gz*
 
-  # Betas skip macOS; their Mac binaries are built locally and uploaded to the release.
   build-macos:
     needs: [tag, ui]
-    if: (needs.tag.outputs.tag != '' && !contains(needs.tag.outputs.tag, '-')) || github.event_name == 'workflow_dispatch'
+    if: needs.tag.outputs.macos == 'true' && (needs.tag.outputs.tag != '' || github.event_name == 'workflow_dispatch')
     strategy:
       fail-fast: false
       matrix:
@@ -224,3 +229,4 @@ jobs:
     uses: ./.github/workflows/install-check.yml
     with:
       tag: ${{ needs.tag.outputs.tag }}
+      macos: ${{ needs.tag.outputs.macos == 'true' }}

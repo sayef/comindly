@@ -7,6 +7,9 @@ on:
       tag:
         type: string
         required: true
+      macos:
+        type: boolean
+        default: true
   workflow_dispatch:
     inputs:
       tag:
@@ -39,9 +42,9 @@ jobs:
           curl -LsSf https://raw.githubusercontent.com/sayef/comindly/main/scripts/install.sh | sh
           "$COMINDLY_BIN_DIR/comindly" --version | grep -F "${COMINDLY_VERSION#v}"
 
-  # Betas get their Mac binaries uploaded by hand after publishing, so only stable releases check them here.
+  # Skipped when the release's Mac binaries are uploaded by hand after publishing.
   install-macos:
-    if: ${{ !contains(inputs.tag, '-') }}
+    if: inputs.macos != false
     name: macOS arm64
     runs-on: macos-latest
     steps:
