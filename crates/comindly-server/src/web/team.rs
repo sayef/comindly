@@ -34,10 +34,16 @@ pub(super) fn defaults() -> api::Defaults {
     }
 }
 
-pub(super) async fn get(State(app): State<Shared>) -> Reply<api::Team> {
+pub(super) async fn get(who: super::Member, State(app): State<Shared>) -> Reply<api::Team> {
     let run = async {
         let root = root(&app).await?;
-        let stored = team::load(&root).await?;
+        let mut stored = team::load(&root).await?;
+        // Who is in which team is for admins; everyone else sees only themselves in the lists.
+        if let Some(w) = who.as_deref().filter(|w| !w.role.at_least(crate::server::Role::Admin)) {
+            for t in stored.settings.teams.iter_mut().flatten() {
+                t.members.retain(|m| m.eq_ignore_ascii_case(&w.email));
+            }
+        }
         let key =
             crate::credentials::llm_key(stored.settings.name.as_deref(), app.server.as_deref()).1;
         anyhow::Ok(api::Team {

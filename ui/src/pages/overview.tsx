@@ -105,14 +105,18 @@ function MapKey() {
   );
 }
 
-/** What the org map says first: the repository most others depend on, and any cycles. */
-function finding(org: ReturnType<typeof useOrg>): string | null {
+/** What the org map says first: the repository most others in view depend on. */
+function finding(org: ReturnType<typeof useOrg>, border: Map<string, { team: string; repos: string[] }>): string | null {
   if (org.repos.length < 2) return null;
-  const hub = [...org.usedBy.entries()].sort((a, b) => b[1].size - a[1].size || a[0].localeCompare(b[0]))[0];
-  if (!hub || hub[1].size === 0) return null;
-  return `${hub[1].size} of ${org.repos.length} repositories depend on ${hub[0]}`;
+  const inView = org.repos.filter((r) => !border.has(r));
+  const users = (id: string) => [...(org.usedBy.get(id)?.keys() ?? [])].filter((r) => !border.has(r));
+  const hub = [...org.usedBy.keys()].map((id) => [id, users(id)] as const).sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))[0];
+  if (!hub || hub[1].length === 0) return null;
+  const box = border.get(hub[0]);
+  const target = box ? `${box.repos.length} ${box.team} ${box.repos.length === 1 ? "repository" : "repositories"}` : hub[0];
+  if (hub[1].length === 1 && inView.length === 1) return `${hub[1][0]} depends on ${target}`;
+  return `${hub[1].length} of ${inView.length} repositories depend on ${target}`;
 }
-
 
 function linkDiff(then: OrgMap, now: OrgMap) {
   const key = (e: OrgMap["edges"][number]) => `${e.src} → ${e.dst} (${e.kind})`;
@@ -357,8 +361,20 @@ export function OverviewPage() {
   const totalRecords = o ? Object.values(o.ledger).reduce((a, b) => a + b, 0) : 0;
   const needs = (ledger.data ?? []).filter((e) => attention(e) < 3).sort((a, b) => attention(a) - attention(b));
 
-  const said = finding(org);
+  const said = finding(org, scoped.border);
   const bySize = (o?.repos ?? []).slice().sort((a, b) => b.symbols - a.symbols);
+  // With a team selection: code links touching the repositories in view, and how many of them cross to other teams.
+  const links = teams.selected.length && map
+    ? map.edges.reduce(
+        (n, e) => {
+          const a = teams.inView(e.src);
+          const b = teams.inView(e.dst);
+          if (e.kind !== "code" || !(a || b)) return n;
+          return { all: n.all + e.weight, out: n.out + (a !== b ? e.weight : 0) };
+        },
+        { all: 0, out: 0 },
+      )
+    : null;
   const kinds = Object.entries(
     (contracts.data ?? []).reduce<Record<string, number>>((m, v) => {
       const k = v.contract.name.split(":")[0];
@@ -385,16 +401,26 @@ export function OverviewPage() {
             }))}
             hint={`${compact(bySize.reduce((n, r) => n + r.symbols, 0))} symbols${bySize.length > 1 ? `, most in ${bySize[0].repo} and ${bySize[1].repo}` : ""}`}
           />
-          <Stat
-            label="Links across repositories"
-            value={o.cross_repo_edges.toLocaleString()}
-            parts={[{ key: "cross", value: o.cross_repo_edges, label: "Across repositories", color: "var(--color-brand)" }]}
-            total={o.edges}
-            hint={`${percent(o.cross_repo_edges, o.edges)} of ${o.edges.toLocaleString()} dependencies cross a repository`}
-          />
+          {links ? (
+            <Stat
+              label="Links across repositories"
+              value={links.all.toLocaleString()}
+              parts={[{ key: "out", value: links.out, label: "To or from other teams", color: "var(--color-brand)" }]}
+              total={links.all}
+              hint={`${links.out.toLocaleString()} to or from other teams' repositories`}
+            />
+          ) : (
+            <Stat
+              label="Links across repositories"
+              value={o.cross_repo_edges.toLocaleString()}
+              parts={[{ key: "cross", value: o.cross_repo_edges, label: "Across repositories", color: "var(--color-brand)" }]}
+              total={o.edges}
+              hint={`${percent(o.cross_repo_edges, o.edges)} of ${o.edges.toLocaleString()} dependencies cross a repository`}
+            />
+          )}
           <Stat
             label="Contracts"
-            value={o.contracts.toLocaleString()}
+            value={(teams.selected.length && contracts.data ? contracts.data.length : o.contracts).toLocaleString()}
             to="/contracts"
             parts={kinds.map(([k, n]) => ({
               key: k,
