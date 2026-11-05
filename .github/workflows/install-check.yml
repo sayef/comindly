@@ -7,6 +7,9 @@ on:
       tag:
         type: string
         required: true
+      macos:
+        type: boolean
+        default: true
   workflow_dispatch:
     inputs:
       tag:
@@ -25,13 +28,26 @@ jobs:
           - { name: "Ubuntu 20.04 x64", os: ubuntu-latest, container: "ubuntu:20.04" }
           - { name: "Ubuntu 20.04 arm64", os: ubuntu-24.04-arm, container: "ubuntu:20.04" }
           - { name: "Ubuntu 24.04 x64", os: ubuntu-latest, container: "ubuntu:24.04" }
-          - { name: "macOS arm64", os: macos-latest }
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     container: ${{ matrix.container }}
     steps:
       - if: matrix.container
         run: apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y curl ca-certificates
+      - name: Install and run
+        env:
+          COMINDLY_VERSION: ${{ inputs.tag }}
+          COMINDLY_BIN_DIR: ${{ runner.temp }}/bin
+        run: |
+          curl -LsSf https://raw.githubusercontent.com/sayef/comindly/main/scripts/install.sh | sh
+          "$COMINDLY_BIN_DIR/comindly" --version | grep -F "${COMINDLY_VERSION#v}"
+
+  # Skipped when the release's Mac binaries are uploaded by hand after publishing.
+  install-macos:
+    if: inputs.macos != false
+    name: macOS arm64
+    runs-on: macos-latest
+    steps:
       - name: Install and run
         env:
           COMINDLY_VERSION: ${{ inputs.tag }}

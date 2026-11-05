@@ -19,6 +19,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # Which releases build their Mac binaries here: `all`, or `stable` (betas get theirs uploaded by hand).
+  MACOS_BUILDS: stable
+
 jobs:
   tag:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
@@ -26,6 +30,7 @@ jobs:
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
       ref: ${{ steps.tag.outputs.ref }}
+      macos: ${{ steps.tag.outputs.macos }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -45,6 +50,7 @@ jobs:
           esac
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "ref=${tag:-$(git rev-parse HEAD)}" >> "$GITHUB_OUTPUT"
+          [[ "$MACOS_BUILDS" == all || "$tag" != *-* ]] && echo "macos=true" >> "$GITHUB_OUTPUT" || echo "macos=false" >> "$GITHUB_OUTPUT"
           echo "Release tag: ${tag:-none}"
 
   ui:
@@ -66,6 +72,7 @@ jobs:
           name: ui-dist
           path: ui/dist
 
+  # Linux and macOS build separately, so the image never waits for a macOS runner.
   build:
     needs: [tag, ui]
     if: needs.tag.outputs.tag != '' || github.event_name == 'workflow_dispatch'
@@ -79,10 +86,6 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04-arm
             container: rust:1.97-bullseye
-          - target: aarch64-apple-darwin
-            os: macos-latest
-          - target: x86_64-apple-darwin
-            os: macos-latest # cross-compiled on Apple Silicon
     runs-on: ${{ matrix.os }}
     container: ${{ matrix.container }}
     steps:
@@ -114,9 +117,40 @@ jobs:
           name: comindly-${{ matrix.target }}
           path: comindly-${{ matrix.target }}.tar.gz*
 
+  build-macos:
+    needs: [tag, ui]
+    if: needs.tag.outputs.macos == 'true' && (needs.tag.outputs.tag != '' || github.event_name == 'workflow_dispatch')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+          - target: x86_64-apple-darwin # cross-compiled on Apple Silicon
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.tag.outputs.ref }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: ui-dist
+          path: ui/dist
+      - run: brew install protobuf cmake
+      - run: rustup target add ${{ matrix.target }}
+      - run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Package
+        run: |
+          tar -C target/${{ matrix.target }}/release -czf "comindly-${{ matrix.target }}.tar.gz" comindly
+          shasum -a 256 "comindly-${{ matrix.target }}.tar.gz" > "comindly-${{ matrix.target }}.tar.gz.sha256"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: comindly-${{ matrix.target }}
+          path: comindly-${{ matrix.target }}.tar.gz*
+
   publish:
-    needs: [tag, build]
-    if: needs.tag.outputs.tag != ''
+    needs: [tag, build, build-macos]
+    if: ${{ !cancelled() && needs.tag.outputs.tag != '' && needs.build.result == 'success' && needs.build-macos.result != 'failure' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -133,9 +167,9 @@ jobs:
 
   # The container image from the Linux binaries above, for amd64 and arm64, on GitHub's registry.
   image:
+    # Only the Linux binaries go into the image, so it never waits for macOS.
     needs: [tag, build]
-    # Only the Linux binaries go into the image, so a stuck macOS runner must not hold it back.
-    if: ${{ !cancelled() && needs.tag.outputs.tag != '' }}
+    if: needs.tag.outputs.tag != ''
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -195,3 +229,4 @@ jobs:
     uses: ./.github/workflows/install-check.yml
     with:
       tag: ${{ needs.tag.outputs.tag }}
+      macos: ${{ needs.tag.outputs.macos == 'true' }}
