@@ -304,7 +304,7 @@ export function Layout() {
             {overview.data && !overview.data.writable && <Badge variant="outline">Read-only</Badge>}
             <TeamPicker admin={admin} />
             {version > 0 && (
-              <span className="nums hidden shrink-0 whitespace-nowrap text-xs text-muted-foreground xl:inline" title={latest ?? undefined}>
+              <span className="nums hidden shrink-0 whitespace-nowrap text-xs text-muted-foreground 2xl:inline" title={latest ?? undefined}>
                 Index version {version}, {ago(latest)}
               </span>
             )}

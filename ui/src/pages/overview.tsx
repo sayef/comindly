@@ -383,7 +383,7 @@ export function OverviewPage() {
               label: r.repo,
               color: `color-mix(in srgb, var(--color-brand) ${Math.max(18, 100 - i * 14)}%, var(--color-muted))`,
             }))}
-            hint={`${compact(o.symbols)} symbols${bySize.length > 1 ? `, most in ${bySize[0].repo} and ${bySize[1].repo}` : ""}`}
+            hint={`${compact(bySize.reduce((n, r) => n + r.symbols, 0))} symbols${bySize.length > 1 ? `, most in ${bySize[0].repo} and ${bySize[1].repo}` : ""}`}
           />
           <Stat
             label="Links across repositories"
