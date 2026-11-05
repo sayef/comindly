@@ -146,6 +146,7 @@ fn needs(method: &Method, path: &str) -> Role {
     }
     if method == Method::GET
         || path.starts_with("/api/v1/auth/")
+        || path == "/api/v1/me/teams"
         || path.starts_with("/api/v1/tokens")
         || path.starts_with("/api/v1/answer/")
     {
@@ -987,5 +988,12 @@ mod tests {
         assert_eq!(needs(&Method::GET, "/api/v1/view"), Role::Viewer);
         assert_eq!(needs(&Method::POST, "/api/v1/review"), Role::Member);
         assert!(!Role::Viewer.at_least(needs(&Method::POST, "/api/v1/review")));
+    }
+
+    #[test]
+    fn anyone_picks_their_teams_and_admins_define_them() {
+        assert_eq!(needs(&Method::POST, "/api/v1/me/teams"), Role::Viewer);
+        assert_eq!(needs(&Method::POST, "/api/v1/teams"), Role::Admin);
+        assert_eq!(needs(&Method::POST, "/api/v1/repos/teams"), Role::Admin);
     }
 }

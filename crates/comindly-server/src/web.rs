@@ -260,14 +260,63 @@ impl AppState {
         })
         .await?;
         let fresh = self.config().fresh();
-        let team = crate::team::load(root)
-            .await
-            .map(|t| t.settings)
-            .unwrap_or_default();
+        let team = crate::team::load(root).await.unwrap_or_default();
+        let repos: Vec<String> = data.graph.repos().into_iter().map(|(r, _)| r).collect();
+        let team = self.backfill_teams(root, team, &repos).await;
         self.set_team(team);
         *self.current.write().await = Arc::new(Session::open(data, fresh).await);
         self.reload_mcp(root);
         Ok(())
+    }
+
+    /// On a server whose teams were never set up: one team named after the org, holding every
+    /// indexed repository and every member and invitation.
+    async fn backfill_teams(
+        &self,
+        root: &str,
+        stored: crate::team::Stored,
+        repos: &[String],
+    ) -> crate::team::TeamSettings {
+        let Some(server) = self.server.as_ref() else {
+            return stored.settings;
+        };
+        let mut members: Vec<String> = server
+            .accounts
+            .members()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|m| m.email)
+            .collect();
+        members.extend(
+            server
+                .accounts
+                .invites()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|i| i.email),
+        );
+        let Some(next) = stored.settings.backfill(repos, &members) else {
+            return stored.settings;
+        };
+        match crate::team::save_as(root, &next, stored.version, "comindly upgrade").await {
+            Ok(_) => {
+                let t = &next.team_list()[0];
+                tracing::info!(
+                    "teams backfilled: {} with {} repositories and {} members",
+                    t.name,
+                    t.repos.len(),
+                    t.members.len()
+                );
+                next
+            }
+            Err(e) => {
+                tracing::warn!("teams not backfilled: {e:#}");
+                crate::team::load(root)
+                    .await
+                    .map(|t| t.settings)
+                    .unwrap_or(stored.settings)
+            }
+        }
     }
 
     /// Load the index at `root` for agents in the background, keeping the previous one until then.
@@ -408,6 +457,9 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
         .route("/api/v1/team/key", post(team::key))
         .route("/api/v1/join", post(team::join))
         .route("/api/v1/team/create", post(team::create))
+        .route("/api/v1/teams", post(team::save_teams))
+        .route("/api/v1/repos/teams", post(team::label_repo))
+        .route("/api/v1/me/teams", post(team::my_teams))
         .route("/api/v1/auth/me", get(auth::me))
         .route("/health", get(health))
         .route("/ready", get(ready))

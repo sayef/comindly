@@ -67,6 +67,26 @@ pub struct TeamSave {
     pub version: Option<u64>,
 }
 
+/// `POST /api/v1/teams`: the whole team list, at the settings version read.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TeamsSave {
+    pub teams: Vec<crate::team::TeamDef>,
+    pub version: Option<u64>,
+}
+
+/// `POST /api/v1/repos/teams`: exactly these teams on `repo` (its indexed name).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoTeams {
+    pub repo: String,
+    pub teams: Vec<String>,
+}
+
+/// `POST /api/v1/me/teams`: the teams you belong to.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MyTeams {
+    pub teams: Vec<String>,
+}
+
 /// `POST /api/v1/team/key`: your API key; empty removes it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeyRequest {

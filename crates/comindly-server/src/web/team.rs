@@ -1,5 +1,6 @@
 //! Team settings from the UI, plus your own API key in your credentials file (never in the index).
 
+use anyhow::Context as _;
 use axum::extract::State;
 use axum::Json;
 
@@ -78,6 +79,8 @@ pub(super) async fn save(
             next.llm_concurrency.is_none_or(|n| (1..=64).contains(&n)),
             "LLM requests at once: between 1 and 64"
         );
+        // Teams have their own endpoints; this form never changes them.
+        next.teams = current.settings.teams.clone();
         let reindex = next.embed_model != current.settings.embed_model;
         let format_changed = next.format != current.settings.format;
         match who.as_deref() {
@@ -189,4 +192,69 @@ async fn use_location(app: &Shared, root: &str, settings: TeamSettings) -> anyho
     }
     app.set_team(settings);
     app.reload(root).await
+}
+
+/// Load the settings, change them with `edit`, and save them as `who`.
+async fn change_teams(
+    app: &Shared,
+    who: &super::Member,
+    expected: Option<Option<u64>>,
+    edit: impl FnOnce(&mut TeamSettings) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    let root = root(app).await?;
+    let current = team::load(&root).await?;
+    let mut next = current.settings.clone();
+    edit(&mut next)?;
+    next.tidy_teams()?;
+    let version = expected.unwrap_or(current.version);
+    match who.as_deref() {
+        Some(w) => team::save_as(&root, &next, version, &w.email).await?,
+        None => crate::config::save_team(&root, &next, version).await?,
+    };
+    app.set_team(next);
+    Ok(())
+}
+
+/// Replace the team list (admins).
+pub(super) async fn save_teams(
+    who: super::Member,
+    State(app): State<Shared>,
+    Json(b): Json<api::TeamsSave>,
+) -> Reply<api::Done> {
+    let run = change_teams(&app, &who, Some(b.version), |t| {
+        t.teams = Some(b.teams);
+        Ok(())
+    });
+    done(run.await.map(|_| "teams saved"))
+}
+
+/// Set the teams labelling one repository (admins); new names become new teams.
+pub(super) async fn label_repo(
+    who: super::Member,
+    State(app): State<Shared>,
+    Json(b): Json<api::RepoTeams>,
+) -> Reply<api::Done> {
+    let repo = b.repo.trim().to_string();
+    let run = change_teams(&app, &who, None, |t| {
+        anyhow::ensure!(!repo.is_empty(), "which repository?");
+        t.label(&repo, &b.teams);
+        Ok(())
+    });
+    done(run.await.map(|_| format!("teams of {repo} saved")))
+}
+
+/// Choose the teams you belong to; on a server only.
+pub(super) async fn my_teams(
+    who: super::Member,
+    State(app): State<Shared>,
+    Json(b): Json<api::MyTeams>,
+) -> Reply<api::Done> {
+    let run = async {
+        let email = who
+            .as_deref()
+            .map(|w| w.email.clone())
+            .context("teams per person need a server with sign-in")?;
+        change_teams(&app, &who, None, |t| t.set_member(&email, &b.teams)).await
+    };
+    done(run.await.map(|_| "your teams saved"))
 }
