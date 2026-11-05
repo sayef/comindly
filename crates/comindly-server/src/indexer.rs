@@ -167,7 +167,9 @@ pub fn child() -> Result<()> {
         let scip = settings.scip;
         let git = spec.git;
         let creds = move |host: &str| {
-            crate::config::env_token(host).or_else(|| git.get(&host.to_lowercase()).cloned())
+            git.get(&host.to_lowercase())
+                .cloned()
+                .or_else(|| crate::config::env_token(host))
         };
         let ctx = IndexContext::new(
             spec.root,

@@ -136,6 +136,9 @@ enum Cmd {
         /// Restrict results to one or more repos (repeatable: --repo x --repo y)
         #[arg(long)]
         repo: Vec<String>,
+        /// Only repositories of these teams (repeatable or comma-separated; `none`: unlabelled)
+        #[arg(long)]
+        team: Vec<String>,
         /// Output format: `md` or `table` (default from config, else `md`)
         #[arg(long)]
         format: Option<String>,
@@ -181,6 +184,9 @@ enum Cmd {
         /// Limit to one or more repos (repeatable: --repo x --repo y)
         #[arg(long)]
         repo: Vec<String>,
+        /// Only repositories of these teams (repeatable or comma-separated; `none`: unlabelled)
+        #[arg(long)]
+        team: Vec<String>,
     },
     /// Indexed repositories with their symbol counts, and the list `comindly link` indexes when
     /// given no folders (`add`, `remove`, `scan`)
@@ -626,6 +632,7 @@ fn main() -> ExitCode {
             query,
             index_dir,
             repo,
+            team,
             format,
             md,
         } => {
@@ -633,13 +640,20 @@ fn main() -> ExitCode {
             let fmt = if md { Some("md".to_string()) } else { format };
             let fmt = fmt.unwrap_or_else(|| settings_for(index_dir.as_deref()).format);
             let markdown = matches!(fmt.as_str(), "md" | "markdown");
-            cmd_search(&query.join(" "), index_dir.as_deref(), &repo, markdown)
+            cmd_search(
+                &query.join(" "),
+                index_dir.as_deref(),
+                &repo,
+                &team,
+                markdown,
+            )
         }
         Cmd::Find {
             query,
             index_dir,
             repo,
-        } => cmd_find(&query, index_dir.as_deref(), &repo),
+            team,
+        } => cmd_find(&query, index_dir.as_deref(), &repo, &team),
         Cmd::Repos { what, index_dir } => cmd_repo_list(what, index_dir.as_deref()),
         Cmd::Stats { index_dir, repo } => cmd_stats(&repo, index_dir.as_deref()),
         Cmd::Guide {
@@ -953,7 +967,13 @@ fn print_group(label: &str, nodes: &[comindly::graph::Node], limit: usize) {
     comindly::ui::field(label, &format!("{}{suffix}", names.join(", ")));
 }
 
-fn cmd_search(query: &str, from: Option<&str>, repos: &[String], markdown: bool) -> ExitCode {
+fn cmd_search(
+    query: &str,
+    from: Option<&str>,
+    repos: &[String],
+    teams: &[String],
+    markdown: bool,
+) -> ExitCode {
     let uri = comindly::config::Config::load().graph_dir(from);
     let uri = uri.as_str();
 
@@ -964,6 +984,14 @@ fn cmd_search(query: &str, from: Option<&str>, repos: &[String], markdown: bool)
             return ExitCode::FAILURE;
         }
     };
+    let Some(scoped) = team_scope(from, &symbols, repos, teams) else {
+        return ExitCode::FAILURE;
+    };
+    if !teams.is_empty() && scoped.is_empty() {
+        comindly::ui::note("no indexed repository belongs to these teams");
+        return ExitCode::SUCCESS;
+    }
+    let repos = scoped.as_slice();
     let by_id: HashMap<String, Symbol> =
         symbols.iter().map(|s| (s.id.render(), s.clone())).collect();
     let g = comindly::graph::CodeGraph::build(&symbols, &edges);
@@ -1047,12 +1075,81 @@ fn read_graph_or_err(from: Option<&str>) -> Result<(Vec<Symbol>, Vec<Edge>), ()>
 }
 
 /// `comindly find <query>` — locate symbols by name/descriptor/path substring.
-fn cmd_find(query: &str, from: Option<&str>, repos: &[String]) -> ExitCode {
+fn cmd_find(query: &str, from: Option<&str>, repos: &[String], teams: &[String]) -> ExitCode {
     let Ok((symbols, edges)) = read_graph_or_err(from) else {
         return ExitCode::FAILURE;
     };
+    let Some(scoped) = team_scope(from, &symbols, repos, teams) else {
+        return ExitCode::FAILURE;
+    };
+    if !teams.is_empty() && scoped.is_empty() {
+        comindly::ui::note("no indexed repository belongs to these teams");
+        return ExitCode::SUCCESS;
+    }
+    let repos = scoped.as_slice();
     let g = comindly::graph::CodeGraph::build(&symbols, &edges);
     render_find(query, &comindly::answers::find(&g, query, repos))
+}
+
+/// `repos` narrowed to the indexed repositories the given teams label; `None` after explaining why not.
+fn team_scope(
+    from: Option<&str>,
+    symbols: &[Symbol],
+    repos: &[String],
+    teams: &[String],
+) -> Option<Vec<String>> {
+    let selected = comindly::team::parse_selection(Some(&teams.join(",")));
+    if selected.is_empty() {
+        return Some(repos.to_vec());
+    }
+    let root = comindly::config::Config::load().index_dir(from);
+    let settings = match comindly::rt::block_on(comindly::team::load(&root)) {
+        Ok(stored) => stored.settings,
+        Err(e) => {
+            comindly::ui::err(&format!("cannot read the teams: {e:#}"));
+            return None;
+        }
+    };
+    let unknown: Vec<&String> = selected
+        .iter()
+        .filter(|s| s.as_str() != comindly::team::UNASSIGNED)
+        .filter(|s| {
+            !settings
+                .team_list()
+                .iter()
+                .any(|t| t.name.eq_ignore_ascii_case(s))
+        })
+        .collect();
+    if !unknown.is_empty() {
+        let known: Vec<&str> = settings
+            .team_list()
+            .iter()
+            .map(|t| t.name.as_str())
+            .collect();
+        comindly::ui::err(&format!(
+            "no team named {}; teams: {}",
+            unknown
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+            if known.is_empty() {
+                "none set up".to_string()
+            } else {
+                known.join(", ")
+            }
+        ));
+        return None;
+    }
+    let indexed: BTreeSet<&str> = symbols.iter().map(|s| s.repo.0.as_str()).collect();
+    Some(
+        indexed
+            .into_iter()
+            .filter(|r| settings.in_view(r, &selected))
+            .filter(|r| repos.is_empty() || repos.iter().any(|x| x == r))
+            .map(str::to_string)
+            .collect(),
+    )
 }
 
 fn render_find(query: &str, hits: &[comindly::graph::Node]) -> ExitCode {
@@ -2813,7 +2910,14 @@ fn plural(n: usize, word: &str) -> String {
     if n == 1 {
         format!("{n} {word}")
     } else {
-        format!("{n} {word}s")
+        format!(
+            "{n} {word}{}",
+            if word.ends_with("ch") || word.ends_with('s') {
+                "es"
+            } else {
+                "s"
+            }
+        )
     }
 }
 

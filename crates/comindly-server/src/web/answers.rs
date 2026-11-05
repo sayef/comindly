@@ -31,8 +31,31 @@ fn repos(r: &Option<String>) -> Vec<String> {
         .collect()
 }
 
+/// The `repos` filter narrowed to the teams' repositories; `None` when the teams label none of them.
+fn scope(s: &super::Session, q: &api::AnswerQuery) -> Option<Vec<String>> {
+    let repos = repos(&q.repos);
+    let selected = crate::team::parse_selection(q.teams.as_deref());
+    if selected.is_empty() {
+        return Some(repos);
+    }
+    let teams = s.teams.read().map(|t| t.clone()).unwrap_or_default();
+    let scoped: Vec<String> = s
+        .data
+        .graph
+        .repos()
+        .into_iter()
+        .map(|(r, _)| r)
+        .filter(|r| teams.in_view(r, &selected))
+        .filter(|r| repos.is_empty() || repos.contains(r))
+        .collect();
+    (!scoped.is_empty()).then_some(scoped)
+}
+
 pub(super) async fn find(Cur(s): Cur, Query(q): Query<api::AnswerQuery>) -> Json<Vec<api::Node>> {
-    Json(crate::answers::find(&s.data.graph, &q.q, &repos(&q.repos)))
+    let Some(repos) = scope(&s, &q) else {
+        return Json(Vec::new());
+    };
+    Json(crate::answers::find(&s.data.graph, &q.q, &repos))
 }
 
 pub(super) async fn search(Cur(s): Cur, Query(q): Query<api::AnswerQuery>) -> Response {
@@ -43,7 +66,9 @@ pub(super) async fn search(Cur(s): Cur, Query(q): Query<api::AnswerQuery>) -> Re
             .await
             .context("the embedding model could not be loaded")?;
         let extras = s.extras().await;
-        let repos = repos(&q.repos);
+        let Some(repos) = scope(&s, &q) else {
+            return anyhow::Ok(None);
+        };
         let hits = crate::search::hybrid(
             tables,
             &engine.by_id,

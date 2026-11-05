@@ -265,10 +265,11 @@ function SecretRow({ s, canStore }: { s: SecretState; canStore: boolean }) {
         {s.source === "stored" && (
           <span className="text-xs text-muted-foreground">
             by {s.updated_by}, {date(s.updated)}
+            {s.replaces_deployment && ", used instead of the deployment's"}
           </span>
         )}
       </div>
-      {s.source !== "deployment" && canStore && (
+      {canStore && (
         <form
           className="flex gap-2"
           onSubmit={(e) => {
@@ -283,7 +284,9 @@ function SecretRow({ s, canStore }: { s: SecretState; canStore: boolean }) {
             aria-label={s.label}
             value={value}
             onChange={(e) => setValue(e.target.value)}
-            placeholder={s.source === "stored" ? "Replace with a new value…" : "Paste the token or key…"}
+            placeholder={
+              s.source === "stored" ? "Replace with a new value…" : s.source === "deployment" ? "Paste one to use instead of the deployment's…" : "Paste the token or key…"
+            }
             className="flex-1"
           />
           <Button type="submit" variant="outline" size="sm" disabled={!value.trim()} loading={save.isPending && !removing}>
@@ -294,7 +297,11 @@ function SecretRow({ s, canStore }: { s: SecretState; canStore: boolean }) {
               type="button"
               variant="ghost"
               size="sm"
-              question={`Remove the stored value for ${s.label}? The server stops using it.`}
+              question={
+                s.replaces_deployment
+                  ? `Remove the stored value for ${s.label}? The deployment's is used again.`
+                  : `Remove the stored value for ${s.label}? The server stops using it.`
+              }
               confirmLabel="Remove"
               loading={removing}
               onConfirm={() => save.mutate("")}
@@ -332,7 +339,7 @@ export function IntegrationsPage() {
       <SettingsTabs />
       <Section
         title="Tokens and keys"
-        description="What the server uses to list and clone repositories and to call the LLM. Values never come back to the browser. Ones the deployment provides win and are changed where it keeps its secrets."
+        description="What the server uses to list and clone repositories and to call the LLM. Values never come back to the browser. One stored here is used instead of one the deployment provides."
       >
         {!list.data.can_store && (
           <p className="text-xs text-muted-foreground">

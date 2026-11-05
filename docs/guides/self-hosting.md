@@ -169,8 +169,8 @@ says so and asks to run `comindly login` again.
 ## Tokens and keys
 
 Settings → Integrations shows each token the server uses and where it comes from, never its value.
-One the deployment provides wins and is read-only there; otherwise an admin pastes one, and it is
-stored encrypted with `COMINDLY_SECRET_KEY`. Read-only tokens are enough: a GitLab group access token
+An admin pastes one there, and it is stored encrypted with `COMINDLY_SECRET_KEY`. A stored one is
+used instead of one the deployment provides; removing it goes back to the deployment's. Read-only tokens are enough: a GitLab group access token
 with `read_repository` and `read_api`, or a fine-grained GitHub token with Contents and Metadata read.
 
 ## Audit log

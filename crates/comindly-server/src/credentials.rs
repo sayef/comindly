@@ -72,11 +72,12 @@ pub fn llm_key(
     server: Option<&crate::server::Server>,
 ) -> (Option<String>, Source) {
     if let Some(server) = server {
-        if let Some(k) = server.config.llm_key.clone() {
-            return (Some(k), Source::Environment);
+        // One an admin stored in the app replaces the deployment's.
+        if let Some(k) = server.secrets.secret(crate::server::LLM_SECRET) {
+            return (Some(k), Source::Server);
         }
-        return match server.secrets.secret(crate::server::LLM_SECRET) {
-            Some(k) => (Some(k), Source::Server),
+        return match server.config.llm_key.clone() {
+            Some(k) => (Some(k), Source::Environment),
             None => (None, Source::None),
         };
     }

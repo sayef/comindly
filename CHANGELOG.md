@@ -19,8 +19,13 @@ All notable changes to this project are documented here. The format follows
   and on each contract, ledger record and repository: the answer the matching MCP tool gives an
   agent, to read or copy. It replaces the symbol page's "Copy context for an agent".
 
+- `comindly search` and `find` take `--team` (repeatable or comma-separated; `none` for unlabelled
+  repositories), locally and against a server.
+
 ### Changed
 
+- Settings → Integrations: an admin can store a token or LLM key even when the deployment provides
+  one; the stored one is used instead, and removing it goes back to the deployment's.
 - Indexing status hangs under the header's right corner instead of floating at the bottom; the
   ledger's and conventions' add buttons moved into their filter rows.
 
@@ -28,6 +33,7 @@ All notable changes to this project are documented here. The format follows
 
 - `comindly init-hooks cursor`, `gemini`, `codex` and `generic` print the hook commands to run, as
   documented, instead of refusing.
+- "8 matches", not "8 matchs".
 
 ## [0.5.0-beta.2](https://github.com/sayef/comindly/compare/v0.5.0-beta.1...v0.5.0-beta.2) - 2026-11-05
 

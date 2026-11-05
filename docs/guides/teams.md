@@ -61,3 +61,9 @@ Agents keep seeing the whole org. The MCP tools `search`, `find`, `repos`, `cont
 take an optional `team` argument (comma-separated names, `none` for unlabelled repositories);
 `repos` lists the teams of each repository, and `ripple` counts the impact per team next to per
 repository. A review bot's instructions for one repository can say which team to prefer.
+
+In a terminal, `comindly search` and `comindly find` take `--team` the same way:
+
+```sh
+comindly find PaymentClient --team payments,platform
+```

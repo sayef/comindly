@@ -249,9 +249,11 @@ impl Server {
         })
     }
 
-    /// A git host's token: the deployment's, else the one stored here.
+    /// A git host's token: the one stored here, else the deployment's.
     pub fn git_token(&self, host: &str) -> Option<String> {
-        crate::config::env_token(host).or_else(|| self.secrets.secret(&git_secret(host)))
+        self.secrets
+            .secret(&git_secret(host))
+            .or_else(|| crate::config::env_token(host))
     }
 }
 
