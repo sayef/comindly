@@ -235,13 +235,6 @@ export function Layout() {
                 </button>
               </div>
             )}
-            {!narrow && (
-              <p className="nums px-2.5 pt-2 text-xs text-muted-foreground">
-                {overview.data
-                  ? `${overview.data.repos.length} repositories, ${overview.data.symbols.toLocaleString()} symbols`
-                  : "Loading the index…"}
-              </p>
-            )}
           </div>
     </>
   );
@@ -305,10 +298,9 @@ export function Layout() {
           </button>
           {/* Equal side columns keep the search centred whatever shows up here. */}
           <div className="flex min-w-0 items-center justify-end gap-3 overflow-hidden">
-            <Activity />
             {overview.data && !overview.data.writable && <Badge variant="outline">Read-only</Badge>}
             {version > 0 && (
-              <span className="nums hidden whitespace-nowrap text-xs text-muted-foreground xl:inline" title={latest ?? undefined}>
+              <span className="nums hidden shrink-0 whitespace-nowrap text-xs text-muted-foreground xl:inline" title={latest ?? undefined}>
                 Index version {version}, {ago(latest)}
               </span>
             )}
@@ -322,6 +314,10 @@ export function Layout() {
             <Outlet />
           </div>
         </main>
+      </div>
+      {/* Running and queued indexing, out of the header's way. */}
+      <div className="pointer-events-none fixed right-[max(1rem,env(safe-area-inset-right))] bottom-[max(1rem,env(safe-area-inset-bottom))] z-40 [&>*]:pointer-events-auto">
+        <Activity />
       </div>
       <CommandPalette open={palette} onOpenChange={setPalette} />
     </div>
