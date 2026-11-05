@@ -14,6 +14,7 @@ import {
   Users,
 } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { TeamChips } from "@/components/team-chips";
 import { RepoDot } from "@/components/symbol";
 import { Link } from "react-router";
 import { IndexLog } from "@/components/index-log";
@@ -31,6 +32,7 @@ import { ago, bytes, compact, date } from "@/lib/utils";
 import { useAbort } from "@/lib/abort";
 import { useAccess } from "@/lib/me";
 import { ApiError, api, type NeedsToken, pickFolder, type ScanHit, type TeamSettings } from "@/lib/api";
+import { useTeams } from "@/lib/teams";
 
 const field = "flex flex-col gap-1.5 text-sm font-semibold";
 
@@ -549,7 +551,21 @@ function Symbols({ n }: { n: number }) {
 }
 
 /** One repository: name and status, then what is indexed, then where it lives; actions at the end. */
-function RepoRow({ name, status, meta, where, actions }: { name: string; status: ReactNode; meta: ReactNode; where?: string | null; actions?: ReactNode }) {
+function RepoRow({
+  name,
+  status,
+  meta,
+  where,
+  actions,
+  teams,
+}: {
+  name: string;
+  status: ReactNode;
+  meta: ReactNode;
+  where?: string | null;
+  actions?: ReactNode;
+  teams?: ReactNode;
+}) {
   return (
     <div className="flex flex-wrap items-start gap-x-3 gap-y-2 border-b px-5 py-3 last:border-0 max-sm:px-4">
       <div className="min-w-0 flex-1 basis-48">
@@ -566,6 +582,7 @@ function RepoRow({ name, status, meta, where, actions }: { name: string; status:
             {where}
           </div>
         )}
+        {teams}
       </div>
       {actions && <div className="ml-auto flex flex-wrap justify-end gap-1.5">{actions}</div>}
     </div>
@@ -576,6 +593,9 @@ export function RepositoriesPage() {
   const qc = useQueryClient();
   const { server, admin } = useAccess();
   const repos = useQuery({ queryKey: ["repos"], queryFn: api.repos });
+  const teams = useTeams();
+  const shown = (repos.data?.repos ?? []).filter((r) => teams.inView(r.name));
+  const hidden = (repos.data?.repos.length ?? 0) - shown.length;
   const [dialog, setDialog] = useState<"add" | "scan" | "org" | null>(null);
   const teamMissing = repos.data?.team_missing ?? [];
   const addTeam = useMutation({
@@ -678,10 +698,19 @@ export function RepositoriesPage() {
                 : "No repositories yet. Add a folder, scan one, or add from GitHub or GitLab."}
           </p>
         )}
-        {repos.data?.repos.map((r) => (
+        {hidden > 0 && (
+          <p className="flex flex-wrap items-center gap-2 border-b px-5 py-2.5 text-xs text-muted-foreground max-sm:px-4">
+            {hidden === 1 ? "One repository is" : `${hidden} repositories are`} outside the teams in view.
+            <button className="underline underline-offset-2 hover:text-foreground" onClick={() => teams.select([])}>
+              Show everyone's
+            </button>
+          </p>
+        )}
+        {shown.map((r) => (
           <RepoRow
             key={r.path}
             name={r.name}
+            teams={teams.setUp || admin ? <TeamChips repo={r.name} admin={admin} /> : undefined}
             status={
               <>
                 {r.managed && !r.cloned && !r.indexed_commit && <Badge variant="outline">Cloned when indexing</Badge>}
@@ -728,6 +757,7 @@ export function RepositoriesPage() {
           <RepoRow
             key={r.name}
             name={r.name}
+            teams={teams.setUp || admin ? <TeamChips repo={r.name} admin={admin} /> : undefined}
             status={
               (repos.data?.repos.length ?? 0) > 0 && <span className="text-xs whitespace-nowrap text-muted-foreground">{server ? "Not on this server" : "Not on this machine"}</span>
             }
