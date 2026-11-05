@@ -89,6 +89,9 @@ pub struct AnswerQuery {
     pub q: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repos: Option<String>,
+    /// Only repositories of these teams: comma-separated names, `none` for unlabelled ones.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub teams: Option<String>,
 }
 
 /// `answer/why`, `answer/flow` and `answer/explore`.

@@ -73,12 +73,14 @@ pub fn dispatch(c: &Client, cmd: &Cmd) -> Option<ExitCode> {
             query,
             index_dir: None,
             repo,
+            team,
         } => show(
             c.get(
                 "/api/v1/answer/find",
                 &api::AnswerQuery {
                     q: query.clone(),
                     repos: csv(repo),
+                    teams: csv(team),
                 },
             ),
             |hits: Vec<comindly::graph::Node>| crate::render_find(query, &hits),
@@ -87,6 +89,7 @@ pub fn dispatch(c: &Client, cmd: &Cmd) -> Option<ExitCode> {
             query,
             index_dir: None,
             repo,
+            team,
             format,
             md,
         } => {
@@ -101,6 +104,7 @@ pub fn dispatch(c: &Client, cmd: &Cmd) -> Option<ExitCode> {
                     &api::AnswerQuery {
                         q: query.clone(),
                         repos: csv(repo),
+                        teams: csv(team),
                     },
                 ),
                 |s| crate::render_search(&query, &s, markdown),
