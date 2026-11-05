@@ -743,21 +743,24 @@ export function RepositoriesPage() {
             }
             where={r.managed ? r.remote : r.path}
             actions={
-              admin && (
-                <ConfirmButton
-                  variant="ghost"
-                  size="icon"
-                  className="size-8"
-                  aria-label={`Remove ${r.name}`}
-                  title="Remove from the list (your folder stays)"
-                  question={`Remove ${r.name}?`}
-                  confirmLabel="Remove"
-                  loading={remove.isPending && remove.variables === r.path}
-                  onConfirm={() => remove.mutate(r.path)}
-                >
-                  {!(remove.isPending && remove.variables === r.path) && <Trash2 />}
-                </ConfirmButton>
-              )
+              <>
+                <AgentView icon asks={[{ label: "Conventions", tool: "guide", args: { focus: r.name } }]} />
+                {admin && (
+                  <ConfirmButton
+                    variant="ghost"
+                    size="icon"
+                    className="size-8"
+                    aria-label={`Remove ${r.name}`}
+                    title="Remove from the list (your folder stays)"
+                    question={`Remove ${r.name}?`}
+                    confirmLabel="Remove"
+                    loading={remove.isPending && remove.variables === r.path}
+                    onConfirm={() => remove.mutate(r.path)}
+                  >
+                    {!(remove.isPending && remove.variables === r.path) && <Trash2 />}
+                  </ConfirmButton>
+                )}
+              </>
             }
           />
         ))}

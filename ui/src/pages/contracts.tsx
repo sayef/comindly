@@ -160,6 +160,11 @@ export function ContractsPage() {
                           {k === "table" ? "Table" : k.toUpperCase()}
                         </Badge>
                         <SymbolLink node={{ ...v.contract, name: v.contract.name.split(":").slice(1).join(":") }} />
+                        <AgentView
+                          icon
+                          className="ml-auto"
+                          asks={[{ label: "Contract", tool: "contracts", args: { kind: k, query: v.contract.name.split(":").slice(1).join(":") } }]}
+                        />
                       </div>
                     </Td>
                     <Td slot="desktop">

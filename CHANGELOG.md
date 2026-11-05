@@ -13,9 +13,9 @@ All notable changes to this project are documented here. The format follows
   `comindly init-agents` prints it for a repository's `AGENTS.md` (`--skill` for a Claude Code
   skill), and the Get started page shows both to copy.
 
-- **As an agent sees it** on the overview, contracts, flows, conventions, repositories and every
-  symbol: the answer the matching MCP tool gives an agent for what the page shows, to read or copy.
-  It replaces the symbol page's "Copy context for an agent".
+- **View as agent** on the overview, contracts, flows, conventions, repositories and every symbol,
+  and on each contract, ledger record and repository: the answer the matching MCP tool gives an
+  agent, to read or copy. It replaces the symbol page's "Copy context for an agent".
 
 ### Changed
 

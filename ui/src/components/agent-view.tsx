@@ -7,12 +7,12 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Toggle, ToggleGroup } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
-import { sentence } from "@/lib/utils";
+import { cn, sentence } from "@/lib/utils";
 
 export type AgentAsk = { label: string; tool: string; args?: Record<string, unknown> };
 
 /** What an agent gets from comindly about what the page shows: the MCP tool's own answer, ready to copy. */
-export function AgentView({ asks, className }: { asks: AgentAsk[]; className?: string }) {
+export function AgentView({ asks, className, icon = false }: { asks: AgentAsk[]; className?: string; icon?: boolean }) {
   const [open, setOpen] = useState(false);
   const [pick, setPick] = useState(0);
   const ask = asks[Math.min(pick, asks.length - 1)];
@@ -29,13 +29,26 @@ export function AgentView({ asks, className }: { asks: AgentAsk[]; className?: s
   const copied = answer.data !== undefined && state(answer.data) === "copied";
   return (
     <>
-      <Button size="sm" variant="outline" className={className} onClick={() => setOpen(true)} title="The answer an agent gets from comindly's MCP tools">
-        <Bot /> As an agent sees it
-      </Button>
+      {icon ? (
+        <Button
+          size="icon"
+          variant="ghost"
+          className={cn("size-7 shrink-0 text-muted-foreground hover:text-foreground", className)}
+          onClick={() => setOpen(true)}
+          aria-label="View as agent"
+          title="View as agent: what comindly's MCP tools tell an agent about this"
+        >
+          <Bot />
+        </Button>
+      ) : (
+        <Button size="sm" variant="outline" className={className} onClick={() => setOpen(true)} title="What comindly's MCP tools tell an agent about what this page shows">
+          <Bot /> View as agent
+        </Button>
+      )}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="top-[8%] flex max-h-[84vh] max-w-3xl flex-col gap-3 p-5">
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <DialogTitle className="text-[17px] font-semibold">As an agent sees it</DialogTitle>
+            <DialogTitle className="text-[17px] font-semibold">Agent context</DialogTitle>
             <span className="text-xs text-muted-foreground">
               The MCP tool <code className="font-mono text-foreground">{ask.tool}</code> answers this
             </span>

@@ -176,13 +176,14 @@ runs and waits. Finished actions appear as toasts in the bottom-right corner.
 
 ![A run indexing and another queued, under the header's right corner](../assets/screenshots/indexing.webp)
 
-**As an agent sees it**, on the overview, contracts, flows, conventions, repositories and every
-symbol, shows the answer an agent gets from the matching MCP tool for what the page shows, with
-the page's team and filters applied. Copy it into an agent that is not connected to comindly, or
+**View as agent**, on the overview, contracts, flows, conventions, repositories and every symbol,
+shows the answer an agent gets from the matching MCP tool for what the page shows, with the page's
+team and filters applied. The small robot icon on each contract, ledger record and repository does
+the same for that one item. Copy it into an agent that is not connected to comindly, or
 use it to see what a connected one is told.
 
-![As an agent sees it: the context pack an agent gets before changing a symbol](../assets/screenshots/agent-view.webp#only-light)
-![As an agent sees it: the context pack an agent gets before changing a symbol](../assets/screenshots/agent-view-dark.webp#only-dark)
+![Agent context: the context pack an agent gets before changing a symbol](../assets/screenshots/agent-view.webp#only-light)
+![Agent context: the context pack an agent gets before changing a symbol](../assets/screenshots/agent-view-dark.webp#only-dark)
 
 Press <kbd>⌘K</kbd> (<kbd>Ctrl K</kbd>) anywhere to search: by name, and by describing what you are
 looking for ("where do we retry HTTP calls"), which uses the same hybrid search as the MCP `search`

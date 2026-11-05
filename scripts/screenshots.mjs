@@ -97,7 +97,7 @@ for (const theme of mode === "server" ? [] : ["light", "dark"]) {
   if (focus) {
     await go(`/explorer?focus=${encodeURIComponent(focus)}`, 3500);
     await shot(`explorer${suffix}`);
-    await evaluate(`[...document.querySelectorAll("button")].find((b) => b.textContent.includes("As an agent sees it"))?.click()`);
+    await evaluate(`[...document.querySelectorAll("button")].find((b) => b.textContent.includes("View as agent"))?.click()`);
     await sleep(2500);
     await shot(`agent-view${suffix}`);
   }

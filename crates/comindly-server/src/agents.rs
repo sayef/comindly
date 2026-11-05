@@ -1,26 +1,70 @@
 //! When and how agents should use comindly's tools: one text for MCP, hooks, files and the app.
 
-/// The guidance itself, as markdown without a heading.
-pub const GUIDE: &str = "\
-This codebase is indexed by comindly: code intelligence across all of the team's repositories. \
-Use its MCP tools instead of grepping or guessing whenever a question reaches beyond the file in front of you.
+/// The guidance itself, as markdown whose headings start at `###`.
+pub const GUIDE: &str = r#"comindly indexes all of the team's repositories into one graph and serves it over MCP. It knows
+what this file cannot tell you: who calls code in other repositories, which services talk through
+which HTTP routes, queues, topics, buckets and tables, how each repository writes its code, and what
+the team recorded about the code (decisions, constraints, failed attempts, traps). Its answers come
+from parsing the code, so they are exact for the indexed version.
 
-- Before changing a function, class, route or schema: `ripple` for what depends on it in every repository, \
-`preflight` for recorded constraints, affected contracts and companion files, `context_pack` for what to read first.
-- Before editing code with history: `why` for the decisions, constraints and failed attempts the team recorded.
-- To find code: `find` by name, `search` by describing it; then `zoom` on the returned `id` for its definition, \
-callers, callees and members.
-- To follow behaviour: `thread` for the call chain from a symbol, `flow` for a narrated walkthrough, \
-`contracts` for who provides and consumes an HTTP route, queue, topic, bucket or table.
-- To match the codebase: `guide` for the conventions measured in each repository.
-- To get oriented: `repos` for what is indexed, `suggest` for questions worth asking. \
-`search`, `find`, `repos`, `contracts` and `suggest` take `team` to stay within one team's repositories.
-- When you learn something a later change must know (a decision, a constraint, a dead end), offer to record it \
-with `remember`; `review` confirms or retires records. Ask the user before writing either.
+### When to use it
 
-Pass the `id` that `find` or `search` returns to the other tools. \
-Name the repository and symbol when an answer relies on comindly.
-";
+- Before changing a function, class, route, message or table that anything else might use.
+- When a question reaches beyond the files you have open: "who calls this", "where is this
+  handled", "what consumes this queue", "how does a request get from A to B".
+- Before editing code that looks odd or fragile: someone may have recorded why it is that way, or
+  what already failed.
+- When you need to write code the way this codebase does: naming, structure, logging, tests.
+- When you are new to an area and need to find your way.
+
+Do not use it for questions the open files answer, or for code that is not committed yet: the
+index reflects each repository's default branch as of the last indexing.
+
+### How to work with it
+
+**Before changing code**
+1. `find` the symbol by name (or `search` by describing it) to get its `id`.
+2. `preflight` with the files and symbols you plan to change: recorded constraints and dead ends,
+   the contracts the code serves, what depends on it, and companion files that usually change with it.
+3. `ripple` on each symbol whose behaviour or signature changes: everything that depends on it, in
+   every repository, across service contracts. Mention callers in other repositories to the user.
+4. `context_pack` for the smallest set of code to read before editing, within a token budget.
+5. `guide` for the repository's conventions, and follow them.
+
+**Understanding behaviour**
+- `zoom` on an `id`: its definition, callers, callees, members and contracts in one answer.
+- `thread` follows the calls from a symbol; `flow` gives a written walkthrough of a whole flow,
+  including hops over HTTP and queues into other services.
+- `contracts` lists routes, queues, topics, buckets and tables with who provides and who uses each;
+  `kind` narrows to `http`, `sqs`, `sns`, `s3` or `table`, `query` filters by name, `dangling` shows
+  ones missing a side.
+
+**Finding your way**
+- `repos` lists the indexed repositories, their size and teams; `suggest` offers questions worth
+  asking about an area (`about`).
+- `search`, `find`, `repos`, `contracts` and `suggest` take `team` (comma-separated names) to stay
+  within one team's repositories.
+
+### The team's records
+
+- `why` on a symbol returns what the team recorded about it, with status and trust. Treat active
+  records as requirements unless the user says otherwise.
+- Trust: T3 means a person wrote or confirmed it, T2 an agent with evidence, T1 an agent without.
+  Records marked "from <team>, unconfirmed" come from another team and wait for the owners to confirm.
+- Stale or moved records point at code that changed since they were written: check them against the
+  code before relying on them.
+- When you learn something a later change must know (a decision and its reason, a constraint, an
+  approach that failed and why, a trap), offer to record it with `remember`: one factual title, the
+  symbols it is about (`on`), and evidence such as `commit:<sha>` or `mr:!123` (required for a failed
+  attempt). `review` confirms, archives, invalidates, supersedes or disputes a record by its id.
+  Ask the user before writing either.
+
+### Habits
+
+- Pass the `id` from `find` or `search` to the other tools; names alone can be ambiguous.
+- Name the repository and symbol when an answer relies on comindly, so the user can check it.
+- If a tool finds nothing, say so instead of guessing; the code may not be indexed yet.
+"#;
 
 /// A section for a repository's `AGENTS.md` or `CLAUDE.md`.
 pub fn agents_md() -> String {
@@ -30,8 +74,8 @@ pub fn agents_md() -> String {
 /// A Claude Code skill, for `.claude/skills/comindly/SKILL.md`.
 pub fn skill() -> String {
     format!(
-        "---\nname: comindly\ndescription: \"Use comindly's MCP tools for questions about this codebase that reach \
-beyond the current file: what depends on code before changing it, recorded decisions, service contracts, \
-call chains and conventions.\"\n---\n\n# comindly\n\n{GUIDE}"
+        "---\nname: comindly\ndescription: \"How and when to use comindly's MCP tools: before changing shared code, \
+for questions that reach beyond the current file, for service contracts, call chains, conventions and the \
+team's recorded decisions.\"\n---\n\n# comindly\n\n{GUIDE}"
     )
 }

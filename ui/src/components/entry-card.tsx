@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { AgentView } from "@/components/agent-view";
 import { Archive, Ban, Check, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { ConfirmButton } from "@/components/confirm";
@@ -109,6 +110,7 @@ export function EntryCard({
             </span>
           </span>
         ))}
+        <AgentView icon asks={r.anchors.map((a) => ({ label: a.name, tool: "why", args: { focus: a.symbol } }))} />
       </dd>
     </div>
   );
