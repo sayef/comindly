@@ -1,7 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import {
   BookText,
-  ChevronsUpDown,
   Boxes,
   Compass,
   History,
@@ -182,28 +181,22 @@ export function Layout() {
             )}
           </div>
 
-          {narrow ? (
-            <Link
-              to="/settings"
-              className="flex size-11 items-center justify-center self-center rounded-lg border bg-card text-sm font-semibold transition-colors duration-100 hover:border-input"
-              title={`Org: ${teamName ?? "no org yet"}`}
-              aria-label={`Org settings: ${teamName ?? "no org yet"}`}
-            >
-              {teamName ? teamName.slice(0, 1).toUpperCase() : <Users className="size-4 text-muted-foreground" />}
-            </Link>
-          ) : (
-            <Link
-              to="/settings"
-              className="flex min-h-11 items-center justify-between gap-2 rounded-lg border bg-card px-2.5 py-1.5 transition-colors duration-100 hover:border-input"
-              title="Org settings"
-            >
-              <span className="flex min-w-0 flex-col">
+          <div className="flex flex-col gap-2">
+            {narrow ? (
+              <span
+                className="flex size-11 items-center justify-center self-center text-sm font-semibold"
+                title={`Org: ${teamName ?? "no org yet"}`}
+              >
+                {teamName ? teamName.slice(0, 1).toUpperCase() : <Users className="size-4 text-muted-foreground" />}
+              </span>
+            ) : (
+              <span className="flex min-w-0 flex-col px-2.5">
                 <span className="eyebrow">Org</span>
                 <span className="truncate text-sm font-semibold">{teamName ?? "No org yet"}</span>
               </span>
-              <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
-            </Link>
-          )}
+            )}
+            <TeamPicker admin={admin} narrow={narrow} />
+          </div>
 
           <nav className="flex flex-col gap-0.5" aria-label="Main">
             {NAV.map((n) => (
@@ -302,9 +295,8 @@ export function Layout() {
           {/* Equal side columns keep the search centred whatever shows up here. */}
           <div className="flex min-w-0 items-center justify-end gap-3 overflow-hidden">
             {overview.data && !overview.data.writable && <Badge variant="outline">Read-only</Badge>}
-            <TeamPicker admin={admin} />
             {version > 0 && (
-              <span className="nums hidden shrink-0 whitespace-nowrap text-xs text-muted-foreground 2xl:inline" title={latest ?? undefined}>
+              <span className="nums hidden shrink-0 whitespace-nowrap text-xs text-muted-foreground xl:inline" title={latest ?? undefined}>
                 Index version {version}, {ago(latest)}
               </span>
             )}

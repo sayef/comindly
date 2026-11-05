@@ -7,10 +7,10 @@ import { UNASSIGNED, useTeams } from "@/lib/teams";
 import { cn } from "@/lib/utils";
 
 /** Which teams' repositories every page shows; signed-in members also join and leave teams here. */
-export function TeamPicker({ admin }: { admin: boolean }) {
+export function TeamPicker({ admin, narrow }: { admin: boolean; narrow: boolean }) {
   const t = useTeams();
   const qc = useQueryClient();
-  const [open, setOpen] = useState<{ top: number; right: number } | null>(null);
+  const [open, setOpen] = useState<{ top: number; left: number } | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const join = useMutation({
     mutationFn: api.saveMyTeams,
@@ -34,9 +34,11 @@ export function TeamPicker({ admin }: { admin: boolean }) {
   if (!t.teams.length) {
     if (!admin) return null;
     return (
-      <Link to="/settings#teams" className="hidden shrink-0 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline lg:inline">
-        Set up teams
-      </Link>
+      !narrow && (
+        <Link to="/settings#teams" className="px-2.5 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">
+          Set up teams
+        </Link>
+      )
     );
   }
 
@@ -51,20 +53,28 @@ export function TeamPicker({ admin }: { admin: boolean }) {
       : `${t.selected.length} teams`;
 
   return (
-    <div ref={root} className="relative shrink-0">
+    <div ref={root} className={cn("relative", narrow && "self-center")}>
       <button
         onClick={(e) => {
           const r = e.currentTarget.getBoundingClientRect();
-          setOpen((o) => (o ? null : { top: r.bottom + 6, right: window.innerWidth - r.right }));
+          setOpen((o) => (o ? null : narrow ? { top: r.top, left: r.right + 8 } : { top: r.bottom + 6, left: r.left }));
         }}
         aria-haspopup="true"
         aria-expanded={!!open}
-        title="Which teams' repositories to show"
-        className="flex h-9 max-w-44 items-center gap-1.5 rounded-md border bg-card px-2.5 text-sm transition-colors duration-100 hover:border-input"
+        title={narrow ? `Teams in view: ${label}` : "Which teams' repositories to show"}
+        aria-label={narrow ? `Teams in view: ${label}` : undefined}
+        className={cn(
+          "flex items-center rounded-lg border bg-card text-sm transition-colors duration-100 hover:border-input",
+          narrow ? "size-11 justify-center" : "min-h-10 w-full gap-2 px-2.5",
+        )}
       >
         <Users className="size-3.5 shrink-0 text-muted-foreground" />
-        <span className="truncate">{label}</span>
-        <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+        {!narrow && (
+          <>
+            <span className="flex-1 truncate text-left">{label}</span>
+            <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+          </>
+        )}
       </button>
       {open && (
         <div role="group" aria-label="Teams in view" style={open} className="fixed z-50 w-64 rounded-lg border bg-popover p-1.5 text-sm shadow-float">
