@@ -176,6 +176,11 @@ runs and waits. Finished actions appear as toasts in the bottom-right corner.
 
 ![A run indexing and another queued, under the header's right corner](../assets/screenshots/indexing.webp)
 
+**As an agent sees it**, on the overview, contracts, flows, conventions, repositories and every
+symbol, shows the answer an agent gets from the matching MCP tool for what the page shows, with
+the page's team and filters applied. Copy it into an agent that is not connected to comindly, or
+use it to see what a connected one is told.
+
 Press <kbd>⌘K</kbd> (<kbd>Ctrl K</kbd>) anywhere to search: by name, and by describing what you are
 looking for ("where do we retry HTTP calls"), which uses the same hybrid search as the MCP `search`
 tool. Graphs scroll with the page; pinch or <kbd>⌘</kbd>/<kbd>Ctrl</kbd> and scroll to zoom, drag to

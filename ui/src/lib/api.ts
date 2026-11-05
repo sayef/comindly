@@ -562,6 +562,12 @@ export const api = {
     if (!r.ok) throw await failure(path, r);
     return r.text();
   },
+  agent: async (tool: string, args: Record<string, unknown>) => {
+    const path = `/api/v1/agent?tool=${encodeURIComponent(tool)}&args=${encodeURIComponent(JSON.stringify(args))}`;
+    const r = await fetch(path);
+    if (!r.ok) throw await failure(path, r);
+    return r.text();
+  },
   node: (focus: string) => get<NodeDetail>(`/api/v1/node?focus=${encodeURIComponent(focus)}`),
   remember: (r: {
     kind: string;

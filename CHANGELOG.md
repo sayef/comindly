@@ -13,6 +13,15 @@ All notable changes to this project are documented here. The format follows
   `comindly init-agents` prints it for a repository's `AGENTS.md` (`--skill` for a Claude Code
   skill), and the Get started page shows both to copy.
 
+- **As an agent sees it** on the overview, contracts, flows, conventions, repositories and every
+  symbol: the answer the matching MCP tool gives an agent for what the page shows, to read or copy.
+  It replaces the symbol page's "Copy context for an agent".
+
+### Changed
+
+- Indexing status hangs under the header's right corner instead of floating at the bottom; the
+  ledger's and conventions' add buttons moved into their filter rows.
+
 ### Fixed
 
 - `comindly init-hooks cursor`, `gemini`, `codex` and `generic` print the hook commands to run, as

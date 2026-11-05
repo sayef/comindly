@@ -8,7 +8,8 @@ export function PageHeader({ title, children, actions }: { title: ReactNode; chi
         <h1 className="text-[26px] leading-tight font-semibold tracking-[-0.02em] [overflow-wrap:anywhere]">{title}</h1>
         {children && <p className="text-sm text-pretty text-muted-foreground">{children}</p>}
       </div>
-      {actions && <div className="flex shrink-0 flex-wrap gap-2 max-sm:w-full">{actions}</div>}
+      {/* At the description's level, clear of the indexing tabs that hang from the app header. */}
+      {actions && <div className="flex shrink-0 flex-wrap gap-2 self-end max-sm:w-full">{actions}</div>}
     </header>
   );
 }

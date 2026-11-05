@@ -446,9 +446,9 @@ function Instructions({ s, server }: { s: Setup | undefined; server: boolean }) 
       </div>
       <ToggleGroup label="Format" value={form} onValueChange={setForm} className="self-start">
         <Toggle value="agents">AGENTS.md</Toggle>
-        <Toggle value="skill">Claude Code skill</Toggle>
+        <Toggle value="skill">SKILL.md</Toggle>
       </ToggleGroup>
-      <Code label={skill ? ".claude/skills/comindly/SKILL.md in a repository" : "AGENTS.md or CLAUDE.md at the root of a repository"}>
+      <Code label={skill ? ".claude/skills/comindly/SKILL.md in a repository (Claude Code)" : "AGENTS.md or CLAUDE.md at the root of a repository"}>
         {skill ? s.skill : s.agents_md}
       </Code>
       {!server && (

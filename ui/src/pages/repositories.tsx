@@ -18,6 +18,7 @@ import { TeamChips, TeamsField } from "@/components/team-chips";
 import { RepoDot } from "@/components/symbol";
 import { Link } from "react-router";
 import { IndexLog } from "@/components/index-log";
+import { AgentView } from "@/components/agent-view";
 import { PageHeader } from "@/components/page-header";
 import { SettingsTabs } from "@/pages/settings";
 import { Badge } from "@/components/ui/badge";
@@ -627,7 +628,7 @@ export function RepositoriesPage() {
 
   return (
     <div className="flex flex-col gap-5">
-      <PageHeader title="Repositories">
+      <PageHeader title="Repositories" actions={<AgentView asks={[{ label: "Repositories", tool: "repos", args: { team: teams.selected.join(",") || undefined } }]} />}>
         What comindly indexes. Each repository is indexed at its default branch from comindly's own checkout
         {server ? "." : ", so your folders and branches are never touched."}
       </PageHeader>

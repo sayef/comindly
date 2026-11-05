@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { withCode } from "@/components/code-text";
 import { Link, useSearchParams } from "react-router";
 import { RepoDot, SymbolLink } from "@/components/symbol";
+import { AgentView } from "@/components/agent-view";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
@@ -241,7 +242,19 @@ export function FlowsPage() {
 
   return (
     <div className="flex flex-col gap-5">
-      <PageHeader title="Flows">
+      <PageHeader
+        title="Flows"
+        actions={
+          id && (
+            <AgentView
+              asks={[
+                { label: "Walkthrough", tool: "flow", args: { focus: id } },
+                { label: "Call chain", tool: "thread", args: { focus: id } },
+              ]}
+            />
+          )
+        }
+      >
         Where work starts and where it travels: calls, then across HTTP routes, topics and queues into the services that handle them.
         With LLM summaries on when indexing, flows also get a written walkthrough.
       </PageHeader>

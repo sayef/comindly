@@ -165,6 +165,15 @@ pub struct Package {
     pub skewed: bool,
 }
 
+/// `GET /api/v1/agent?tool=&args=`: what a read-only MCP tool answers an agent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentQuery {
+    pub tool: String,
+    /// The tool's arguments as JSON.
+    #[serde(default)]
+    pub args: Option<String>,
+}
+
 /// `GET /api/v1/setup`: the index, its checks and how to connect agents.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Setup {

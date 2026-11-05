@@ -1247,6 +1247,40 @@ impl ComindlyServer {
     }
 }
 
+impl ComindlyServer {
+    /// The markdown a read-only tool gives an agent for these arguments, for the app's agent view.
+    pub async fn as_agent(&self, tool: &str, args: serde_json::Value) -> Result<String> {
+        let me = Self {
+            markdown: true,
+            ..self.clone()
+        };
+        macro_rules! args {
+            () => {
+                Parameters(serde_json::from_value(args)?)
+            };
+        }
+        let r = match tool {
+            "repos" => me.repos(args!()),
+            "contracts" => me.contracts(args!()),
+            "guide" => me.guide(args!()),
+            "find" => me.find(args!()),
+            "suggest" => me.suggest(args!()),
+            "ripple" => me.ripple(args!()),
+            "thread" => me.thread(args!()),
+            "flow" => me.flow(args!()),
+            "zoom" => me.zoom(args!()).await,
+            "why" => me.why(args!()).await,
+            "context_pack" => me.context_pack(args!()).await,
+            _ => anyhow::bail!("`{tool}` is not a read-only tool"),
+        };
+        Ok(r.content
+            .iter()
+            .filter_map(|c| c.as_text().map(|t| t.text.as_str()))
+            .collect::<Vec<_>>()
+            .join("\n"))
+    }
+}
+
 #[rmcp::tool_handler(router = Self::tool_router())]
 impl rmcp::ServerHandler for ComindlyServer {
     fn get_info(&self) -> rmcp::model::ServerConfig {
