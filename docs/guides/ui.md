@@ -169,10 +169,12 @@ Activity: indexing runs grouped by day, one opened as a timeline of its steps
 Get started: register the MCP server with your agent
 ///
 
-What is running shows in the header's corner (indexing with its current step, or any action in
-progress), with **Cancel** where it can be stopped; indexing stops at its next checkpoint and keeps
+What is running hangs under the header's right corner (indexing with its current step, a queued run
+beside it, or any action in progress), with **Cancel** where it can be stopped; indexing stops at its next checkpoint and keeps
 what it already saved. Clicking it opens the run under **Activity**, whose sidebar entry counts what
 runs and waits. Finished actions appear as toasts in the bottom-right corner.
+
+![A run indexing and another queued, under the header's right corner](../assets/screenshots/indexing.webp)
 
 Press <kbd>⌘K</kbd> (<kbd>Ctrl K</kbd>) anywhere to search: by name, and by describing what you are
 looking for ("where do we retry HTTP calls"), which uses the same hybrid search as the MCP `search`

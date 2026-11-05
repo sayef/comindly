@@ -58,6 +58,9 @@ comindly init-agents --skill               # a Claude Code skill for .claude/ski
 
 The app's Get started page shows both, ready to copy.
 
+![Get started: the guidance for agents, as an AGENTS.md section or a Claude Code skill](../assets/screenshots/setup-agents.webp#only-light)
+![Get started: the guidance for agents, as an AGENTS.md section or a Claude Code skill](../assets/screenshots/setup-agents-dark.webp#only-dark)
+
 ## Hooks
 
 `comindly init-hooks claude` prints two hooks for Claude Code:

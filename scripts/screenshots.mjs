@@ -83,6 +83,10 @@ if (mode === "server") {
   }
 }
 
+// Each example repository belongs to the team that commits to it, so the team picker shows.
+const TEAMS = { "acme-common": "Platform", orders: "Checkout", payments: "Payments", inventory: "Fulfilment", storefront: "Web" };
+if (mode !== "server") for (const [repo, team] of Object.entries(TEAMS)) await evaluate(post("/api/v1/repos/teams", { repo, teams: [team] }));
+
 const focus = mode === "server" ? null : await evaluate(`fetch("/api/v1/find?q=create_order").then((r) => r.json()).then((j) => (j.results ?? j)[0]?.id)`);
 
 for (const theme of mode === "server" ? [] : ["light", "dark"]) {
@@ -98,6 +102,10 @@ for (const theme of mode === "server" ? [] : ["light", "dark"]) {
     await go(`/${path}`);
     await shot(`${page}${suffix}`);
   }
+  await go("/setup");
+  await evaluate(`[...document.querySelectorAll("h2")].find((h) => h.textContent.includes("when to use it"))?.closest("section")?.scrollIntoView({ block: "start" }); document.querySelector("main").scrollBy(0, -28)`);
+  await sleep(500);
+  await shot(`setup-agents${suffix}`);
   await go("/flows");
   await shot(`flows${suffix}`);
   const across = await evaluate(`fetch("/api/v1/flows").then((r) => r.json()).then((l) => (l.find((f) => f.repos.length > 2) ?? l[0])?.entry.id)`);
@@ -119,7 +127,14 @@ for (const theme of mode === "server" ? [] : ["light", "dark"]) {
 
 // Last, since it re-indexes: two runs from the app, the second queued behind the first, for the Activity page.
 if (mode !== "server") {
+  await evaluate(`localStorage.setItem("comindly.theme", "light")`);
+  await go("/ledger");
   for (let i = 0; i < 2; i++) await evaluate(post("/api/v1/index", { llm: false, drop_unlisted: false }));
+  // The running and the queued run hang under the header while they last; a fresh page sees them at once.
+  await go("/ledger", 0);
+  await evaluate(`new Promise((r) => { const t = Date.now(); const f = () => (document.querySelector('a[title^="Indexing"]') || Date.now() - t > 4000 ? r() : setTimeout(f, 50)); f(); })`);
+  await sleep(150);
+  await shot("indexing");
   const jobs = `fetch("/api/v1/jobs").then((r) => r.json()).then((j) => j.jobs)`;
   for (let i = 0; i < 120 && (await evaluate(`${jobs}.then((l) => l.some((j) => j.status === "queued" || j.status === "running"))`)); i++) await sleep(1000);
   const first = await evaluate(`${jobs}.then((l) => l[l.length - 1]?.id)`);
