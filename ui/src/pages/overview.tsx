@@ -130,7 +130,7 @@ function FormCard({ onSubmit, children }: { onSubmit: () => void; children: Reac
   );
 }
 
-/** Where a team's index lives: a folder or a bucket location. */
+/** Where an org's index lives: a folder or a bucket location. */
 function Location({ index, setIndex }: { index: string; setIndex: (v: string) => void }) {
   return (
     <Input
@@ -145,16 +145,16 @@ function Location({ index, setIndex }: { index: string; setIndex: (v: string) =>
   );
 }
 
-/** First run: use the team's index. */
+/** First run: use the org's index. */
 function JoinTeam() {
   const qc = useQueryClient();
   const [index, setIndex] = useState("");
   const join = useMutation({ mutationFn: () => api.join(index), meta: { inline: true }, onSuccess: () => qc.invalidateQueries() });
   return (
     <FormCard onSubmit={() => index.trim() && join.mutate()}>
-      <h2 className="font-semibold">Join a team</h2>
+      <h2 className="font-semibold">Join an org</h2>
       <p className="mt-1 text-xs text-muted-foreground">
-        Where your team's index lives. Bucket access uses the credentials this machine already has.
+        Where your org's index lives. Bucket access uses the credentials this machine already has.
       </p>
       <div className="mt-3 flex flex-1 flex-col gap-2">
         <Location index={index} setIndex={setIndex} />
@@ -169,7 +169,7 @@ function JoinTeam() {
   );
 }
 
-/** First run: start a team at an empty folder or bucket location; colleagues then join it. */
+/** First run: start an org at an empty folder or bucket location; colleagues then join it. */
 /** `at`: the location a server's deployment set; then only the name is asked. */
 function CreateTeam({ at }: { at?: string }) {
   const qc = useQueryClient();
@@ -183,18 +183,18 @@ function CreateTeam({ at }: { at?: string }) {
   });
   return (
     <FormCard onSubmit={() => name.trim() && index.trim() && create.mutate()}>
-      <h2 className="font-semibold">Create a team</h2>
+      <h2 className="font-semibold">Create an org</h2>
       <p className="mt-1 text-xs text-muted-foreground">
         {at
           ? "The index lives where the deployment set it. You add repositories next."
           : "Pick an empty folder or bucket location everyone can reach. You add repositories next; colleagues join with the same location."}
       </p>
       <div className="mt-3 flex flex-1 flex-col gap-2">
-        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Team name, e.g. Platform" aria-label="Team name" autoComplete="off" />
+        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Org name, e.g. Acme" aria-label="Org name" autoComplete="off" />
         {!at && <Location index={index} setIndex={setIndex} />}
         <div className="mt-auto">
           <Button type="submit" variant="brand" disabled={!name.trim() || !index.trim()} loading={create.isPending}>
-            Create team
+            Create org
           </Button>
         </div>
         <Outcome error={create.error} />
@@ -268,7 +268,7 @@ export function OverviewPage() {
   const diff = at !== null && at !== last && past.data && latest.data ? linkDiff(past.data, latest.data) : null;
   const o = overview.data;
   const team = useQuery({ queryKey: ["team"], queryFn: api.team, retry: false });
-  const teamName = team.data?.version != null ? (team.data.settings.name ?? "your team") : null;
+  const teamName = team.data?.version != null ? (team.data.settings.name ?? "your org") : null;
   const [switching, setSwitching] = useState(false);
 
   if (o?.problem && server && !(admin && !teamName)) {
@@ -277,8 +277,8 @@ export function OverviewPage() {
         <h1 className="text-[26px] font-semibold tracking-[-0.02em]">{teamName ? `You're in ${teamName}` : "Welcome to comindly"}</h1>
         <p className="text-sm text-muted-foreground">
           {admin
-            ? "Nothing is indexed yet. Add the team's repositories and index them; everyone signed in here then sees the same graph."
-            : "Nothing is indexed yet. An admin adds the team's repositories under Settings → Repositories; this page fills in once they are indexed."}
+            ? "Nothing is indexed yet. Add the org's repositories and index them; everyone signed in here then sees the same graph."
+            : "Nothing is indexed yet. An admin adds the org's repositories under Settings → Repositories; this page fills in once they are indexed."}
         </p>
         {admin && (
           <Button variant="brand" asChild>
@@ -293,7 +293,7 @@ export function OverviewPage() {
     return (
       <Welcome>
         <h1 className="text-[26px] font-semibold tracking-[-0.02em]">Welcome to comindly</h1>
-        <p className="text-sm text-muted-foreground">Name the team; then add its repositories and index them.</p>
+        <p className="text-sm text-muted-foreground">Name the org; then add its repositories and index them.</p>
         <div className="w-full max-w-sm">
           <CreateTeam at={o.root ?? undefined} />
         </div>
@@ -306,18 +306,18 @@ export function OverviewPage() {
       <Welcome>
         <h1 className="text-[26px] font-semibold tracking-[-0.02em]">You're in {teamName}</h1>
         <p className="text-sm text-muted-foreground">
-          Nothing is indexed yet. Add the team's repositories and index them; everyone in {teamName} then sees the same graph.
+          Nothing is indexed yet. Add the org's repositories and index them; everyone in {teamName} then sees the same graph.
         </p>
         <div className="flex flex-wrap justify-center gap-2">
           <Button variant="brand" asChild>
             <Link to="/settings/repositories">Add repositories</Link>
           </Button>
           <Button variant="outline" asChild>
-            <Link to="/settings">Team settings</Link>
+            <Link to="/settings">Org settings</Link>
           </Button>
         </div>
         <button className="text-xs text-muted-foreground underline underline-offset-2" onClick={() => setSwitching(true)}>
-          Join or create a different team
+          Join or create a different org
         </button>
       </Welcome>
     );
@@ -327,7 +327,7 @@ export function OverviewPage() {
     return (
       <Welcome wide>
         <h1 className="text-[26px] font-semibold tracking-[-0.02em]">Welcome to comindly</h1>
-        <p className="text-sm text-muted-foreground">Join your team, start one, or index just for yourself.</p>
+        <p className="text-sm text-muted-foreground">Join your org, start one, or index just for yourself.</p>
         <div className="grid w-full gap-3 sm:grid-cols-2">
           <JoinTeam />
           <CreateTeam />
@@ -369,7 +369,7 @@ export function OverviewPage() {
 
   return (
     <div className="flex flex-col gap-5">
-      <PageHeader title="Overview">How the team's repositories depend on each other, in code and through service contracts.</PageHeader>
+      <PageHeader title="Overview">How the org's repositories depend on each other, in code and through service contracts.</PageHeader>
 
       {o ? (
         <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border bg-border lg:grid-cols-4">

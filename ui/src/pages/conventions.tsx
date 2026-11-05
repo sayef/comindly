@@ -20,7 +20,7 @@ import { cn, percent, sentence } from "@/lib/utils";
 
 const ORG = "*";
 const scopeName = (r: string) => (r === ORG ? "Org-wide" : r);
-const originName = { measured: "Measured", edited: "Edited", manual: "Team" } as const;
+const originName = { measured: "Measured", edited: "Edited", manual: "Org" } as const;
 const textarea =
   "min-h-20 w-full rounded-md border border-input bg-card px-3 py-2 text-sm outline-none transition-[border-color,box-shadow] duration-100 hover:border-muted-foreground/50 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/20 max-sm:text-base";
 const select = "h-9 min-w-0 rounded-md max-sm:w-full border border-input bg-card px-2 text-sm transition-colors duration-100 hover:border-muted-foreground/50";
@@ -218,7 +218,7 @@ function Row({ c, writable, commitUrls }: { c: Convention; writable: boolean; co
           <Td slot="full" colSpan={6} className="py-3 pr-4 pl-0 max-sm:mt-0">
             <p className="mb-2 text-xs text-muted-foreground">
               {c.origin === "manual"
-                ? "Set by the team."
+                ? "Set by the org."
                 : `Measured from ${recipe ? "commit history" : "the code"}: ${c.support} of ${c.total} follow it.`}{" "}
               Where it comes from:
             </p>
@@ -251,7 +251,7 @@ function AddDialog({ open, onOpenChange, scopes, scope, dimensions }: { open: bo
     <Dialog open={open} onOpenChange={(o) => (o && setRepo(scope), onOpenChange(o))}>
       <DialogContent className="p-5">
         <DialogTitle className="text-[17px] font-semibold">Add a convention</DialogTitle>
-        <p className="mt-1 text-sm text-muted-foreground">Agents see it through the MCP guide, marked as set by the team.</p>
+        <p className="mt-1 text-sm text-muted-foreground">Agents see it through the MCP guide, marked as set by the org.</p>
         <div className="mt-4 flex flex-col gap-3">
           <label className="flex flex-col gap-1 text-xs font-medium">
             Applies to
@@ -374,7 +374,7 @@ export function ConventionsPage() {
           <option value="">Any origin</option>
           <option value="measured">Measured</option>
           <option value="edited">Edited</option>
-          <option value="manual">Team</option>
+          <option value="manual">Org</option>
         </select>
         <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
           <ArrowDownUp className="size-4 max-sm:hidden" />

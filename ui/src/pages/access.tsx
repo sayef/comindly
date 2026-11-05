@@ -429,7 +429,7 @@ export function AccessPage() {
       )}
       <Section
         title="Personal access tokens"
-        description="Agents and scripts use comindly as you with a token, sent as Authorization: Bearer …. They stop working if you are removed from the team."
+        description="Agents and scripts use comindly as you with a token, sent as Authorization: Bearer …. They stop working if you are removed from the org."
       >
         <form
           className="flex flex-wrap gap-2"

@@ -186,8 +186,8 @@ export function Layout() {
             <Link
               to="/settings"
               className="flex size-11 items-center justify-center self-center rounded-lg border bg-card text-sm font-semibold transition-colors duration-100 hover:border-input"
-              title={`Team: ${teamName ?? "no team yet"}`}
-              aria-label={`Team settings: ${teamName ?? "no team yet"}`}
+              title={`Org: ${teamName ?? "no org yet"}`}
+              aria-label={`Org settings: ${teamName ?? "no org yet"}`}
             >
               {teamName ? teamName.slice(0, 1).toUpperCase() : <Users className="size-4 text-muted-foreground" />}
             </Link>
@@ -195,11 +195,11 @@ export function Layout() {
             <Link
               to="/settings"
               className="flex min-h-11 items-center justify-between gap-2 rounded-lg border bg-card px-2.5 py-1.5 transition-colors duration-100 hover:border-input"
-              title="Team settings"
+              title="Org settings"
             >
               <span className="flex min-w-0 flex-col">
-                <span className="eyebrow">Team</span>
-                <span className="truncate text-sm font-semibold">{teamName ?? "No team yet"}</span>
+                <span className="eyebrow">Org</span>
+                <span className="truncate text-sm font-semibold">{teamName ?? "No org yet"}</span>
               </span>
               <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
             </Link>

@@ -525,7 +525,7 @@ function OrgDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bo
               {hasTeam ? (
                 <label className="flex items-center gap-2 text-sm">
                   <input type="checkbox" checked={share} onChange={(e) => setShare(e.target.checked)} />
-                  Share with the team
+                  Share with the org
                 </label>
               ) : (
                 <span />
@@ -649,7 +649,7 @@ export function RepositoriesPage() {
         <div className="flex flex-wrap items-center gap-3 rounded-md bg-accent px-4 py-3 text-sm">
           <Users className="size-4 shrink-0 text-brand" />
           <span className="min-w-0 flex-1">
-            The team has {teamMissing.length === 1 ? "a repository" : `${teamMissing.length} repositories`} you don't have here yet.
+            The org has {teamMissing.length === 1 ? "a repository" : `${teamMissing.length} repositories`} you don't have here yet.
           </span>
           <Button variant="outline" size="sm" loading={addTeam.isPending} onClick={() => addTeam.mutate()}>
             Add {teamMissing.length === 1 ? "it" : "them"}
