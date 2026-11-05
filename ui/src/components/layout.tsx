@@ -27,9 +27,11 @@ import { Link, NavLink, Outlet, useLocation } from "react-router";
 import { Activity } from "@/components/activity";
 import { CommandPalette } from "@/components/command-palette";
 import { useTheme } from "@/components/theme";
+import { TeamPicker } from "@/components/team-picker";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
+import { useAccess } from "@/lib/me";
 import { ago, cn } from "@/lib/utils";
 
 const NAV: { to: string; label: string; icon: LucideIcon }[] = [
@@ -110,6 +112,7 @@ export function Layout() {
   const versions = useQuery({ queryKey: ["versions"], queryFn: api.versions });
   const team = useQuery({ queryKey: ["team"], queryFn: api.team, retry: false });
   const me = useQuery({ queryKey: ["me"], queryFn: api.me, staleTime: Infinity });
+  const { admin } = useAccess();
   const teamName = team.data?.version != null ? (team.data.settings.name ?? null) : null;
   const signOut = () => api.signOut().finally(() => window.location.replace("/"));
   const { pathname } = useLocation();
@@ -299,6 +302,7 @@ export function Layout() {
           {/* Equal side columns keep the search centred whatever shows up here. */}
           <div className="flex min-w-0 items-center justify-end gap-3 overflow-hidden">
             {overview.data && !overview.data.writable && <Badge variant="outline">Read-only</Badge>}
+            <TeamPicker admin={admin} />
             {version > 0 && (
               <span className="nums hidden shrink-0 whitespace-nowrap text-xs text-muted-foreground xl:inline" title={latest ?? undefined}>
                 Index version {version}, {ago(latest)}

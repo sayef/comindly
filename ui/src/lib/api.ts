@@ -220,6 +220,16 @@ export interface TeamSettings {
   auto_index_llm?: boolean;
   auto_index_minutes?: number;
   repos?: string[];
+  /** Absent until teams are set up. */
+  teams?: TeamDef[] | null;
+}
+
+/** A team: a label on repositories (by indexed name) and the members who belong to it. */
+export interface TeamDef {
+  name: string;
+  repos: string[];
+  members: string[];
+  incoming: "open" | "review" | "closed";
 }
 
 /** Where your API key comes from: your credentials file (team entry or default) or OPENAI_API_KEY. */
@@ -537,6 +547,9 @@ export const api = {
   saveKey: (key: string) => post<{ ok: boolean; message: string }>("/api/v1/team/key", { key }),
   join: (index: string) => post("/api/v1/join", { index }),
   createTeam: (name: string, index: string) => post("/api/v1/team/create", { name, index }),
+  saveTeams: (teams: TeamDef[], version: number | null) => post("/api/v1/teams", { teams, version }),
+  labelRepo: (repo: string, teams: string[]) => post("/api/v1/repos/teams", { repo, teams }),
+  saveMyTeams: (teams: string[]) => post("/api/v1/me/teams", { teams }),
   saveSettings: (c: SettingsChange) => post("/api/v1/settings", c),
   testIndex: (index_dir: string) => post("/api/v1/settings/test", { index_dir }),
   context: async (focus: string) => {
