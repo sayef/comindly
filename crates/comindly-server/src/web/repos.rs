@@ -158,7 +158,10 @@ pub(super) async fn change(
     Json(c): Json<api::RepoChange>,
 ) -> Reply<api::Done> {
     let mut list = app.repos();
-    let by = who.map(|w| w.email.clone());
+    let by = who.as_ref().map(|w| w.email.clone());
+    let named: Vec<String> = c.add.iter().map(|p| worktree::name(Path::new(p))).collect();
+    let teams = c.teams.clone();
+    let shared = app.clone();
     let run = tokio::task::spawn_blocking(move || {
         for p in &c.add {
             let path = absolute(p);
@@ -182,7 +185,11 @@ pub(super) async fn change(
         anyhow::Ok(list.len())
     })
     .await;
-    match run.map_err(anyhow::Error::from).and_then(|r| r) {
+    let run = match run.map_err(anyhow::Error::from).and_then(|r| r) {
+        Ok(n) => label_added(&shared, &who, &named, &teams).await.map(|_| n),
+        Err(e) => Err(e),
+    };
+    match run {
         Ok(n) => {
             let what = if n == 1 { "repository" } else { "repositories" };
             Ok(Json(api::Done::new(format!(
@@ -593,6 +600,25 @@ pub(super) async fn remote_list(
         })
 }
 
+/// Label just-added repositories, by the names they are listed and indexed under, with `teams`.
+async fn label_added(
+    app: &Shared,
+    who: &super::Member,
+    names: &[String],
+    teams: &[String],
+) -> anyhow::Result<()> {
+    if teams.is_empty() || names.is_empty() {
+        return Ok(());
+    }
+    super::team::change_teams(app, who, None, |t| {
+        for n in names {
+            t.label(n, teams);
+        }
+        Ok(())
+    })
+    .await
+}
+
 /// Add repositories by clone URL; comindly clones them into its own folder when indexing.
 pub(super) async fn remote_add(
     who: super::Member,
@@ -603,10 +629,12 @@ pub(super) async fn remote_add(
     let run = async {
         let mut list = app.repos();
         let mut added = 0;
+        let mut named = Vec::new();
         for url in &q.urls {
             let path = crate::hosting::managed_path(Path::new(&crate::config::data_dir()), url)?
                 .to_string_lossy()
                 .into_owned();
+            named.push(worktree::name(Path::new(&path)));
             if !list.iter().any(|r| r.path == path) {
                 list.push(RepoEntry {
                     path,
@@ -616,6 +644,7 @@ pub(super) async fn remote_add(
             }
         }
         app.set_repos(who.as_ref().map(|w| w.email.as_str()), &list)?;
+        label_added(&app, &who, &named, &q.teams).await?;
         let mut shared = 0;
         if q.share {
             let root = s.data.root.clone().context("no index to share with")?;
@@ -638,7 +667,7 @@ pub(super) async fn remote_add(
         }
         anyhow::Ok(match (added, q.share) {
             (_, true) => format!(
-                "added {added}, {shared} new for the team; press Index now to clone and index them"
+                "added {added}, {shared} new for the org; press Index now to clone and index them"
             ),
             _ => format!("added {added}; press Index now to clone and index them"),
         })

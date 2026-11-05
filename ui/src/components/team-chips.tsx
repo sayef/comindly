@@ -72,6 +72,40 @@ export function TeamChips({ repo, admin }: { repo: string; admin: boolean }) {
   );
 }
 
+/** Teams for repositories being added: the org's teams to pick from, and a new one. */
+export function TeamsField({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+  const t = useTeams();
+  const [fresh, setFresh] = useState("");
+  const names = [...new Set([...t.teams.map((x) => x.name), ...value])];
+  const flip = (n: string) => onChange(value.includes(n) ? value.filter((x) => x !== n) : [...value, n]);
+  const add = () => {
+    const n = fresh.trim();
+    if (n && !value.some((x) => x.toLowerCase() === n.toLowerCase())) onChange([...value, n]);
+    setFresh("");
+  };
+  return (
+    <div className="flex flex-col gap-1.5 text-sm">
+      <span className="font-semibold">Teams</span>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {names.map((n) => (
+          <Chip key={n} on={value.includes(n)} onClick={() => flip(n)}>
+            {n}
+          </Chip>
+        ))}
+        <Input
+          value={fresh}
+          onChange={(e) => setFresh(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), add())}
+          onBlur={add}
+          placeholder="New team"
+          aria-label="New team"
+          className="h-7 w-32 text-xs"
+        />
+      </div>
+    </div>
+  );
+}
+
 export function Chip({ on, onClick, children }: { on?: boolean; onClick?: () => void; children: React.ReactNode }) {
   const style = cn(
     "rounded-sm border px-1.5 py-0.5 text-xs",

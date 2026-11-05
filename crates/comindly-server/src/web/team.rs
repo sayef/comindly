@@ -204,7 +204,7 @@ async fn use_location(app: &Shared, root: &str, settings: TeamSettings) -> anyho
 }
 
 /// Load the settings, change them with `edit`, and save them as `who`.
-async fn change_teams(
+pub(super) async fn change_teams(
     app: &Shared,
     who: &super::Member,
     expected: Option<Option<u64>>,

@@ -71,6 +71,9 @@ pub struct RepoChange {
     pub add: Vec<String>,
     #[serde(default)]
     pub remove: Vec<String>,
+    /// Teams to label the added repositories with.
+    #[serde(default)]
+    pub teams: Vec<String>,
 }
 
 /// `POST /api/v1/repos/remote/list`: a GitHub organisation or GitLab group, with a token if needed.
@@ -107,6 +110,9 @@ pub struct RemoteAddRequest {
     pub urls: Vec<String>,
     #[serde(default)]
     pub share: bool,
+    /// Teams to label the added repositories with.
+    #[serde(default)]
+    pub teams: Vec<String>,
 }
 
 /// `POST /api/v1/index`: queue indexing of the listed repositories.

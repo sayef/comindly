@@ -80,7 +80,11 @@ pub fn teams_affected(
     if others.is_empty() {
         return String::new();
     }
-    let verb = if others.len() == 1 { "depends" } else { "depend" };
+    let verb = if others.len() == 1 {
+        "depends"
+    } else {
+        "depend"
+    };
     format!(
         "\n### Other teams\n{} {verb} on this code; tell them before merging.\n",
         others.join(", ")
