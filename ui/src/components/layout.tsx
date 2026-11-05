@@ -15,7 +15,6 @@ import {
   Search,
   Settings,
   Sun,
-  Users,
   Waypoints,
   Workflow,
   X,
@@ -152,11 +151,19 @@ export function Layout() {
   const railBody = (narrow: boolean, drawer = false) => (
     <>
           <div className={cn("flex items-center", narrow ? "flex-col gap-3" : "justify-between")}>
-            <Link to="/" className="flex items-center gap-2.5 rounded-md px-2 pt-1" aria-label={narrow ? "comindly overview" : undefined}>
-              <Logo className="size-6" />
+            <Link
+              to="/"
+              className="flex min-w-0 items-center gap-2.5 rounded-md px-2 pt-1"
+              aria-label={narrow ? `comindly${teamName ? ` for ${teamName}` : ""}, overview` : undefined}
+              title={narrow && teamName ? `comindly for ${teamName}` : undefined}
+            >
+              <Logo className="size-6 shrink-0" />
               {!narrow && (
-                <span className="text-[17px] font-semibold tracking-[-0.01em]" translate="no">
-                  comindly
+                <span className="flex min-w-0 flex-col">
+                  <span className="text-[17px] leading-tight font-semibold tracking-[-0.01em]" translate="no">
+                    comindly
+                  </span>
+                  {teamName && <span className="truncate text-xs leading-tight text-muted-foreground">for {teamName}</span>}
                 </span>
               )}
             </Link>
@@ -181,22 +188,7 @@ export function Layout() {
             )}
           </div>
 
-          <div className="flex flex-col gap-2">
-            {narrow ? (
-              <span
-                className="flex size-11 items-center justify-center self-center text-sm font-semibold"
-                title={`Org: ${teamName ?? "no org yet"}`}
-              >
-                {teamName ? teamName.slice(0, 1).toUpperCase() : <Users className="size-4 text-muted-foreground" />}
-              </span>
-            ) : (
-              <span className="flex min-w-0 flex-col px-2.5">
-                <span className="eyebrow">Org</span>
-                <span className="truncate text-sm font-semibold">{teamName ?? "No org yet"}</span>
-              </span>
-            )}
-            <TeamPicker admin={admin} narrow={narrow} />
-          </div>
+          <TeamPicker admin={admin} narrow={narrow} />
 
           <nav className="flex flex-col gap-0.5" aria-label="Main">
             {NAV.map((n) => (
