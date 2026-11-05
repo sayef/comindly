@@ -152,7 +152,7 @@ pub(super) async fn preflight(
         None => Default::default(),
     };
     let entries = s.entries().await.clone();
-    Json(crate::answers::preflight(
+    let mut answer = crate::answers::preflight(
         &s.data.graph,
         &s.data.symbols,
         &s.data.edges,
@@ -160,5 +160,9 @@ pub(super) async fn preflight(
         &recipes,
         &packages,
         &q.changes,
-    ))
+    );
+    let teams = s.teams.read().unwrap_or_else(|e| e.into_inner()).clone();
+    answer.markdown +=
+        &crate::preflight::teams_affected(&s.data.graph, &s.data.symbols, &q.changes, &teams);
+    Json(answer)
 }

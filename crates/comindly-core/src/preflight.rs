@@ -53,6 +53,40 @@ pub fn touched(symbols: &[Symbol], changes: &[Change]) -> Vec<String> {
     out
 }
 
+/// Teams other than the changed code's own whose repositories depend on it, as a closing line.
+pub fn teams_affected(
+    graph: &CodeGraph,
+    symbols: &[Symbol],
+    changes: &[Change],
+    teams: &crate::team::TeamSettings,
+) -> String {
+    if teams.team_list().is_empty() {
+        return String::new();
+    }
+    let mine: BTreeSet<String> = changes
+        .iter()
+        .flat_map(|c| teams.teams_of(&c.repo))
+        .collect();
+    let mut affected: BTreeSet<String> = BTreeSet::new();
+    for id in touched(symbols, changes) {
+        let Some(idx) = graph.lookup(&id) else {
+            continue;
+        };
+        for h in graph.ripple(idx, 3) {
+            affected.extend(teams.teams_of(&h.node.repo));
+        }
+    }
+    let others: Vec<String> = affected.difference(&mine).cloned().collect();
+    if others.is_empty() {
+        return String::new();
+    }
+    let verb = if others.len() == 1 { "depends" } else { "depend" };
+    format!(
+        "\n### Other teams\n{} {verb} on this code; tell them before merging.\n",
+        others.join(", ")
+    )
+}
+
 pub fn report(
     graph: &CodeGraph,
     symbols: &[Symbol],

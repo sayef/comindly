@@ -1010,6 +1010,11 @@ impl ComindlyServer {
                 &recipes,
                 &findings,
                 &changes,
+            ) + &crate::preflight::teams_affected(
+                &self.graph,
+                &symbols,
+                &changes,
+                &self.team_settings(),
             )
         };
         let dto = LedgerDto {
