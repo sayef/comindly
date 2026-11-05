@@ -360,8 +360,8 @@ mod tests {
 
     fn two_teams() -> TeamSettings {
         let mut t = TeamSettings::default();
-        t.label("hypnos", &["Skills".into()]);
-        t.label("shared-lib", &["Skills".into(), "Backend".into()]);
+        t.label("catalog", &["Search".into()]);
+        t.label("shared-lib", &["Search".into(), "Backend".into()]);
         t.label("billing", &["Backend".into()]);
         t
     }
@@ -369,13 +369,13 @@ mod tests {
     #[test]
     fn labels_select_repositories() {
         let t = two_teams();
-        assert_eq!(t.teams_of("shared-lib"), ["Skills", "Backend"]);
-        let skills = vec!["skills".to_string()];
-        assert!(t.in_view("hypnos", &skills) && t.in_view("shared-lib", &skills));
-        assert!(!t.in_view("billing", &skills));
+        assert_eq!(t.teams_of("shared-lib"), ["Search", "Backend"]);
+        let search = vec!["search".to_string()];
+        assert!(t.in_view("catalog", &search) && t.in_view("shared-lib", &search));
+        assert!(!t.in_view("billing", &search));
         assert!(t.in_view("billing", &[]), "no selection shows everything");
         let none = vec![UNASSIGNED.to_string()];
-        assert!(t.in_view("docs", &none) && !t.in_view("hypnos", &none));
+        assert!(t.in_view("docs", &none) && !t.in_view("catalog", &none));
     }
 
     #[test]
@@ -392,7 +392,7 @@ mod tests {
     fn tidy_refuses_duplicates_and_the_reserved_name() {
         let mut t = two_teams();
         t.teams.as_mut().unwrap().push(TeamDef {
-            name: " skills ".into(),
+            name: " search ".into(),
             ..Default::default()
         });
         assert!(t.tidy_teams().is_err());
@@ -429,15 +429,15 @@ mod tests {
     #[test]
     fn backfill_only_once() {
         let org = TeamSettings {
-            name: Some("Skills".into()),
+            name: Some("Search".into()),
             ..Default::default()
         };
         let done = org
             .backfill(&["b".into(), "a".into(), "a".into()], &["Ann@X.io".into()])
             .unwrap();
-        assert_eq!(done.team_list()[0].name, "Skills");
+        assert_eq!(done.team_list()[0].name, "Search");
         assert_eq!(done.team_list()[0].repos, ["a", "b"]);
-        assert_eq!(done.teams_of_member("ann@x.io"), ["Skills"]);
+        assert_eq!(done.teams_of_member("ann@x.io"), ["Search"]);
         assert!(
             done.backfill(&["c".into()], &[]).is_none(),
             "already set up"
@@ -461,9 +461,9 @@ mod tests {
     #[test]
     fn members_pick_existing_teams() {
         let mut t = two_teams();
-        t.set_member("Ann@x.io", &["skills".into(), "Backend".into()])
+        t.set_member("Ann@x.io", &["search".into(), "Backend".into()])
             .unwrap();
-        assert_eq!(t.teams_of_member("ann@x.io"), ["Skills", "Backend"]);
+        assert_eq!(t.teams_of_member("ann@x.io"), ["Search", "Backend"]);
         t.set_member("ann@x.io", &["Backend".into()]).unwrap();
         assert_eq!(t.teams_of_member("ann@x.io"), ["Backend"]);
         assert!(t.set_member("ann@x.io", &["Nope".into()]).is_err());
