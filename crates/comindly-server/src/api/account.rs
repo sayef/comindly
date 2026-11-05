@@ -126,6 +126,9 @@ pub enum SecretState {
         #[serde(flatten)]
         info: SecretInfo,
         label: String,
+        /// The deployment provides one too; this one is used instead.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        replaces_deployment: bool,
     },
 }
 

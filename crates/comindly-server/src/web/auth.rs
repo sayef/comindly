@@ -828,14 +828,15 @@ pub(super) async fn secrets(On(server): On) -> Json<api::Secrets> {
                     label: label(n),
                 })
             };
-            if deployment(&server.config, n).is_some() {
-                elsewhere("deployment")
-            } else if let Some(mut info) = store.secret_info(n) {
+            if let Some(mut info) = store.secret_info(n) {
                 info.name = n.clone();
                 api::SecretState::Stored {
                     info,
                     label: label(n),
+                    replaces_deployment: deployment(&server.config, n).is_some(),
                 }
+            } else if deployment(&server.config, n).is_some() {
+                elsewhere("deployment")
             } else {
                 elsewhere("none")
             }
@@ -847,7 +848,7 @@ pub(super) async fn secrets(On(server): On) -> Json<api::Secrets> {
     })
 }
 
-/// Store or remove a token or key; one the deployment provides cannot be changed here.
+/// Store or remove a token or key; a stored one is used instead of the deployment's.
 pub(super) async fn set_secret(
     On(server): On,
     Extension(who): Extension<Who>,
@@ -863,16 +864,12 @@ pub(super) async fn set_secret(
     if !valid {
         return Err(fail(StatusCode::BAD_REQUEST, "Unknown secret"));
     }
-    if deployment(&server.config, &name).is_some() {
-        return Err(fail(
-            StatusCode::BAD_REQUEST,
-            "The deployment provides this one; change it where the deployment keeps its secrets",
-        ));
-    }
-    let message = if q.value.trim().is_empty() {
-        "Removed"
-    } else {
-        "Saved"
+    let both = deployment(&server.config, &name).is_some();
+    let message = match (q.value.trim().is_empty(), both) {
+        (true, true) => "Removed; the deployment's is used again",
+        (true, false) => "Removed",
+        (false, true) => "Saved; it is used instead of the deployment's",
+        (false, false) => "Saved",
     };
     done(
         server.secrets.set_secret(&who.email, &name, &q.value),

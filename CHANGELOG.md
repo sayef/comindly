@@ -24,6 +24,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Settings → Integrations: an admin can store a token or LLM key even when the deployment provides
+  one; the stored one is used instead, and removing it goes back to the deployment's.
 - Indexing status hangs under the header's right corner instead of floating at the bottom; the
   ledger's and conventions' add buttons moved into their filter rows.
 

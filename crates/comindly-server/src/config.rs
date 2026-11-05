@@ -326,7 +326,7 @@ pub fn env_token(host: &str) -> Option<String> {
     vars.iter().find_map(|v| crate::server::env_secret(v))
 }
 
-/// Git tokens for indexing: the deployment's, then on a server the ones stored there.
+/// Git tokens for indexing: on a server the ones stored there, then the deployment's.
 pub fn git_credentials(
     server: Option<std::sync::Arc<crate::server::Server>>,
 ) -> std::sync::Arc<dyn crate::worktree::Credentials> {

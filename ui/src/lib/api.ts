@@ -484,6 +484,8 @@ export interface SecretState {
   name: string;
   label: string;
   source: "deployment" | "stored" | "none";
+  /** Stored here while the deployment provides one too; this one is used. */
+  replaces_deployment?: boolean;
   hint?: string | null;
   updated?: string | null;
   updated_by?: string | null;
