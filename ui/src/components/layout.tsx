@@ -150,42 +150,43 @@ export function Layout() {
   // The rail's contents: in the side column on desktop (wide or narrow), in a drawer on phones.
   const railBody = (narrow: boolean, drawer = false) => (
     <>
-          <div className={cn("flex items-center", narrow ? "flex-col gap-3" : "justify-between")}>
-            <Link
-              to="/"
-              className="flex min-w-0 items-center gap-2.5 rounded-md px-2 pt-1"
-              aria-label={narrow ? `comindly${teamName ? ` for ${teamName}` : ""}, overview` : undefined}
-              title={narrow && teamName ? `comindly for ${teamName}` : undefined}
-            >
-              <Logo className="size-6 shrink-0" />
-              {!narrow && (
-                <span className="flex min-w-0 flex-col">
-                  <span className="text-[17px] leading-tight font-semibold tracking-[-0.01em]" translate="no">
+          <div className="flex flex-col">
+            <div className={cn("flex items-center", narrow ? "flex-col gap-3" : "justify-between")}>
+              <Link
+                to="/"
+                className="flex items-center gap-2.5 rounded-md px-2 pt-1"
+                aria-label={narrow ? `comindly${teamName ? ` for ${teamName}` : ""}, overview` : undefined}
+                title={narrow && teamName ? `comindly for ${teamName}` : undefined}
+              >
+                <Logo className="size-6" />
+                {!narrow && (
+                  <span className="text-[17px] font-semibold tracking-[-0.01em]" translate="no">
                     comindly
                   </span>
-                  {teamName && <span className="truncate text-xs leading-tight text-muted-foreground">for {teamName}</span>}
-                </span>
-              )}
-            </Link>
-            {drawer ? (
-              <DialogPrimitive.Close asChild>
-                <Button variant="ghost" size="icon" className="size-8" aria-label="Close menu">
-                  <X />
+                )}
+              </Link>
+              {drawer ? (
+                <DialogPrimitive.Close asChild>
+                  <Button variant="ghost" size="icon" className="size-8" aria-label="Close menu">
+                    <X />
+                  </Button>
+                </DialogPrimitive.Close>
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-8"
+                  onClick={toggleRail}
+                  aria-label={narrow ? "Expand sidebar" : "Collapse sidebar"}
+                  aria-expanded={!narrow}
+                  title={`${narrow ? "Expand" : "Collapse"} sidebar (⌘ \\)`}
+                >
+                  {narrow ? <PanelLeftOpen /> : <PanelLeftClose />}
                 </Button>
-              </DialogPrimitive.Close>
-            ) : (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-8"
-                onClick={toggleRail}
-                aria-label={narrow ? "Expand sidebar" : "Collapse sidebar"}
-                aria-expanded={!narrow}
-                title={`${narrow ? "Expand" : "Collapse"} sidebar (⌘ \\)`}
-              >
-                {narrow ? <PanelLeftOpen /> : <PanelLeftClose />}
-              </Button>
-            )}
+              )}
+            </div>
+            {/* Under the wordmark: the logo's 24px, the 10px gap and the link's 8px padding. */}
+            {!narrow && teamName && <p className="truncate pl-[42px] text-xs leading-tight text-muted-foreground">for {teamName}</p>}
           </div>
 
           <TeamPicker admin={admin} narrow={narrow} />
