@@ -111,9 +111,10 @@ jobs:
           name: comindly-${{ matrix.target }}
           path: comindly-${{ matrix.target }}.tar.gz*
 
+  # Betas skip macOS; their Mac binaries are built locally and uploaded to the release.
   build-macos:
     needs: [tag, ui]
-    if: needs.tag.outputs.tag != '' || github.event_name == 'workflow_dispatch'
+    if: (needs.tag.outputs.tag != '' && !contains(needs.tag.outputs.tag, '-')) || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -144,7 +145,7 @@ jobs:
 
   publish:
     needs: [tag, build, build-macos]
-    if: needs.tag.outputs.tag != ''
+    if: ${{ !cancelled() && needs.tag.outputs.tag != '' && needs.build.result == 'success' && needs.build-macos.result != 'failure' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
