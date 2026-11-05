@@ -42,6 +42,8 @@ struct Session {
     past: tokio::sync::Mutex<HashMap<usize, api::OrgMap>>,
     /// Where flows start, ranked once per loaded index.
     flow_list: OnceCell<Vec<api::FlowRow>>,
+    /// The org's teams, shared with the app; they weigh notes from outside a team.
+    teams: crate::mcp::Teams,
 }
 
 #[derive(Default)]
@@ -112,7 +114,7 @@ struct AppState {
     /// Members, sign-in and stored secrets, in server mode.
     server: Option<Arc<crate::server::Server>>,
     /// The loaded index's shared settings.
-    team: std::sync::RwLock<crate::team::TeamSettings>,
+    team: crate::mcp::Teams,
     /// `config.toml` as last read, with the file's modification time.
     /// Your preferences as last read, and when; `None` reads them again.
     config: std::sync::Mutex<(Arc<crate::config::Config>, Option<std::time::Instant>)>,
@@ -168,18 +170,26 @@ impl Session {
                 tokio::task::spawn_blocking(move || crate::ledger::Ledger::open(&root)).await;
             if let Ok(Ok(ledger)) = opened {
                 if let Ok(records) = ledger.all().await {
-                    *self.entries.write().await = crate::ledger::derive(
-                        &records,
-                        &self.data.symbols,
-                        &crate::config::local_verifier(),
-                    );
+                    *self.entries.write().await = self.derive(&records);
                 }
             }
         }
         self.entries.read().await
     }
 
-    async fn open(mut data: Data, fresh: std::time::Duration) -> Session {
+    /// Status and trust of every record, with notes from outside a team weighed.
+    fn derive(&self, records: &[Record]) -> Vec<Entry> {
+        let mut entries = crate::ledger::derive(
+            records,
+            &self.data.symbols,
+            &crate::config::local_verifier(),
+        );
+        let teams = self.teams.read().unwrap_or_else(|e| e.into_inner());
+        crate::ledger::weigh_teams(&mut entries, records, &teams);
+        entries
+    }
+
+    async fn open(mut data: Data, fresh: std::time::Duration, teams: crate::mcp::Teams) -> Session {
         let entries = std::mem::take(&mut data.entries);
         let manual = std::mem::take(&mut data.manual);
         let tables = match data.root.as_ref() {
@@ -192,12 +202,18 @@ impl Session {
         Session {
             data,
             entries: RwLock::new(entries),
-            entries_read: tokio::sync::Mutex::new(std::time::Instant::now()),
+            // Read again on first use, so the teams weigh what the index loaded.
+            entries_read: tokio::sync::Mutex::new(
+                std::time::Instant::now()
+                    .checked_sub(std::time::Duration::from_secs(60))
+                    .unwrap_or_else(std::time::Instant::now),
+            ),
             manual: RwLock::new(manual),
             extras: OnceCell::new(),
             search: OnceCell::new(),
             tables,
             past: Default::default(),
+            teams,
             flow_list: OnceCell::new(),
         }
     }
@@ -264,7 +280,7 @@ impl AppState {
         let repos: Vec<String> = data.graph.repos().into_iter().map(|(r, _)| r).collect();
         let team = self.backfill_teams(root, team, &repos).await;
         self.set_team(team);
-        *self.current.write().await = Arc::new(Session::open(data, fresh).await);
+        *self.current.write().await = Arc::new(Session::open(data, fresh, self.team.clone()).await);
         self.reload_mcp(root);
         Ok(())
     }
@@ -331,10 +347,14 @@ impl AppState {
             + 1;
         let latest = self.mcp_generation.clone();
         let (fresh, markdown) = (self.config().fresh(), self.settings().format != "json");
+        let teams = self.team.clone();
         tokio::spawn(async move {
             match crate::mcp::load(&uri, markdown, fresh).await {
                 // A slower, older load never replaces a newer one.
-                Ok(server) if latest.load(std::sync::atomic::Ordering::SeqCst) == generation => {
+                Ok(mut server)
+                    if latest.load(std::sync::atomic::Ordering::SeqCst) == generation =>
+                {
+                    server.teams = teams;
                     if let Ok(mut m) = mcp.write() {
                         *m = Some(server);
                     }
@@ -363,16 +383,20 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
         Access::Local(_) => None,
     };
     let cfg = Arc::new(crate::config::Config::load());
-    let team = match &root {
+    let team: crate::mcp::Teams = Arc::new(std::sync::RwLock::new(match &root {
         Some(r) => rt
             .block_on(crate::team::load(r))
             .map(|t| t.settings)
             .unwrap_or_default(),
         None => Default::default(),
-    };
+    }));
     let state = Arc::new(AppState {
-        team: std::sync::RwLock::new(team),
-        current: RwLock::new(Arc::new(rt.block_on(Session::open(data, cfg.fresh())))),
+        team: team.clone(),
+        current: RwLock::new(Arc::new(rt.block_on(Session::open(
+            data,
+            cfg.fresh(),
+            team,
+        )))),
         config: std::sync::Mutex::new((cfg, Some(std::time::Instant::now()))),
         jobs: crate::jobs::Jobs::new(
             match &server {
@@ -1416,8 +1440,13 @@ fn neighbourhood(z: &Zoom) -> api::Neighbourhood {
 }
 
 /// Provenance for a write from the UI: the signed-in member on a server, else this machine's user.
-fn provenance(who: Option<&crate::server::Who>) -> Provenance {
-    Provenance::human("comindly-web", &identity(who))
+fn provenance(who: Option<&crate::server::Who>, s: &Session) -> Provenance {
+    let mut p = Provenance::human("comindly-web", &identity(who));
+    if let Some(w) = who {
+        let teams = s.teams.read().unwrap_or_else(|e| e.into_inner());
+        p.teams = teams.teams_of_member(&w.email);
+    }
+    p
 }
 
 /// The signed-in member on a server, else this machine's user.
@@ -1442,7 +1471,7 @@ fn signer(who: Option<&crate::server::Who>) -> Option<std::path::PathBuf> {
 
 async fn review(who: Member, Cur(s): Cur, Json(b): Json<api::ReviewRequest>) -> Reply<api::Done> {
     let signer = signer(who.as_deref());
-    match apply_review(&s, &b, provenance(who.as_deref()), signer).await {
+    match apply_review(&s, &b, provenance(who.as_deref(), &s), signer).await {
         Ok(msg) => Ok(Json(api::Done::new(msg))),
         Err(e) => Err(bad(e)),
     }
@@ -1476,7 +1505,7 @@ async fn apply_review(
     let rec = Record::review(&target, &b.action, &b.reason, prov)?;
     ledger.put(&rec).await?;
     let records = ledger.all().await?;
-    let fresh = crate::ledger::derive(&records, &s.data.symbols, &crate::config::local_verifier());
+    let fresh = s.derive(&records);
     let status = fresh
         .iter()
         .find(|e| e.record.id == target.id)
@@ -1511,7 +1540,12 @@ async fn remember(
             anchors.push(crate::ledger::Anchor::of(sym.context("symbol not loaded")?).at(&commits));
         }
         let commit = anchors.first().and_then(|a| a.commit.clone());
-        let mut rec = Record::new(kind, &b.title, anchors, provenance(who.as_deref()));
+        let mut rec = Record::new(kind, &b.title, anchors, provenance(who.as_deref(), &s));
+        let repos: Vec<&str> = rec.anchors.iter().map(|a| a.repo.as_str()).collect();
+        s.teams
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .accepts(&rec.provenance.teams, &repos)?;
         rec.body = b.body.trim().to_string();
         rec.trigger = b.trigger.filter(|t| !t.trim().is_empty());
         rec.evidence = b
@@ -1534,8 +1568,7 @@ async fn remember(
         let ledger = crate::ledger::Ledger::open(root)?.signed_by(signer(who.as_deref()));
         ledger.put(&rec).await?;
         let records = ledger.all().await?;
-        *s.entries.write().await =
-            crate::ledger::derive(&records, &s.data.symbols, &crate::config::local_verifier());
+        *s.entries.write().await = s.derive(&records);
         anyhow::Ok(rec.id)
     };
     match run.await {
@@ -1552,8 +1585,7 @@ async fn erase(Cur(s): Cur, Json(b): Json<api::IdRequest>) -> Reply<api::Done> {
         let gone = ledger.erase(|r| r.id == b.id, true).await?;
         anyhow::ensure!(!gone.is_empty(), "no such record");
         let records = ledger.all().await?;
-        *s.entries.write().await =
-            crate::ledger::derive(&records, &s.data.symbols, &crate::config::local_verifier());
+        *s.entries.write().await = s.derive(&records);
         anyhow::Ok(format!(
             "deleted {}",
             crate::doctor::plural(gone.len(), "record")

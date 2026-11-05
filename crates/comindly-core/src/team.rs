@@ -125,6 +125,18 @@ impl TeamSettings {
         (!owners.is_empty() && !inside).then_some(owners)
     }
 
+    /// Refuses a note from outside when every team owning `repos` is closed to them.
+    pub fn accepts(&self, writer: &[String], repos: &[&str]) -> Result<()> {
+        if let Some(owners) = self.outside(writer, repos) {
+            anyhow::ensure!(
+                self.incoming(&owners) != Incoming::Closed,
+                "{} take notes on this code only from their members; ask one of them to record it",
+                owners.join(" and ")
+            );
+        }
+        Ok(())
+    }
+
     /// The most open policy among `owners` for notes from outside.
     pub fn incoming(&self, owners: &[String]) -> Incoming {
         self.team_list()
@@ -387,6 +399,26 @@ mod tests {
             ..Default::default()
         };
         assert!(t.tidy_teams().is_err());
+    }
+
+    #[test]
+    fn closed_teams_refuse_notes_from_outside() {
+        let mut t = TeamSettings::default();
+        t.label("api", &["Backend".into()]);
+        t.label("pay", &["Payments".into(), "Backend".into()]);
+        let search = ["Search".to_string()];
+        assert_eq!(
+            t.outside(&search, &["api"]),
+            Some(vec!["Backend".to_string()])
+        );
+        assert_eq!(t.outside(&["backend".into()], &["api"]), None);
+        assert_eq!(t.outside(&[], &["api"]), None);
+        assert_eq!(t.outside(&search, &["unlabelled"]), None);
+        t.teams.as_mut().unwrap()[0].incoming = Incoming::Closed;
+        assert!(t.accepts(&search, &["api"]).is_err());
+        // Several owners: the most open decides.
+        assert!(t.accepts(&search, &["pay"]).is_ok());
+        assert!(t.accepts(&["Payments".into()], &["api"]).is_err());
     }
 
     #[test]
