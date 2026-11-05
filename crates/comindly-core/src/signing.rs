@@ -186,6 +186,7 @@ mod tests {
                 agent: None,
                 session: None,
                 name: None,
+                teams: Vec::new(),
             },
         );
         sign_with(&mut rec, &key).unwrap();

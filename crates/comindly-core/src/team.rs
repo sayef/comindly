@@ -79,7 +79,8 @@ pub struct TeamDef {
     pub incoming: Incoming,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// Ordered from most to least open.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Incoming {
     Open,
@@ -103,6 +104,35 @@ impl TeamSettings {
             .filter(|t| t.repos.iter().any(|r| r == repo))
             .map(|t| t.name.clone())
             .collect()
+    }
+
+    /// The teams owning `repos` when the writer is in none of them; `None` inside or unlabelled.
+    pub fn outside(&self, writer: &[String], repos: &[&str]) -> Option<Vec<String>> {
+        if writer.is_empty() {
+            return None;
+        }
+        let mut owners: Vec<String> = Vec::new();
+        for r in repos {
+            for t in self.teams_of(r) {
+                if !owners.contains(&t) {
+                    owners.push(t);
+                }
+            }
+        }
+        let inside = owners
+            .iter()
+            .any(|o| writer.iter().any(|w| w.eq_ignore_ascii_case(o)));
+        (!owners.is_empty() && !inside).then_some(owners)
+    }
+
+    /// The most open policy among `owners` for notes from outside.
+    pub fn incoming(&self, owners: &[String]) -> Incoming {
+        self.team_list()
+            .iter()
+            .filter(|t| owners.iter().any(|o| o.eq_ignore_ascii_case(&t.name)))
+            .map(|t| t.incoming)
+            .min()
+            .unwrap_or_default()
     }
 
     /// Teams `email` belongs to.
