@@ -696,15 +696,6 @@ struct PackParam {
 
 // ---- tools ------------------------------------------------------------------------------
 
-/// First-contact orientation shown to the agent as MCP server `instructions`.
-const INSTRUCTIONS: &str = "Deterministic code intelligence over an indexed codebase.\n\
-New here? Call `repos` to see what's indexed and `suggest` for ready-made questions.\n\
-Workflow: `find`/`search` return a symbol `id` → pass that id to `zoom` (360° view), \
-`ripple` (who breaks if I change this — crosses service contracts too), `thread` (forward call \
-trace), `context_pack` (minimal safe edit read-set), or `flow` (narrated walkthrough). \
-`contracts` lists HTTP routes, queues, topics, buckets and tables with providers and consumers. `search` needs embeddings \
-(on by default unless the index was built with --no-embed); the graph tools always work.";
-
 #[tool_router(vis = "pub(crate)")]
 impl ComindlyServer {
     #[tool(
@@ -1265,7 +1256,7 @@ impl rmcp::ServerHandler for ComindlyServer {
                 .build(),
         )
         .with_server_info(rmcp::model::Implementation::from_build_env())
-        .with_instructions(INSTRUCTIONS)
+        .with_instructions(crate::agents::GUIDE)
     }
 }
 

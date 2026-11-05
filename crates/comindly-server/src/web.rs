@@ -1381,6 +1381,8 @@ async fn setup(State(app): State<Shared>, Cur(s): Cur) -> Json<api::Setup> {
         checks,
         tools,
         agents,
+        agents_md: crate::agents::agents_md(),
+        skill: crate::agents::skill(),
     })
 }
 

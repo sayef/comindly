@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Toggle, ToggleGroup } from "@/components/ui/tabs";
 import { useAccess } from "@/lib/me";
 import { api, type Setup } from "@/lib/api";
 import { cn, sentence } from "@/lib/utils";
@@ -430,6 +431,35 @@ function Questions({ s }: { s: Setup | undefined }) {
   );
 }
 
+function Instructions({ s, server }: { s: Setup | undefined; server: boolean }) {
+  const [form, setForm] = useState("agents");
+  if (!s) return null;
+  const skill = form === "skill";
+  return (
+    <section className="flex flex-col gap-4">
+      <div>
+        <h2 className="text-[17px] font-semibold">Tell your agent when to use it</h2>
+        <p className="mt-1 text-muted-foreground">
+          Agents get this guidance when they connect. Add it to a repository too, so agents that read the repository's instructions first see
+          it, and your team can adjust it.
+        </p>
+      </div>
+      <ToggleGroup label="Format" value={form} onValueChange={setForm} className="self-start">
+        <Toggle value="agents">AGENTS.md</Toggle>
+        <Toggle value="skill">Claude Code skill</Toggle>
+      </ToggleGroup>
+      <Code label={skill ? ".claude/skills/comindly/SKILL.md in a repository" : "AGENTS.md or CLAUDE.md at the root of a repository"}>
+        {skill ? s.skill : s.agents_md}
+      </Code>
+      {!server && (
+        <p className="text-xs text-muted-foreground">
+          In a terminal: <code className="font-mono text-foreground">comindly init-agents{skill ? " --skill" : ""}</code>
+        </p>
+      )}
+    </section>
+  );
+}
+
 function Terminal() {
   const { copy, state, live } = useCopy();
   return (
@@ -491,6 +521,7 @@ export function SetupPage() {
       </div>
 
       <Questions s={s} />
+      <Instructions s={s} server={server} />
       {!server && <Terminal />}
     </div>
   );

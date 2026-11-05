@@ -174,6 +174,9 @@ pub struct Setup {
     pub checks: Vec<Check>,
     pub tools: Vec<Tool>,
     pub agents: Vec<String>,
+    /// When to use comindly's tools: a section for AGENTS.md, and the same as a Claude Code skill.
+    pub agents_md: String,
+    pub skill: String,
 }
 
 /// An MCP tool.

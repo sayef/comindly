@@ -415,6 +415,8 @@ export interface Setup {
   checks: { ok: boolean; optional: boolean; message: string }[];
   tools: { name: string; description: string }[];
   agents: string[];
+  agents_md: string;
+  skill: string;
 }
 
 async function get<T>(path: string): Promise<T> {
