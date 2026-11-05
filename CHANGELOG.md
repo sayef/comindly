@@ -6,7 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Teams: labels on repositories inside one org. A team picker in the header filters the org map,
+  flows, contracts, explorer, ledger, packages, conventions and repositories; other teams' repositories
+  fold into one node per team at the edge of the org map. Admins label repositories and manage teams;
+  everyone picks their own teams. See [Teams](https://comindly.pages.dev/guides/teams/).
+- An existing server gets one team on upgrade, named after the org, with every indexed repository and
+  every member.
+
 ### Changed
+
+- The app says "org" for the whole index and its people; "team" now means a team inside it.
 
 - A deploy or restart pauses indexing instead of interrupting it: the job continues by itself once a
   server is back, under the same job and in its order, reusing what was already summarised.
