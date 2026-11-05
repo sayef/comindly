@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0-beta.2](https://github.com/sayef/comindly/compare/v0.5.0-beta.1...v0.5.0-beta.2) - 2026-11-05
+
 ### Added
 
 - Teams: labels on repositories inside one org. A team picker in the header filters the org map,
