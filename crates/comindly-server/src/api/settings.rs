@@ -119,7 +119,7 @@ pub struct Prompts {
 pub struct PromptTask {
     pub task: crate::prompts::Task,
     pub builtin: String,
-    /// The fixed reply format appended to whichever instructions run.
+    /// The reply format and its JSON schema, added after whichever instructions run.
     pub format: String,
     /// `None`: the built-in prompt.
     pub active: Option<u32>,

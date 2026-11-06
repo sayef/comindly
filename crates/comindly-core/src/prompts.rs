@@ -81,6 +81,18 @@ impl Task {
     }
 }
 
+impl Task {
+    /// What is always added after the instructions: the format and its JSON schema, so a server
+    /// that ignores structured output still gets the shape.
+    pub fn fixed(self) -> String {
+        format!(
+            "{}\n\nThe reply must match this JSON schema:\n{}",
+            self.format(),
+            crate::llm::reply_schema(self)
+        )
+    }
+}
+
 /// One saved version of a task's instructions.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Version {
@@ -197,7 +209,7 @@ impl Prompts {
             .0
             .get(&task)
             .map_or(task.builtin(), |(_, t)| t.as_str());
-        format!("{text}\n\n{}", task.format())
+        format!("{text}\n\n{}", task.fixed())
     }
 
     /// Part of the reuse key of what `task` writes; `None` for v0, so built-in results stay valid.
@@ -266,7 +278,7 @@ mod tests {
         assert_eq!(p.version(Task::Summary), 1);
         assert!(p.system(Task::Summary).starts_with("Summarise for search."));
         assert!(
-            p.system(Task::Summary).contains("Reply as JSON"),
+            p.system(Task::Summary).contains("\"queries\""),
             "the format stays"
         );
         assert!(p.key(Task::Summary).is_some());

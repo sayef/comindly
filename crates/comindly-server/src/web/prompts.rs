@@ -18,7 +18,7 @@ pub(super) async fn get(State(app): State<Shared>) -> Reply<api::Prompts> {
                 .map(|t| api::PromptTask {
                     task: t,
                     builtin: t.builtin().into(),
-                    format: t.format().into(),
+                    format: t.fixed(),
                     active: lib.active.get(&t).copied(),
                     versions: lib.of(t).cloned().collect(),
                 })

@@ -188,6 +188,16 @@ struct Walkthrough {
     queries: Vec<String>,
 }
 
+/// The JSON schema of `task`'s reply, as text for the system message.
+pub fn reply_schema(task: Task) -> String {
+    let schema = match task {
+        Task::Summary => schemars::schema_for!(Enrichment),
+        Task::Guide => schemars::schema_for!(GuideSection),
+        Task::Flow => schemars::schema_for!(Walkthrough),
+    };
+    serde_json::to_string_pretty(&schema).unwrap_or_default()
+}
+
 fn tidy(items: Vec<String>) -> Vec<String> {
     items
         .into_iter()
