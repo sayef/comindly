@@ -15,6 +15,8 @@ use crate::worktree::{Credentials, NoCredentials};
 #[derive(Debug, Clone)]
 pub struct Settings {
     pub llm_model: String,
+    /// Tasks that run on another model than `llm_model`.
+    pub task_models: std::collections::BTreeMap<crate::prompts::Task, String>,
     pub llm_base_url: Option<String>,
     pub embed_model: String,
     pub embed: bool,
@@ -49,6 +51,14 @@ impl Settings {
                 .clone()
                 .or_else(|| env("COMINDLY_LLM_MODEL"))
                 .unwrap_or_else(|| crate::llm::DEFAULT_MODEL.to_string()),
+            task_models: [
+                (crate::prompts::Task::Summary, &team.llm_model_summary),
+                (crate::prompts::Task::Guide, &team.llm_model_guide),
+                (crate::prompts::Task::Flow, &team.llm_model_flow),
+            ]
+            .into_iter()
+            .filter_map(|(t, m)| Some((t, m.clone()?)))
+            .collect(),
             llm_base_url: team
                 .llm_base_url
                 .clone()

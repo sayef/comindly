@@ -311,6 +311,13 @@ enum Cmd {
         #[arg(long = "index-dir", global = true)]
         index_dir: Option<String>,
     },
+    /// The LLM prompts indexing uses: list, show, save a draft, activate, deactivate, delete
+    Prompts {
+        #[command(subcommand)]
+        what: Option<PromptsWhat>,
+        #[arg(long = "index-dir", global = true)]
+        index_dir: Option<String>,
+    },
     /// Use a team's index on this machine: remember its location
     Join {
         /// The team's index (a folder, s3://, gs:// or az:// location)
@@ -432,7 +439,7 @@ enum Cmd {
 
 #[derive(Subcommand)]
 enum TeamWhat {
-    /// Set team settings, KEY=VALUE: name, llm_model, llm_base_url, embed_model, embed, enrich, flows, guide, max_enrich, max_flows, llm_concurrency, llm_price_in, llm_price_out, format, scip, auto_index, auto_index_llm, auto_index_minutes (empty removes)
+    /// Set team settings, KEY=VALUE: name, llm_model, llm_model_summary, llm_model_guide, llm_model_flow, llm_base_url, embed_model, embed, enrich, flows, guide, max_enrich, max_flows, llm_concurrency, llm_price_in, llm_price_out, format, scip, auto_index, auto_index_llm, auto_index_minutes (empty removes)
     Set {
         #[arg(required = true, value_name = "KEY=VALUE")]
         pairs: Vec<String>,
@@ -446,6 +453,29 @@ enum TeamWhat {
         #[arg(long)]
         default: bool,
     },
+}
+
+#[derive(Subcommand)]
+enum PromptsWhat {
+    /// A task's prompt in use, or one version (0 is the built-in)
+    Show { task: String, version: Option<u32> },
+    /// Save instructions from a file (or stdin with `-`) as a new version, not used until activated
+    Save {
+        task: String,
+        file: String,
+        /// What changed, for whoever activates it
+        #[arg(long)]
+        note: Option<String>,
+        /// Style guide only: a JSON file of section guidance by section title
+        #[arg(long)]
+        sections: Option<String>,
+    },
+    /// Use a version from the next index on; that index writes the task's results again
+    Activate { task: String, version: u32 },
+    /// Go back to the built-in prompt from the next index on
+    Deactivate { task: String },
+    /// Delete a version that is not in use
+    Delete { task: String, version: u32 },
 }
 
 #[derive(Subcommand)]
@@ -791,6 +821,7 @@ fn main() -> ExitCode {
         }
         Cmd::App { index_dir } => cmd_app(index_dir.as_deref()),
         Cmd::Team { what, index_dir } => cmd_team(what, index_dir.as_deref()),
+        Cmd::Prompts { what, index_dir } => cmd_prompts(what, index_dir.as_deref()),
         Cmd::Join { index } => cmd_join(&index),
         Cmd::Erase {
             ids,
@@ -1818,6 +1849,141 @@ fn read_secret(env: &str, stdin: bool, prompt: &str) -> anyhow::Result<String> {
     Ok(v)
 }
 
+fn cmd_prompts(what: Option<PromptsWhat>, from: Option<&str>) -> ExitCode {
+    let root = comindly::config::Config::load().index_dir(from);
+    match prompts_run(what, &root) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            comindly::ui::err(&comindly::storage::explain(&format!("{e:#}")));
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn prompts_run(what: Option<PromptsWhat>, root: &str) -> anyhow::Result<()> {
+    use anyhow::Context as _;
+    use comindly::prompts::{self, Task};
+    let task = |t: &str| {
+        Task::parse(t).with_context(|| format!("`{t}` is not a task: summary, guide or flow"))
+    };
+    let stored = comindly::rt::block_on(prompts::load(root))?;
+    let mut lib = stored.doc;
+    let me = comindly::config::local_identity();
+    let by = me.name.unwrap_or(me.actor);
+    let msg = match what {
+        None => {
+            comindly::ui::header(&format!("Prompts of {root}"));
+            for t in Task::ALL {
+                let active = lib.active.get(&t).copied();
+                let used = active.map_or("built-in".to_string(), |n| format!("version {n}"));
+                comindly::ui::field(t.name(), &used);
+                for v in lib.of(t) {
+                    let note = v
+                        .note
+                        .as_deref()
+                        .map(|n| format!(" {n}."))
+                        .unwrap_or_default();
+                    let mark = if active == Some(v.version) {
+                        " (in use)"
+                    } else {
+                        ""
+                    };
+                    comindly::ui::note(&format!(
+                        "v{}{mark}{note} {}, {}",
+                        v.version,
+                        v.author,
+                        &v.created_at[..v.created_at.len().min(16)]
+                    ));
+                }
+                if let Some(n) = lib.builtin_changed(t) {
+                    comindly::ui::warn(&format!(
+                        "the built-in {} prompt changed since version {n} was written",
+                        t.name()
+                    ));
+                }
+            }
+            return Ok(());
+        }
+        Some(PromptsWhat::Show {
+            task: name,
+            version,
+        }) => {
+            let t = task(&name)?;
+            let n = version.or_else(|| lib.active.get(&t).copied()).unwrap_or(0);
+            let v = lib.of(t).find(|v| v.version == n);
+            anyhow::ensure!(n == 0 || v.is_some(), "{name} has no version {n}");
+            println!("{}", v.map_or(t.builtin(), |v| v.text.as_str()));
+            if t == Task::Guide {
+                for (title, builtin) in comindly::styleguide::SECTIONS {
+                    let g = v
+                        .and_then(|v| v.sections.get(title))
+                        .map_or(builtin, |g| g.as_str());
+                    println!("\n## {title}\n{g}");
+                }
+            }
+            println!("\n# Always added\n{}", t.fixed());
+            return Ok(());
+        }
+        Some(PromptsWhat::Save {
+            task: name,
+            file,
+            note,
+            sections,
+        }) => {
+            let t = task(&name)?;
+            let text = if file == "-" {
+                std::io::read_to_string(std::io::stdin())?
+            } else {
+                std::fs::read_to_string(&file).with_context(|| format!("read {file}"))?
+            };
+            let sections = match sections {
+                Some(f) => serde_json::from_str(
+                    &std::fs::read_to_string(&f).with_context(|| format!("read {f}"))?,
+                )
+                .with_context(|| {
+                    format!("{f} is not a JSON object of section title to guidance")
+                })?,
+                None => Default::default(),
+            };
+            let n = lib.add(t, &text, &sections, note.as_deref(), &by)?;
+            format!(
+                "saved {} version {n}; not used until you activate it",
+                t.name()
+            )
+        }
+        Some(PromptsWhat::Activate {
+            task: name,
+            version,
+        }) => {
+            let t = task(&name)?;
+            lib.activate(t, version)?;
+            format!(
+                "{} version {version} is in use; the next index writes its results again",
+                t.name()
+            )
+        }
+        Some(PromptsWhat::Deactivate { task: name }) => {
+            let t = task(&name)?;
+            lib.deactivate(t);
+            format!(
+                "{} is back to the built-in prompt; the next index writes its results again",
+                t.name()
+            )
+        }
+        Some(PromptsWhat::Delete {
+            task: name,
+            version,
+        }) => {
+            let t = task(&name)?;
+            lib.remove(t, version)?;
+            format!("{} version {version} deleted", t.name())
+        }
+    };
+    comindly::rt::block_on(prompts::save_as(root, &lib, stored.version, &by))?;
+    comindly::ui::ok(&msg);
+    Ok(())
+}
+
 fn cmd_team(what: Option<TeamWhat>, from: Option<&str>) -> ExitCode {
     let root = comindly::config::Config::load().index_dir(from);
     match team_run(what, &root) {
@@ -1852,6 +2018,13 @@ fn team_run(what: Option<TeamWhat>, root: &str) -> anyhow::Result<()> {
                 s.llm_model.clone(),
                 comindly::llm::DEFAULT_MODEL,
             );
+            for (k, v) in [
+                ("llm_model_summary", &s.llm_model_summary),
+                ("llm_model_guide", &s.llm_model_guide),
+                ("llm_model_flow", &s.llm_model_flow),
+            ] {
+                comindly::ui::field(k, v.as_deref().unwrap_or("same as llm_model"));
+            }
             show(
                 "embed_model",
                 s.embed_model.clone(),
@@ -1952,6 +2125,9 @@ fn team_run(what: Option<TeamWhat>, root: &str) -> anyhow::Result<()> {
                 match k.trim() {
                     "name" => s.name = text,
                     "llm_model" => s.llm_model = text,
+                    "llm_model_summary" => s.llm_model_summary = text,
+                    "llm_model_guide" => s.llm_model_guide = text,
+                    "llm_model_flow" => s.llm_model_flow = text,
                     "llm_base_url" => s.llm_base_url = text,
                     "embed_model" => {
                         comindly::ui::warn(

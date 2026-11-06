@@ -30,6 +30,8 @@ pub struct LlmClient {
     // Responses API — proxies/Ollama/vLLM implement `/chat/completions`, not `/responses`.
     client: openai::OpenAI,
     model: String,
+    /// Tasks that run on another model than `model`.
+    models: std::collections::BTreeMap<Task, String>,
     // OpenAI's own API takes `max_completion_tokens` (required by newer models); compatible
     // servers (Ollama, vLLM, LiteLLM) expect `max_tokens`.
     openai_native: bool,
@@ -61,6 +63,7 @@ impl LlmClient {
         Ok(Self {
             client,
             model: model.to_string(),
+            models: Default::default(),
             openai_native: base_url.is_none(),
             input_tokens: Arc::new(AtomicU64::new(0)),
             output_tokens: Arc::new(AtomicU64::new(0)),
@@ -75,9 +78,21 @@ impl LlmClient {
         )
     }
 
+    /// Run `task` on its own model instead of the default one.
+    pub fn with_models(mut self, models: std::collections::BTreeMap<Task, String>) -> Self {
+        self.models = models;
+        self
+    }
+
+    /// The model `task` runs on.
+    pub fn model(&self, task: Task) -> &str {
+        self.models.get(&task).unwrap_or(&self.model)
+    }
+
     /// A reply in the shape of `T`, asked for as structured output (a JSON schema).
     async fn complete<T: DeserializeOwned + JsonSchema>(
         &self,
+        task: Task,
         system: &str,
         user: &str,
         max_tokens: u32,
@@ -96,7 +111,7 @@ impl LlmClient {
         };
         let resp = self
             .client
-            .chat(&self.model)
+            .chat(self.model(task))
             .call(req)
             .await
             .context("LLM completion")?;
@@ -117,7 +132,7 @@ impl LlmClient {
     ) -> Result<Enrichment> {
         let user = format!("Symbol: {name}\nSignature: {signature}\nContext: {context}");
         let r: Enrichment = self
-            .complete(&prompts.system(Task::Summary), &user, 160)
+            .complete(Task::Summary, &prompts.system(Task::Summary), &user, 160)
             .await?;
         Ok(Enrichment {
             summary: r.summary.trim().to_string(),
@@ -139,7 +154,7 @@ impl LlmClient {
             "Repository: {repo}\nSection: {title}\nWhat to cover: {guidance}\n\n# Evidence\n\n{evidence}"
         );
         let r: GuideSection = self
-            .complete(&prompts.system(Task::Guide), &user, 900)
+            .complete(Task::Guide, &prompts.system(Task::Guide), &user, 900)
             .await?;
         let rules = tidy(r.rules);
         Ok((r.observed && !rules.is_empty()).then(|| {
@@ -162,7 +177,7 @@ impl LlmClient {
     ) -> Result<(String, Vec<String>)> {
         let user = format!("Entry point: {entry}\nSignature: {signature}\nCall trace:\n{trace}");
         let r: Walkthrough = self
-            .complete(&prompts.system(Task::Flow), &user, 320)
+            .complete(Task::Flow, &prompts.system(Task::Flow), &user, 320)
             .await?;
         Ok((r.narration.trim().to_string(), tidy(r.queries)))
     }

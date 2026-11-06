@@ -75,6 +75,9 @@ pub(super) async fn save(
             &mut next.name,
             &mut next.llm_base_url,
             &mut next.llm_model,
+            &mut next.llm_model_summary,
+            &mut next.llm_model_guide,
+            &mut next.llm_model_flow,
             &mut next.embed_model,
         ] {
             if v.as_deref().is_some_and(|s| s.trim().is_empty()) {

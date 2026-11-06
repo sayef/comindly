@@ -272,6 +272,7 @@ pub fn llm_client(
         key.as_deref(),
     )
     .ok()
+    .map(|c| c.with_models(settings.task_models.clone()))
 }
 
 fn home_path(p: &str) -> PathBuf {

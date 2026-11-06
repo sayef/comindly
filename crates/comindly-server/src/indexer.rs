@@ -161,6 +161,7 @@ pub fn child() -> Result<()> {
                 spec.llm_key.as_deref(),
             )
             .ok()
+            .map(|c| c.with_models(settings.task_models.clone()))
         } else {
             None
         };
