@@ -1669,7 +1669,14 @@ mod tests {
                 view("http:POST /chat", "agent", "service"),
             ],
         );
-        let kind = |src: &str| map.edges.iter().find(|e| e.src == src).unwrap().kind.clone();
+        let kind = |src: &str| {
+            map.edges
+                .iter()
+                .find(|e| e.src == src)
+                .unwrap()
+                .kind
+                .clone()
+        };
         assert_eq!(kind("library"), "data");
         assert_eq!(kind("service"), "contract");
     }
