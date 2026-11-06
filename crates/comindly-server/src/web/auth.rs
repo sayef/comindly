@@ -208,8 +208,7 @@ pub(super) async fn guard(
             };
             // The gateway signed them in with the provider, so an invitation is accepted here too.
             let join = server.oidc.as_ref().is_some_and(|o| o.may_join(&email));
-            let member =
-                tokio::task::block_in_place(|| server.accounts.admit(&email, join).ok());
+            let member = tokio::task::block_in_place(|| server.accounts.admit(&email, join).ok());
             let Some(member) = member else {
                 return fail(
                     StatusCode::FORBIDDEN,
