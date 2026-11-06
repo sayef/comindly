@@ -470,7 +470,7 @@ enum PromptsWhat {
         #[arg(long)]
         sections: Option<String>,
     },
-    /// Use a version from the next index on; that index writes the task's results again
+    /// Use a version for what the next index writes; nothing is rewritten for it
     Activate { task: String, version: u32 },
     /// Go back to the built-in prompt from the next index on
     Deactivate { task: String },
@@ -1958,7 +1958,7 @@ fn prompts_run(what: Option<PromptsWhat>, root: &str) -> anyhow::Result<()> {
             let t = task(&name)?;
             lib.activate(t, version)?;
             format!(
-                "{} version {version} is in use; the next index writes its results again",
+                "{} version {version} is in use for what the next index writes",
                 t.name()
             )
         }
@@ -1966,7 +1966,7 @@ fn prompts_run(what: Option<PromptsWhat>, root: &str) -> anyhow::Result<()> {
             let t = task(&name)?;
             lib.deactivate(t);
             format!(
-                "{} is back to the built-in prompt; the next index writes its results again",
+                "{} is back to the built-in prompt for what the next index writes",
                 t.name()
             )
         }

@@ -14,7 +14,7 @@ use futures::StreamExt;
 use crate::context::{Cancelled, IndexContext};
 use crate::events::Usage;
 use crate::model::{Edge, EdgeKind, GlobalSymbolId, Symbol, SymbolKind};
-use crate::prompts::{Prompts, Task};
+use crate::prompts::Prompts;
 
 /// A repository to index: the folder of its clone and, for one comindly keeps itself, the URL it
 /// is cloned from when the folder is missing.
@@ -648,19 +648,13 @@ async fn summaries(
     } else {
         HashMap::new()
     };
-    // A summary is written from the name, signature and path only, so it stays valid while they
-    // and the prompt do.
-    let prompt = prompts.key(Task::Summary);
+    // A summary is written from the name, signature and path only, so it stays valid while they do.
     let key = |s: &Symbol| {
-        fingerprint(
-            [
-                s.name.clone(),
-                s.signature.clone().unwrap_or_default(),
-                s.file_path.clone(),
-            ]
-            .into_iter()
-            .chain(prompt.clone()),
-        )
+        fingerprint([
+            s.name.clone(),
+            s.signature.clone().unwrap_or_default(),
+            s.file_path.clone(),
+        ])
     };
     let stored_keys = read_keys(dst, "enrich_keys").await;
     let mut rows: Vec<TextRow> = Vec::new();
@@ -863,14 +857,12 @@ async fn style_guides(
     let mut bodies: HashMap<String, String> = read_keys(dst, "guide_sections").await;
     let mut basis: HashMap<String, String> = read_keys(dst, "guide_basis").await;
     let mut redone = 0usize;
-    let prompt = prompts.key(Task::Guide);
     for (repo, sections) in per_repo {
         ctx.check()?;
         let key = fingerprint(
             sections
                 .iter()
-                .map(|s| format!("{}\0{}\0{}", s.title, s.guidance, s.evidence))
-                .chain(prompt.clone()),
+                .map(|s| format!("{}\0{}\0{}", s.title, s.guidance, s.evidence)),
         );
         let sid = |title: &str| format!("{repo}\0{title}");
         let old_doc = guides
@@ -886,7 +878,7 @@ async fn style_guides(
                 let id = sid(&sec.title);
                 if !bodies.contains_key(&id) {
                     bodies.insert(id.clone(), guide_section_of(doc, &sec.title));
-                    basis.insert(id, guide_basis(sec, &prompt));
+                    basis.insert(id, guide_basis(sec));
                 }
             }
             reused += 1;
@@ -899,7 +891,7 @@ async fn style_guides(
                 !(bodies.contains_key(&id)
                     && basis
                         .get(&id)
-                        .is_some_and(|b| guide_similar(b, &guide_basis(sec, &prompt))))
+                        .is_some_and(|b| guide_similar(b, &guide_basis(sec))))
             })
             .collect();
         let total = todo.len() as u64;
@@ -940,7 +932,7 @@ async fn style_guides(
             if let Some(body) = body {
                 let id = sid(&sec.title);
                 bodies.insert(id.clone(), body.trim().to_string());
-                basis.insert(id, guide_basis(sec, &prompt));
+                basis.insert(id, guide_basis(sec));
                 redone += 1;
             }
         }
@@ -1028,12 +1020,8 @@ fn guide_section_of(doc: &str, title: &str) -> String {
 
 /// What a section is written from, with counts dropped and percentages rounded to tens, so
 /// ordinary churn does not count as a change.
-fn guide_basis(sec: &crate::styleguide::Section, prompt: &Option<String>) -> String {
-    let mut out = fingerprint(
-        [sec.title.clone(), sec.guidance.clone()]
-            .into_iter()
-            .chain(prompt.clone()),
-    );
+fn guide_basis(sec: &crate::styleguide::Section) -> String {
+    let mut out = fingerprint([sec.title.clone(), sec.guidance.clone()]);
     for line in sec.evidence.lines() {
         let line = line.trim();
         if line.is_empty() {
@@ -1125,14 +1113,7 @@ async fn walkthroughs(
         return Ok(());
     }
     r.warn("Walkthroughs send call traces to the LLM.");
-    let prompt = prompts.key(Task::Flow);
-    let key = |name: &str, sig: &str, trace: &str| {
-        fingerprint(
-            [format!("{name}\0{sig}\0{trace}")]
-                .into_iter()
-                .chain(prompt.clone()),
-        )
-    };
+    let key = |name: &str, sig: &str, trace: &str| fingerprint([format!("{name}\0{sig}\0{trace}")]);
     let stored_keys = read_keys(dst, "flow_keys").await;
     let stored: HashMap<String, (String, Vec<String>)> = crate::index::read_flows(dst)
         .await
@@ -1518,25 +1499,22 @@ mod tests {
             .map(|i| format!("def handler_{}(x): pass", (b'a' + i) as char))
             .collect();
         let base = format!("snake_case 97.3% (1234/1268)\n{}", lines.join("\n"));
-        let a = guide_basis(&sec(&base), &None);
-        let counts = guide_basis(
-            &sec(&base.replace("97.3% (1234/1268)", "96.8% (1301/1340)")),
-            &None,
-        );
+        let a = guide_basis(&sec(&base));
+        let counts = guide_basis(&sec(&base.replace("97.3% (1234/1268)", "96.8% (1301/1340)")));
         assert!(guide_similar(&a, &counts), "counts moving is churn");
-        let shifted = guide_basis(&sec(&base.replace("97.3%", "61.0%")), &None);
+        let shifted = guide_basis(&sec(&base.replace("97.3%", "61.0%")));
         assert!(
             !guide_similar(&a, &shifted),
             "a measured ratio moving rewrites"
         );
-        let one = guide_basis(&sec(&base.replacen("handler_a", "handle_a", 1)), &None);
+        let one = guide_basis(&sec(&base.replacen("handler_a", "handle_a", 1)));
         assert!(guide_similar(&a, &one), "one changed excerpt line is churn");
-        let many = guide_basis(&sec(&base.replace("handler_", "Handler")), &None);
+        let many = guide_basis(&sec(&base.replace("handler_", "Handler")));
         assert!(!guide_similar(&a, &many), "most lines changed is drift");
         let mut other = sec(&base);
         other.guidance = "New prompt".into();
         assert!(
-            !guide_similar(&a, &guide_basis(&other, &None)),
+            !guide_similar(&a, &guide_basis(&other)),
             "new guidance rewrites"
         );
     }

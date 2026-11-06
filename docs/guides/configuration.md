@@ -76,8 +76,10 @@ walkthroughs. All of it is stored with the index.
 Each task starts with comindly's built-in prompt. Saving an edit makes a new version that nothing
 uses yet; for style guides it can also change what each section covers. **Try** runs a draft on one
 symbol, flow or style guide section and shows it next to what the index holds now. Activating a
-version, or deactivating it to go back to the built-in prompt, takes effect from the next index,
-which then writes that task's results again. Only the instructions can be changed: the reply format
+version, or deactivating it to go back to the built-in prompt, applies to what the next index
+writes, partial or full; the same goes for a model change. Nothing already written is redone for
+it: a partial index writes new or changed code with it, and a full index writes everything it
+does not reuse. Only the instructions can be changed: the reply format
 and its JSON schema are always added, so a model or server without structured output still replies
 in the right shape. When a release changes a built-in prompt that an active version replaces, the
 page says so. On a team server, admins change models and prompts, everyone can read them, and

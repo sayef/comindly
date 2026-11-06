@@ -42,15 +42,6 @@ pub(super) async fn get(State(app): State<Shared>) -> Reply<api::Prompts> {
     run.await.map(Json).map_err(fail)
 }
 
-/// What the next index writes again when `task` changes prompt.
-fn redone(task: Task) -> &'static str {
-    match task {
-        Task::Summary => "writes every summary again",
-        Task::Guide => "writes every style guide again",
-        Task::Flow => "writes every walkthrough again",
-    }
-}
-
 pub(super) async fn change(
     who: super::Member,
     State(app): State<Shared>,
@@ -84,14 +75,11 @@ pub(super) async fn change(
             }
             PromptAction::Activate { task, n } => {
                 lib.activate(task, n)?;
-                format!("version {n} is in use; the next index {}", redone(task))
+                format!("version {n} is in use for what the next index writes")
             }
             PromptAction::Deactivate { task } => {
                 lib.deactivate(task);
-                format!(
-                    "back to the built-in prompt; the next index {}",
-                    redone(task)
-                )
+                "back to the built-in prompt for what the next index writes".to_string()
             }
             PromptAction::Delete { task, n } => {
                 lib.remove(task, n)?;

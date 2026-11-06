@@ -1,5 +1,5 @@
-//! The LLM prompts indexing uses: built in (v0), or an activated saved version, stored with the
-//! index (`<index>/_team`, table `prompts`). Only the instructions are editable, never the format.
+//! The LLM prompts indexing uses: built in (v0) or an activated version, stored with the index
+//! (`<index>/_team`, table `prompts`), for what the next index writes; nothing is redone for them.
 
 use std::collections::BTreeMap;
 
@@ -303,21 +303,6 @@ impl Prompts {
         s.get(title).map(String::as_str)
     }
 
-    /// Part of the reuse key of what `task` writes; `None` for v0, so built-in results stay valid.
-    pub fn key(&self, task: Task) -> Option<String> {
-        self.0.get(&task).map(|(_, t, sections)| {
-            let mut h = blake3::Hasher::new();
-            h.update(t.as_bytes());
-            for (title, g) in sections {
-                h.update(b"\0");
-                h.update(title.as_bytes());
-                h.update(b"\0");
-                h.update(g.as_bytes());
-            }
-            format!("prompt\0{}", h.finalize().to_hex())
-        })
-    }
-
     /// e.g. `summary v2, guide built-in, flow built-in`.
     pub fn describe(&self) -> String {
         Task::ALL
@@ -377,7 +362,6 @@ mod tests {
             0,
             "a saved draft is not used"
         );
-        assert_eq!(l.in_use().key(Task::Summary), None);
         l.activate(Task::Summary, v1).unwrap();
         let p = l.in_use();
         assert_eq!(p.version(Task::Summary), 1);
@@ -386,7 +370,6 @@ mod tests {
             p.system(Task::Summary).contains("\"queries\""),
             "the format stays"
         );
-        assert!(p.key(Task::Summary).is_some());
         assert_eq!(p.version(Task::Flow), 0);
         assert!(l.remove(Task::Summary, v1).is_err(), "the active one stays");
         l.deactivate(Task::Summary);
@@ -440,12 +423,10 @@ mod tests {
         let bad = BTreeMap::from([("Nope".to_string(), "x".to_string())]);
         assert!(l.add(Task::Guide, "x", &bad, None, "a").is_err());
         assert!(l.add(Task::Summary, "x", &sections, None, "a").is_err());
-        let before = l.in_use().key(Task::Guide);
         l.activate(Task::Guide, n).unwrap();
         let p = l.in_use();
         assert_eq!(p.guidance(title), Some("Only casing."));
         assert_ne!(p.guidance(title), Some(builtin));
-        assert_ne!(p.key(Task::Guide), before);
         assert_eq!(l.builtin_changed(Task::Guide), None);
         l.versions[0].based_on = Some("an older release".into());
         assert_eq!(l.builtin_changed(Task::Guide), Some(n));

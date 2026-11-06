@@ -18,21 +18,18 @@ const pre = "whitespace-pre-wrap rounded-md bg-muted/50 px-3 py-2 font-mono text
 
 const modelKey = { summary: "llm_model_summary", guide: "llm_model_guide", flow: "llm_model_flow" } as const;
 
-const about: Record<PromptTaskName, { title: string; writes: string; redo: string }> = {
+const about: Record<PromptTaskName, { title: string; writes: string }> = {
   summary: {
     title: "Summaries",
     writes: "A sentence and search questions for each of the most used functions and types.",
-    redo: "every summary",
   },
   guide: {
     title: "Style guides",
     writes: "Each section of a repository's style guide, from evidence measured in its code.",
-    redo: "every style guide",
   },
   flow: {
     title: "Walkthroughs",
     writes: "A short walkthrough of each flow, from its entry point and call trace.",
-    redo: "every walkthrough",
   },
 };
 
@@ -54,8 +51,8 @@ export function PromptsPage() {
   return (
     <div className="flex max-w-4xl flex-col gap-5">
       <PageHeader title="Models &amp; prompts">
-        Which models indexing and search use, and what indexing asks the LLM. A saved prompt is a draft until someone activates it; deactivating goes back to the built-in prompt.
-        Either takes effect from the next index.
+        Which models indexing and search use, and what indexing asks the LLM. A saved prompt is a draft until someone activates it; deactivating goes back to the built-in prompt. A
+        change, to a model or a prompt, applies to what the next index writes, partial or full; nothing already written is redone for it.
       </PageHeader>
       <SettingsTabs />
       <TeamSection part="models" />
@@ -113,7 +110,7 @@ function TaskCard({ t, model, version, writable }: { t: PromptTask; model?: stri
                   size="sm"
                   variant="ghost"
                   danger={false}
-                  question={`Back to the built-in prompt? The next index writes ${a.redo} again.`}
+                  question="Back to the built-in prompt for what the next index writes?"
                   confirmLabel="Deactivate"
                   loading={busy("deactivate")}
                   onConfirm={() => change.mutate({ action: "deactivate", task: t.task })}
@@ -126,7 +123,7 @@ function TaskCard({ t, model, version, writable }: { t: PromptTask; model?: stri
                     size="sm"
                     variant="outline"
                     danger={false}
-                    question={`The next index writes ${a.redo} again with this version.`}
+                    question="Use this version for what the next index writes?"
                     confirmLabel="Activate"
                     loading={busy("activate", v.version)}
                     onConfirm={() =>

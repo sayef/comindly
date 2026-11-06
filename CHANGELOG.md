@@ -14,9 +14,10 @@ All notable changes to this project are documented here. The format follows
 - Prompts for summaries, style guides and walkthroughs. An edit is saved as a new version that is
   not used until someone activates it; deactivating goes back to the built-in prompt. A style guide
   version can also change what each section covers. A draft can be tried on one symbol, flow or
-  style guide section next to what the index holds now. The next index writes a task's results
-  again after its prompt changes; prompt changes appear in the server's audit log, and the page
-  says when a release changed a built-in prompt that an active version replaces.
+  style guide section next to what the index holds now. A model or prompt change applies to what
+  the next index writes, partial or full, without redoing results already written. Prompt changes
+  appear in the server's audit log, and the page says when a release changed a built-in prompt
+  that an active version replaces.
 - `comindly prompts`: list, show, save a draft from a file, activate, deactivate and delete.
 
 ### Changed
