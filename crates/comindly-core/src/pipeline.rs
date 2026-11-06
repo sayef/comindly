@@ -914,6 +914,7 @@ async fn style_guides(
                     llm.guide_section(&prompts, &repo, &title, &guidance, &evidence)
                         .await
                         .ok()
+                        .map(|b| b.unwrap_or_else(|| NO_CONVENTION.to_string()))
                 }
             },
             |_| {
@@ -939,7 +940,7 @@ async fn style_guides(
         let mut doc = String::new();
         for sec in &sections {
             let t = bodies.get(&sid(&sec.title)).map(|b| b.trim()).unwrap_or("");
-            if t.is_empty() || t.eq_ignore_ascii_case("No consistent convention observed.") {
+            if t.is_empty() || t.eq_ignore_ascii_case(NO_CONVENTION) {
                 continue;
             }
             doc.push_str(&format!("## {}\n\n{}\n\n", sec.title, t));
@@ -1213,6 +1214,9 @@ async fn walkthroughs(
     }
     Ok(())
 }
+
+/// A guide section's body when its evidence shows no consistent convention.
+const NO_CONVENTION: &str = "No consistent convention observed.";
 
 fn fingerprint(parts: impl IntoIterator<Item = String>) -> String {
     let mut h = blake3::Hasher::new();

@@ -14,6 +14,12 @@ All notable changes to this project are documented here. The format follows
   what the index holds now. The reply format stays fixed, and the next index writes a task's results
   again after its prompt changes.
 
+### Changed
+
+- Summaries, style guide sections and walkthroughs ask the LLM for structured output (a JSON
+  schema) instead of a text format read back line by line. A server that ignores the schema still
+  works when its reply holds the JSON. Results already in an index stay valid.
+
 ## [0.5.0-beta.4](https://github.com/sayef/comindly/compare/v0.5.0-beta.3...v0.5.0-beta.4) - 2026-11-06
 
 ### Added

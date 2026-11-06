@@ -59,26 +59,23 @@ impl Task {
         }
     }
 
-    /// The reply format the parser expects; never editable.
+    /// What the reply holds; the same shape goes along as a JSON schema, and is never editable.
     pub fn format(self) -> &'static str {
         match self {
             Task::Summary => {
-                "Reply in exactly this format:\n\
-                SUMMARY: <one concise sentence describing what this does>\n\
-                QUERIES: <3 natural-language questions a developer might ask that this code answers, separated by ` | `>\n\
-                No preamble, no code fences."
+                "Reply as JSON: \"summary\" is one concise sentence describing what this does; \
+                \"queries\" are 3 natural-language questions a developer might ask that this code \
+                answers."
             }
             Task::Guide => {
-                "Output ONLY this section's rules as terse markdown bullets: NO top-level heading, \
-                no preamble, no closing note. If the evidence shows no consistent convention, reply \
-                with exactly: No consistent convention observed."
+                "Reply as JSON: \"rules\" holds this section's rules, one terse markdown rule per \
+                item, with no heading, preamble or closing note; \"observed\" is false, with no \
+                rules, when the evidence shows no consistent convention."
             }
             Task::Flow => {
                 "You get an entry point and its call trace (each line: depth, relation, symbol, \
-                location). Reply in exactly this format:\n\
-                NARRATION: <the walkthrough>\n\
-                QUERIES: <3 questions a developer might ask about this flow, separated by ` | `>\n\
-                No preamble, no code fences."
+                location). Reply as JSON: \"narration\" is the walkthrough; \"queries\" are 3 \
+                questions a developer might ask about this flow."
             }
         }
     }
@@ -269,7 +266,7 @@ mod tests {
         assert_eq!(p.version(Task::Summary), 1);
         assert!(p.system(Task::Summary).starts_with("Summarise for search."));
         assert!(
-            p.system(Task::Summary).contains("SUMMARY:"),
+            p.system(Task::Summary).contains("Reply as JSON"),
             "the format stays"
         );
         assert!(p.key(Task::Summary).is_some());
