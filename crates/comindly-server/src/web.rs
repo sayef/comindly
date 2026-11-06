@@ -1138,6 +1138,9 @@ async fn conventions(Cur(s): Cur, Query(q): Query<api::RepoQuery>) -> Json<api::
         .filter(|c| mine(&c.repo))
         .map(|c| api::ShownConvention {
             id: c.id(),
+            strength: c.strength().map(String::from),
+            evidence: c.evidence(),
+            few: c.few(),
             convention: c,
         })
         .collect();

@@ -31,6 +31,12 @@ pub struct Convention {
     pub generic: String,
     pub support: usize,
     pub total: usize,
+    /// What `support` and `total` count, e.g. `functions with parameters`.
+    #[serde(default)]
+    pub unit: String,
+    /// Org baseline only: the repositories that share it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub repos: Vec<String>,
     /// `path:line` of representative, central instances.
     pub exemplars: Vec<String>,
     /// `path:line` of instances that deviate.
@@ -201,6 +207,8 @@ pub fn apply(mut measured: Vec<Convention>, manual: &[Manual]) -> Vec<Convention
                 generic: m.rule.clone(),
                 support: 0,
                 total: 0,
+                unit: String::new(),
+                repos: Vec::new(),
                 exemplars: Vec::new(),
                 counterexamples: Vec::new(),
                 origin: Origin::Manual,
@@ -351,16 +359,12 @@ fn org_baseline(per_repo: &[Convention]) -> Vec<Convention> {
                 repo: ORG.into(),
                 dimension: cs[0].dimension.clone(),
                 key: key.to_string(),
-                rule: format!(
-                    "{}: in {} of {} measured repos ({})",
-                    cs[0].generic,
-                    cs.len(),
-                    repos.len(),
-                    names.join(", ")
-                ),
+                rule: cs[0].generic.clone(),
                 generic: cs[0].generic.clone(),
                 support: cs.len(),
                 total: repos.len(),
+                unit: "measured repositories".into(),
+                repos: names.iter().map(|n| n.to_string()).collect(),
                 // `repo:path:line`, since the baseline spans repositories.
                 exemplars: cs
                     .iter()
@@ -515,16 +519,18 @@ impl<'a> Cx<'a> {
                 .filter(|s| casing(&s.name) != *case)
                 .copied()
                 .collect();
-            let generic = format!("{} are {case}", capitalize(label));
+            let generic = format!("Name {label} in `{case}`");
             out.push(Convention {
                 origin: Origin::Measured,
                 repo: repo.into(),
                 dimension: "naming".into(),
                 key: format!("naming:{label}:{case}"),
-                rule: format!("{generic} ({} of {})", hits.len(), named.len()),
+                rule: generic.clone(),
                 generic,
                 support: hits.len(),
                 total: named.len(),
+                unit: label.to_string(),
+                repos: Vec::new(),
                 exemplars: self.central(hits.clone(), 3),
                 counterexamples: self.central(deviants, 3),
             });
@@ -549,14 +555,14 @@ impl<'a> Cx<'a> {
         if share >= 60 || share <= 20 {
             let (generic, key, ex, dev) = if share >= 60 {
                 (
-                    "Functions declare return types",
+                    "Declare return types",
                     "signatures:return-types:annotated",
                     annotated,
                     bare,
                 )
             } else {
                 (
-                    "Return types are mostly left unannotated",
+                    "Leave return types unannotated",
                     "signatures:return-types:bare",
                     bare,
                     annotated,
@@ -567,10 +573,12 @@ impl<'a> Cx<'a> {
                 repo: repo.into(),
                 dimension: "signatures".into(),
                 key: key.into(),
-                rule: format!("{generic} ({} of {})", ex.len(), callables.len()),
+                rule: generic.into(),
                 generic: generic.into(),
                 support: ex.len(),
                 total: callables.len(),
+                unit: "functions".into(),
+                repos: Vec::new(),
                 exemplars: self.central(ex, 3),
                 counterexamples: self.central(dev, 3),
             });
@@ -584,20 +592,18 @@ impl<'a> Cx<'a> {
             .iter()
             .partition(|s| self.typed.contains(s.id.render().as_str()));
         if with_params.len() >= 10 && typed.len() * 10 >= with_params.len() * 7 {
-            let generic = "Parameters carry type annotations";
+            let generic = "Type-annotate parameters";
             out.push(Convention {
                 origin: Origin::Measured,
                 repo: repo.into(),
                 dimension: "signatures".into(),
                 key: "signatures:params:typed".into(),
-                rule: format!(
-                    "{generic} ({} of {} functions with parameters)",
-                    typed.len(),
-                    with_params.len()
-                ),
+                rule: generic.into(),
                 generic: generic.into(),
                 support: typed.len(),
                 total: with_params.len(),
+                unit: "functions with parameters".into(),
+                repos: Vec::new(),
                 exemplars: self.central(typed, 3),
                 counterexamples: self.central(untyped, 3),
             });
@@ -612,20 +618,18 @@ impl<'a> Cx<'a> {
             .copied()
             .collect();
         if asyncs.len() * 2 >= callables.len() {
-            let generic = "Code is predominantly async";
+            let generic = "Write functions as `async`";
             out.push(Convention {
                 origin: Origin::Measured,
                 repo: repo.into(),
                 dimension: "signatures".into(),
                 key: "signatures:async".into(),
-                rule: format!(
-                    "{generic} ({} of {} functions)",
-                    asyncs.len(),
-                    callables.len()
-                ),
+                rule: generic.into(),
                 generic: generic.into(),
                 support: asyncs.len(),
                 total: callables.len(),
+                unit: "functions".into(),
+                repos: Vec::new(),
                 exemplars: self.central(asyncs, 3),
                 counterexamples: Vec::new(),
             });
@@ -694,16 +698,18 @@ impl<'a> Cx<'a> {
             by_base.into_iter().filter(|(_, c)| c.len() >= 3).collect();
         models.sort_by_key(|(_, c)| std::cmp::Reverse(c.len()));
         for (base, classes) in models.into_iter().take(4) {
-            let generic = format!("Classes extend {base}");
+            let generic = format!("Extend {base} for new classes of its kind");
             out.push(Convention {
                 origin: Origin::Measured,
                 repo: repo.into(),
                 dimension: "models".into(),
                 key: format!("models:base:{base}"),
-                rule: format!("{generic} ({} classes)", classes.len()),
+                rule: generic.clone(),
                 generic,
                 support: classes.len(),
                 total: classes.len(),
+                unit: "classes".into(),
+                repos: Vec::new(),
                 exemplars: self.central(classes, 3),
                 counterexamples: Vec::new(),
             });
@@ -716,16 +722,18 @@ impl<'a> Cx<'a> {
                     .filter(|(r, _)| *r != root)
                     .flat_map(|(_, c)| c.iter().copied())
                     .collect();
-                let generic = format!("Custom errors derive from {root}");
+                let generic = format!("Derive custom errors from {root}");
                 out.push(Convention {
                     origin: Origin::Measured,
                     repo: repo.into(),
                     dimension: "errors".into(),
                     key: format!("errors:root:{root}"),
-                    rule: format!("{generic} ({} of {total})", classes.len()),
+                    rule: generic.clone(),
                     generic,
                     support: classes.len(),
                     total,
+                    unit: "custom errors".into(),
+                    repos: Vec::new(),
                     exemplars: self.central(classes.clone(), 3),
                     counterexamples: self.central(deviants, 3),
                 });
@@ -780,17 +788,16 @@ impl<'a> Cx<'a> {
                 repo: repo.into(),
                 dimension: "layout".into(),
                 key: format!("layout:{}", label.to_lowercase().replace(' ', "-")),
-                rule: format!(
-                    "{label} live in `{dir}/` ({} of {})",
-                    hits.len(),
-                    syms.len()
-                ),
+                rule: format!("Put {} in `{dir}/`", lower(label)),
                 generic: format!(
-                    "{label} live in one directory per service (e.g. `…/{}/`)",
+                    "Put {} in one directory per service (e.g. `…/{}/`)",
+                    lower(label),
                     tail.join("/")
                 ),
                 support: hits.len(),
                 total: syms.len(),
+                unit: lower(label),
+                repos: Vec::new(),
                 exemplars: self.central(hits.clone(), 3),
                 counterexamples: self.central(deviants, 3),
             });
@@ -827,8 +834,8 @@ impl<'a> Cx<'a> {
             "logging",
             "logging:factory",
             by_factory,
-            |name| format!("Loggers come from `{name}`"),
-            "call sites",
+            |name| format!("Get loggers from `{name}`"),
+            "logger calls",
         )
     }
 
@@ -867,10 +874,10 @@ impl<'a> Cx<'a> {
         env_reads.sort();
         env_reads.dedup();
         let (generic, key, rule) = if settings.is_empty() {
-            let g = "Configuration is read from environment variables directly";
-            (g, "config:env", format!("{g} ({n_env} sites)"))
+            let g = "Read configuration from environment variables";
+            (g, "config:env", g.to_string())
         } else {
-            let g = "Configuration lives in settings classes";
+            let g = "Keep configuration in settings classes";
             let names: Vec<String> = settings
                 .iter()
                 .take(3)
@@ -879,7 +886,7 @@ impl<'a> Cx<'a> {
             (
                 g,
                 "config:settings-classes",
-                format!("{g} ({}); direct env reads: {n_env}", names.join(", ")),
+                format!("{g}, such as {}", names.join(", ")),
             )
         };
         vec![Convention {
@@ -891,6 +898,8 @@ impl<'a> Cx<'a> {
             generic: generic.into(),
             support: settings.len().max(n_env),
             total: settings.len() + n_env,
+            unit: "settings classes and environment reads".into(),
+            repos: Vec::new(),
             exemplars: self.central(settings, 3),
             counterexamples: env_reads.into_iter().take(3).collect(),
         }]
@@ -943,19 +952,18 @@ impl<'a> Cx<'a> {
             if *n < 3 || *n <= d.len() {
                 continue;
             }
-            let generic = format!("`{ext}` is used through `{wrapper}`");
+            let generic = format!("Use `{ext}` through `{wrapper}`, not directly");
             out.push(Convention {
                 origin: Origin::Measured,
                 repo: repo.into(),
                 dimension: "libraries".into(),
                 key: format!("libraries:{ext}:via:{wrapper}"),
-                rule: format!(
-                    "{generic} ({n} imports; direct `{ext}` imports: {})",
-                    d.len()
-                ),
+                rule: generic.clone(),
                 generic,
                 support: *n,
                 total: n + d.len(),
+                unit: format!("imports of `{ext}`"),
+                repos: Vec::new(),
                 exemplars: Vec::new(),
                 counterexamples: d.into_iter().take(3).collect(),
             });
@@ -994,18 +1002,14 @@ impl<'a> Cx<'a> {
         let Some((lib, files)) = fw.iter().max_by_key(|(_, v)| v.len()) else {
             return Vec::new();
         };
-        let generic = format!("Tests use `{lib}`");
-        let mut rule = format!("{generic} ({} of {} test files)", files.len(), tests.len());
-        let mock_list: Vec<String> = mocks.iter().map(|(m, n)| format!("`{m}` ({n})")).collect();
+        let generic = format!("Write tests with `{lib}`");
+        let mut rule = generic.clone();
+        let mock_list: Vec<String> = mocks.keys().map(|m| format!("`{m}`")).collect();
         if !mock_list.is_empty() {
-            rule.push_str(&format!("; mocking via {}", mock_list.join(", ")));
+            rule.push_str(&format!("; mock with {}", mock_list.join(" or ")));
         }
-        let conftests = tests
-            .iter()
-            .filter(|f| f.path.ends_with("conftest.py"))
-            .count();
-        if conftests > 0 {
-            rule.push_str(&format!("; shared fixtures in {conftests} conftest.py"));
+        if tests.iter().any(|f| f.path.ends_with("conftest.py")) {
+            rule.push_str("; share fixtures in `conftest.py`");
         }
         let mut ex = files.clone();
         ex.sort_by_key(|p| p.len());
@@ -1018,9 +1022,89 @@ impl<'a> Cx<'a> {
             generic,
             support: files.len(),
             total: tests.len(),
+            unit: "test files".into(),
+            repos: Vec::new(),
             exemplars: ex.into_iter().take(3).collect(),
             counterexamples: Vec::new(),
         }]
+    }
+}
+
+fn lower(label: &str) -> String {
+    match label.split_once(' ') {
+        Some((first, rest)) if first.chars().all(|c| c.is_uppercase()) => format!("{first} {rest}"),
+        _ => label.to_lowercase(),
+    }
+}
+
+impl Convention {
+    /// How strictly the code follows it: `Always`, `Usually`, `Often` or `Sometimes`; `None` when
+    /// nothing was counted (the team's own).
+    pub fn strength(&self) -> Option<&'static str> {
+        if self.total == 0 || self.counts_only() {
+            return None;
+        }
+        let p = self.support as f64 / self.total as f64;
+        Some(match p {
+            p if p >= 0.95 => "Always",
+            p if p >= 0.8 => "Usually",
+            p if p >= 0.6 => "Often",
+            _ => "Sometimes",
+        })
+    }
+
+    /// Too few instances to call it settled.
+    pub fn few(&self) -> bool {
+        self.repos.is_empty() && self.total > 0 && self.total < FEW
+    }
+
+    /// What it was measured from, e.g. `Followed by 412 of the 530 functions with parameters.`
+    pub fn evidence(&self) -> Option<String> {
+        if !self.repos.is_empty() {
+            return Some(format!("Shared by {}.", and_list(&self.repos)));
+        }
+        (self.total > 0).then(|| {
+            let unit = if self.unit.is_empty() {
+                "places"
+            } else {
+                &self.unit
+            };
+            let (n, of) = (thousands(self.support), thousands(self.total));
+            match (self.counts_only(), self.support == self.total) {
+                (true, _) => format!("Extended by {n} {unit}."),
+                (false, true) => format!("Followed by all {of} {unit}."),
+                (false, false) => format!("Followed by {n} of the {of} {unit}."),
+            }
+        })
+    }
+
+    /// A pattern counted where it occurs, with nothing that could deviate from it.
+    fn counts_only(&self) -> bool {
+        self.key.starts_with("models:base:")
+    }
+}
+
+/// `1689` as `1,689`.
+fn thousands(n: usize) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// Below this many instances a convention is marked as having few examples.
+const FEW: usize = 10;
+
+fn and_list(items: &[String]) -> String {
+    match items {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
     }
 }
 
@@ -1052,10 +1136,12 @@ fn dominant(
         repo: repo.into(),
         dimension: dimension.into(),
         key: format!("{key}:{name}"),
-        rule: format!("{g} ({} of {total} {unit})", sites.len()),
+        rule: g.clone(),
         generic: g,
         support: sites.len(),
         total,
+        unit: unit.into(),
+        repos: Vec::new(),
         exemplars: sites.iter().take(3).cloned().collect(),
         counterexamples: deviants,
     }]
@@ -1102,13 +1188,6 @@ fn has_params(sig: &str) -> bool {
         .split(',')
         .map(str::trim)
         .any(|p| !p.is_empty() && !matches!(p, "self" | "cls" | "this"))
-}
-
-fn capitalize(s: &str) -> String {
-    let mut c = s.chars();
-    c.next().map_or_else(String::new, |f| {
-        f.to_uppercase().collect::<String>() + c.as_str()
-    })
 }
 
 /// The first segment of a third-party import (`boto3`, `@scope/pkg`), or `None` if internal.
@@ -1226,14 +1305,49 @@ mod tests {
             generic: "Functions are snake_case".into(),
             support: 10,
             total: 10,
+            unit: String::new(),
+            repos: Vec::new(),
             exemplars: vec![format!("{repo}/a.py:1")],
             counterexamples: Vec::new(),
         };
         let org = org_baseline(&[c("a"), c("b")]);
         assert_eq!(org.len(), 1);
-        assert!(org[0]
-            .rule
-            .starts_with("Functions are snake_case: in 2 of 2 measured repos"));
+        assert_eq!(org[0].rule, "Functions are snake_case");
+        assert_eq!(org[0].evidence().as_deref(), Some("Shared by a and b."));
+        assert!(!org[0].few(), "a baseline is never marked as few examples");
+    }
+
+    #[test]
+    fn strength_words_and_evidence() {
+        let mut c = Convention {
+            origin: Origin::Measured,
+            repo: "svc".into(),
+            dimension: "signatures".into(),
+            key: "signatures:params:typed".into(),
+            rule: "Type-annotate parameters".into(),
+            generic: "Type-annotate parameters".into(),
+            support: 412,
+            total: 530,
+            unit: "functions with parameters".into(),
+            repos: Vec::new(),
+            exemplars: Vec::new(),
+            counterexamples: Vec::new(),
+        };
+        assert_eq!(c.strength(), Some("Often"));
+        assert_eq!(
+            c.evidence().as_deref(),
+            Some("Followed by 412 of the 530 functions with parameters.")
+        );
+        c.support = 450;
+        assert_eq!(c.strength(), Some("Usually"));
+        (c.support, c.total) = (6, 6);
+        assert_eq!(c.strength(), Some("Always"));
+        assert!(c.few());
+        assert_eq!(thousands(1689), "1,689");
+        c.key = "models:base:`Base`".into();
+        assert_eq!(c.strength(), None, "a base class is counted, not followed");
+        c.total = 0;
+        assert_eq!((c.strength(), c.evidence()), (None, None));
     }
 
     #[test]
@@ -1247,6 +1361,8 @@ mod tests {
             generic: "Errors derive from Base".into(),
             support: 9,
             total: 10,
+            unit: String::new(),
+            repos: Vec::new(),
             exemplars: vec!["e.py:1".into()],
             counterexamples: Vec::new(),
         }];

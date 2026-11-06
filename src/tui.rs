@@ -717,7 +717,10 @@ impl App {
             .map(|c| {
                 let mut lines = vec![Line::from(vec![
                     Span::styled(format!("{:<11}", c.dimension), Style::new().fg(Color::Cyan)),
-                    Span::raw(c.rule.clone()),
+                    Span::raw(match c.strength() {
+                        Some(s) => format!("{s}: {}", c.rule),
+                        None => c.rule.clone(),
+                    }),
                 ])];
                 if let Some(e) = c.exemplars.first() {
                     lines.push(Line::styled(

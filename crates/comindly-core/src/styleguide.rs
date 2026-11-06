@@ -137,7 +137,11 @@ fn measured(ctx: &Ctx, title: &str, conventions: &[crate::conventions::Conventio
     let mut o =
         String::from("Measured conventions (authoritative: cite them, never contradict them):\n");
     for c in &relevant {
-        let _ = writeln!(o, "- {}", c.rule);
+        match c.evidence() {
+            Some(e) => writeln!(o, "- {} ({e})", c.rule),
+            None => writeln!(o, "- {}", c.rule),
+        }
+        .ok();
         if !c.counterexamples.is_empty() {
             let _ = writeln!(o, "  deviations: {}", c.counterexamples.join(", "));
         }

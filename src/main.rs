@@ -2619,7 +2619,11 @@ fn render_conventions(c: &comindly::answers::Conventions) -> ExitCode {
                 Origin::Edited => ", edited",
                 Origin::Manual => ", team",
             };
-            comindly::ui::field(&c.dimension, &format!("{}  [{}{tag}]", c.rule, c.id()));
+            let how = c.strength().map(|s| format!("{s}: ")).unwrap_or_default();
+            comindly::ui::field(&c.dimension, &format!("{how}{}  [{}{tag}]", c.rule, c.id()));
+            if let Some(e) = c.evidence() {
+                comindly::ui::note(&e);
+            }
             if !c.exemplars.is_empty() {
                 comindly::ui::note(&format!("e.g. {}", c.exemplars.join(", ")));
             }

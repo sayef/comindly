@@ -31,6 +31,12 @@ pub struct ShownConvention {
     #[serde(flatten)]
     pub convention: Convention,
     pub id: String,
+    /// `Always`, `Usually`, `Often` or `Sometimes`; none for the team's own.
+    pub strength: Option<String>,
+    /// What it was measured from, e.g. `Followed by 412 of the 530 functions with parameters.`
+    pub evidence: Option<String>,
+    /// Too few instances to call it settled.
+    pub few: bool,
 }
 
 /// `POST /api/v1/conventions`: `add`, `edit`, `hide` or `restore`.

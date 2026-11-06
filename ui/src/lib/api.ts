@@ -128,6 +128,16 @@ export interface Convention {
   rule: string;
   support: number;
   total: number;
+  /** What `support` and `total` count. */
+  unit?: string;
+  /** Org baseline only: the repositories that share it. */
+  repos?: string[];
+  /** How strictly the code follows it; absent for the team's own. */
+  strength: "Always" | "Usually" | "Often" | "Sometimes" | null;
+  /** What it was measured from, e.g. "Followed by 412 of the 530 functions with parameters." */
+  evidence: string | null;
+  /** Too few instances to call it settled. */
+  few: boolean;
   exemplars: string[];
   counterexamples: string[];
   origin: "measured" | "edited" | "manual";
