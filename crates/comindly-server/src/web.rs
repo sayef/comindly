@@ -1024,10 +1024,16 @@ fn org(
                 consumers.extend(q.consumers.iter().filter(real));
             }
         }
+        // Tables and buckets are data both sides share, not a call from one to the other.
+        let kind = if c.contract.name.starts_with("table:") || c.contract.name.starts_with("s3:") {
+            "data"
+        } else {
+            "contract"
+        };
         for u in consumers {
             for p in c.providers.iter().filter(real).filter(|p| p.repo != u.repo) {
                 let link = links
-                    .entry((u.repo.clone(), p.repo.clone(), "contract"))
+                    .entry((u.repo.clone(), p.repo.clone(), kind))
                     .or_default();
                 link.0 += 1;
                 link.1.insert(c.contract.name.clone());
@@ -1637,6 +1643,36 @@ async fn erase(Cur(s): Cur, Json(b): Json<api::IdRequest>) -> Reply<api::Done> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shared_tables_are_data_and_routes_are_contracts() {
+        let node = |id: &str, repo: &str| Node {
+            id: id.into(),
+            name: id.into(),
+            kind: "function".into(),
+            repo: repo.into(),
+            location: String::new(),
+            signature: None,
+        };
+        let view = |name: &str, provider: &str, consumer: &str| crate::graph::ContractView {
+            contract: node(name, crate::resolve::CONTRACTS),
+            providers: vec![node("p", provider)],
+            consumers: vec![node("c", consumer)],
+        };
+        let graph = crate::graph::CodeGraph::build(&[], &[]);
+        let map = org(
+            &graph,
+            &[],
+            &[],
+            &[
+                view("table:customer", "service", "library"),
+                view("http:POST /chat", "agent", "service"),
+            ],
+        );
+        let kind = |src: &str| map.edges.iter().find(|e| e.src == src).unwrap().kind.clone();
+        assert_eq!(kind("library"), "data");
+        assert_eq!(kind("service"), "contract");
+    }
 
     /// A router behind `traced` whose log lines, as JSON, land in the returned buffer.
     fn traced_app() -> (Router, Arc<std::sync::Mutex<Vec<String>>>) {
