@@ -14,6 +14,7 @@ use futures::StreamExt;
 use crate::context::{Cancelled, IndexContext};
 use crate::events::Usage;
 use crate::model::{Edge, EdgeKind, GlobalSymbolId, Symbol, SymbolKind};
+use crate::prompts::{Prompts, Task};
 
 /// A repository to index: the folder of its clone and, for one comindly keeps itself, the URL it
 /// is cloned from when the folder is missing.
@@ -513,14 +514,20 @@ async fn enrich_all(
         }
         return Ok(());
     };
+    let prompts = crate::prompts::load(&ctx.root)
+        .await
+        .context("reading the prompts")?
+        .doc
+        .in_use();
+    ctx.report.note(format!("prompts: {}", prompts.describe()));
     if s.enrich {
-        summaries(ctx, &llm, dst, symbols, edges, stale, incremental).await?;
+        summaries(ctx, &llm, &prompts, dst, symbols, edges, stale, incremental).await?;
     }
     if s.guide {
-        style_guides(ctx, &llm, dst, symbols, edges, roots).await?;
+        style_guides(ctx, &llm, &prompts, dst, symbols, edges, roots).await?;
     }
     if s.flows {
-        walkthroughs(ctx, &llm, dst, symbols, edges).await?;
+        walkthroughs(ctx, &llm, &prompts, dst, symbols, edges).await?;
     }
     Ok(())
 }
@@ -590,9 +597,11 @@ async fn embed(
 }
 
 /// Summaries of the most-used definitions, saved every `CHECKPOINT` and reused while unchanged.
+#[allow(clippy::too_many_arguments)]
 async fn summaries(
     ctx: &IndexContext,
     llm: &Arc<crate::llm::LlmClient>,
+    prompts: &Prompts,
     dst: &str,
     symbols: &Arc<Vec<Symbol>>,
     edges: &Arc<Vec<Edge>>,
@@ -639,13 +648,19 @@ async fn summaries(
     } else {
         HashMap::new()
     };
-    // A summary is written from the name, signature and path only, so it stays valid while they do.
+    // A summary is written from the name, signature and path only, so it stays valid while they
+    // and the prompt do.
+    let prompt = prompts.key(Task::Summary);
     let key = |s: &Symbol| {
-        fingerprint([
-            s.name.clone(),
-            s.signature.clone().unwrap_or_default(),
-            s.file_path.clone(),
-        ])
+        fingerprint(
+            [
+                s.name.clone(),
+                s.signature.clone().unwrap_or_default(),
+                s.file_path.clone(),
+            ]
+            .into_iter()
+            .chain(prompt.clone()),
+        )
     };
     let stored_keys = read_keys(dst, "enrich_keys").await;
     let mut rows: Vec<TextRow> = Vec::new();
@@ -690,8 +705,8 @@ async fn summaries(
                 })
                 .collect(),
             |(n, sig, path)| {
-                let llm = llm.clone();
-                async move { llm.enrich_symbol(&n, &sig, &path).await.ok() }
+                let (llm, prompts) = (llm.clone(), prompts.clone());
+                async move { llm.enrich_symbol(&prompts, &n, &sig, &path).await.ok() }
             },
             |d| {
                 done += 1;
@@ -778,6 +793,7 @@ fn usage(ctx: &IndexContext, llm: &crate::llm::LlmClient) -> Usage {
 async fn style_guides(
     ctx: &IndexContext,
     llm: &Arc<crate::llm::LlmClient>,
+    prompts: &Prompts,
     dst: &str,
     symbols: &Arc<Vec<Symbol>>,
     edges: &Arc<Vec<Edge>>,
@@ -840,12 +856,14 @@ async fn style_guides(
     let mut bodies: HashMap<String, String> = read_keys(dst, "guide_sections").await;
     let mut basis: HashMap<String, String> = read_keys(dst, "guide_basis").await;
     let mut redone = 0usize;
+    let prompt = prompts.key(Task::Guide);
     for (repo, sections) in per_repo {
         ctx.check()?;
         let key = fingerprint(
             sections
                 .iter()
-                .map(|s| format!("{}\0{}\0{}", s.title, s.guidance, s.evidence)),
+                .map(|s| format!("{}\0{}\0{}", s.title, s.guidance, s.evidence))
+                .chain(prompt.clone()),
         );
         let sid = |title: &str| format!("{repo}\0{title}");
         let old_doc = guides
@@ -861,7 +879,7 @@ async fn style_guides(
                 let id = sid(&sec.title);
                 if !bodies.contains_key(&id) {
                     bodies.insert(id.clone(), guide_section_of(doc, &sec.title));
-                    basis.insert(id, guide_basis(sec));
+                    basis.insert(id, guide_basis(sec, &prompt));
                 }
             }
             reused += 1;
@@ -874,7 +892,7 @@ async fn style_guides(
                 !(bodies.contains_key(&id)
                     && basis
                         .get(&id)
-                        .is_some_and(|b| guide_similar(b, &guide_basis(sec))))
+                        .is_some_and(|b| guide_similar(b, &guide_basis(sec, &prompt))))
             })
             .collect();
         let total = todo.len() as u64;
@@ -891,9 +909,9 @@ async fn style_guides(
                 })
                 .collect(),
             |(title, guidance, evidence)| {
-                let (llm, repo) = (llm.clone(), repo.clone());
+                let (llm, prompts, repo) = (llm.clone(), prompts.clone(), repo.clone());
                 async move {
-                    llm.guide_section(&repo, &title, &guidance, &evidence)
+                    llm.guide_section(&prompts, &repo, &title, &guidance, &evidence)
                         .await
                         .ok()
                 }
@@ -914,7 +932,7 @@ async fn style_guides(
             if let Some(body) = body {
                 let id = sid(&sec.title);
                 bodies.insert(id.clone(), body.trim().to_string());
-                basis.insert(id, guide_basis(sec));
+                basis.insert(id, guide_basis(sec, &prompt));
                 redone += 1;
             }
         }
@@ -1002,8 +1020,12 @@ fn guide_section_of(doc: &str, title: &str) -> String {
 
 /// What a section is written from, with counts dropped and percentages rounded to tens, so
 /// ordinary churn does not count as a change.
-fn guide_basis(sec: &crate::styleguide::Section) -> String {
-    let mut out = fingerprint([sec.title.clone(), sec.guidance.clone()]);
+fn guide_basis(sec: &crate::styleguide::Section, prompt: &Option<String>) -> String {
+    let mut out = fingerprint(
+        [sec.title.clone(), sec.guidance.clone()]
+            .into_iter()
+            .chain(prompt.clone()),
+    );
     for line in sec.evidence.lines() {
         let line = line.trim();
         if line.is_empty() {
@@ -1063,6 +1085,7 @@ fn guide_similar(a: &str, b: &str) -> bool {
 async fn walkthroughs(
     ctx: &IndexContext,
     llm: &Arc<crate::llm::LlmClient>,
+    prompts: &Prompts,
     dst: &str,
     symbols: &Arc<Vec<Symbol>>,
     edges: &Arc<Vec<Edge>>,
@@ -1078,17 +1101,7 @@ async fn walkthroughs(
             .into_iter()
             .filter_map(|(idx, _)| {
                 let s = by_id.get(&g.node(idx).id)?;
-                let trace = g
-                    .flow(idx, 6)
-                    .iter()
-                    .map(|h| {
-                        format!(
-                            "d{} {} {}:{} {}",
-                            h.depth, h.via, h.node.repo, h.node.name, h.node.location
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
+                let trace = g.flow_trace(idx);
                 Some((
                     s.id.clone(),
                     s.name.clone(),
@@ -1104,7 +1117,14 @@ async fn walkthroughs(
         return Ok(());
     }
     r.warn("Walkthroughs send call traces to the LLM.");
-    let key = |name: &str, sig: &str, trace: &str| fingerprint([format!("{name}\0{sig}\0{trace}")]);
+    let prompt = prompts.key(Task::Flow);
+    let key = |name: &str, sig: &str, trace: &str| {
+        fingerprint(
+            [format!("{name}\0{sig}\0{trace}")]
+                .into_iter()
+                .chain(prompt.clone()),
+        )
+    };
     let stored_keys = read_keys(dst, "flow_keys").await;
     let stored: HashMap<String, (String, Vec<String>)> = crate::index::read_flows(dst)
         .await
@@ -1145,8 +1165,8 @@ async fn walkthroughs(
                 .map(|(_, name, sig, trace)| (name.clone(), sig.clone(), trace.clone()))
                 .collect(),
             |(name, sig, trace)| {
-                let llm = llm.clone();
-                async move { llm.narrate_flow(&name, &sig, &trace).await.ok() }
+                let (llm, prompts) = (llm.clone(), prompts.clone());
+                async move { llm.narrate_flow(&prompts, &name, &sig, &trace).await.ok() }
             },
             |_| {
                 done += 1;
@@ -1487,22 +1507,25 @@ mod tests {
             .map(|i| format!("def handler_{}(x): pass", (b'a' + i) as char))
             .collect();
         let base = format!("snake_case 97.3% (1234/1268)\n{}", lines.join("\n"));
-        let a = guide_basis(&sec(&base));
-        let counts = guide_basis(&sec(&base.replace("97.3% (1234/1268)", "96.8% (1301/1340)")));
+        let a = guide_basis(&sec(&base), &None);
+        let counts = guide_basis(
+            &sec(&base.replace("97.3% (1234/1268)", "96.8% (1301/1340)")),
+            &None,
+        );
         assert!(guide_similar(&a, &counts), "counts moving is churn");
-        let shifted = guide_basis(&sec(&base.replace("97.3%", "61.0%")));
+        let shifted = guide_basis(&sec(&base.replace("97.3%", "61.0%")), &None);
         assert!(
             !guide_similar(&a, &shifted),
             "a measured ratio moving rewrites"
         );
-        let one = guide_basis(&sec(&base.replacen("handler_a", "handle_a", 1)));
+        let one = guide_basis(&sec(&base.replacen("handler_a", "handle_a", 1)), &None);
         assert!(guide_similar(&a, &one), "one changed excerpt line is churn");
-        let many = guide_basis(&sec(&base.replace("handler_", "Handler")));
+        let many = guide_basis(&sec(&base.replace("handler_", "Handler")), &None);
         assert!(!guide_similar(&a, &many), "most lines changed is drift");
         let mut other = sec(&base);
         other.guidance = "New prompt".into();
         assert!(
-            !guide_similar(&a, &guide_basis(&other)),
+            !guide_similar(&a, &guide_basis(&other, &None)),
             "new guidance rewrites"
         );
     }

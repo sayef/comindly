@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Settings → Prompts: the LLM instructions for summaries, style guides and walkthroughs, stored with
+  the index. An edit is saved as a new version that is not used until someone activates it;
+  deactivating goes back to the built-in prompt. A draft can be tried on one symbol or flow next to
+  what the index holds now. The reply format stays fixed, and the next index writes a task's results
+  again after its prompt changes.
+
 ## [0.5.0-beta.4](https://github.com/sayef/comindly/compare/v0.5.0-beta.3...v0.5.0-beta.4) - 2026-11-06
 
 ### Added

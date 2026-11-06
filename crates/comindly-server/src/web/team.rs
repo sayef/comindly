@@ -12,7 +12,7 @@ fn done(r: anyhow::Result<impl Into<String>>) -> Reply<api::Done> {
     r.map(|m| Json(api::Done::new(m))).map_err(fail)
 }
 
-async fn root(app: &Shared) -> anyhow::Result<String> {
+pub(super) async fn root(app: &Shared) -> anyhow::Result<String> {
     use anyhow::Context as _;
     app.current
         .read()

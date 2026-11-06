@@ -65,6 +65,16 @@ Keys: `name`, `llm_model`, `llm_base_url`, `embed_model`, `embed`, `enrich`, `fl
 `scip` (`auto`, `require` or `off`), `auto_index`, `auto_index_llm` and `auto_index_minutes`. Where one is unset, comindly's default applies.
 See [Team setup](team-setup.md#team-settings).
 
+## Prompts
+
+The instructions indexing gives the LLM for summaries, style guides and walkthroughs are stored with
+the index too, under **Settings → Prompts**. Each starts with comindly's built-in prompt. Saving an
+edit makes a new version that nothing uses yet; **Try** runs a draft on one symbol or flow and shows
+it next to what the index holds now. Activating a version, or deactivating it to go back to the
+built-in prompt, takes effect from the next index, which then writes that task's results again.
+Only the instructions can be changed: the reply format comindly reads back is always added. On a
+team server, admins change prompts and everyone can read them.
+
 ## Environment
 
 - `COMINDLY_INDEX_DIR`: the index location, over your preferences.

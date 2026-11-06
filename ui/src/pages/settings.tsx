@@ -214,6 +214,9 @@ function SettingsNav() {
       <NavLink to="/settings/repositories" className={tab}>
         Repositories
       </NavLink>
+      <NavLink to="/settings/prompts" className={tab}>
+        Prompts
+      </NavLink>
       {server && admin && (
         <>
           <NavLink to="/settings/members" className={tab}>

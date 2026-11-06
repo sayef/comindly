@@ -105,3 +105,73 @@ pub struct CreateTeam {
     pub name: String,
     pub index: String,
 }
+
+/// `GET /api/v1/prompts`: each LLM task's built-in prompt, its saved versions and the one in use.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Prompts {
+    pub tasks: Vec<PromptTask>,
+    pub version: Option<u64>,
+    pub changed_by: Option<String>,
+    pub changed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptTask {
+    pub task: crate::prompts::Task,
+    pub builtin: String,
+    /// The fixed reply format appended to whichever instructions run.
+    pub format: String,
+    /// `None`: the built-in prompt.
+    pub active: Option<u32>,
+    pub versions: Vec<crate::prompts::Version>,
+}
+
+/// `POST /api/v1/prompts`: one change, at the version read.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptChange {
+    pub version: Option<u64>,
+    #[serde(flatten)]
+    pub action: PromptAction,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "lowercase")]
+pub enum PromptAction {
+    /// A new version, not in use until activated.
+    Save {
+        task: crate::prompts::Task,
+        text: String,
+        #[serde(default)]
+        note: Option<String>,
+    },
+    Activate {
+        task: crate::prompts::Task,
+        n: u32,
+    },
+    /// Back to the built-in prompt.
+    Deactivate {
+        task: crate::prompts::Task,
+    },
+    Delete {
+        task: crate::prompts::Task,
+        n: u32,
+    },
+}
+
+/// `POST /api/v1/prompts/try`: run `text` on one sample without saving it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptTry {
+    pub task: crate::prompts::Task,
+    pub text: String,
+    /// A symbol id for a summary, an entry point for a walkthrough; the most used one otherwise.
+    #[serde(default)]
+    pub sample: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptTried {
+    pub sample: String,
+    pub output: String,
+    /// What the index holds for the same sample now.
+    pub current: Option<String>,
+}

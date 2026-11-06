@@ -14,6 +14,8 @@ use anyhow::{Context, Result};
 use rig::completion::CompletionRequest;
 use rig::providers::openai;
 
+use crate::prompts::{Prompts, Task};
+
 /// Default model — cheap and fast, suitable for bulk symbol summaries.
 pub const DEFAULT_MODEL: &str = "gpt-6-luna";
 
@@ -94,71 +96,48 @@ impl LlmClient {
     /// One-line summary of what a symbol does, plus a few natural-language queries it answers.
     pub async fn enrich_symbol(
         &self,
+        prompts: &Prompts,
         name: &str,
         signature: &str,
         context: &str,
     ) -> Result<Enrichment> {
-        let system = "You document code for a search index. Reply in exactly this format:\n\
-             SUMMARY: <one concise sentence describing what this does>\n\
-             QUERIES: <3 natural-language questions a developer might ask that this code answers, separated by ` | `>\n\
-             No preamble, no code fences.";
         let user = format!("Symbol: {name}\nSignature: {signature}\nContext: {context}");
-        let raw = self.complete(system, &user, 160).await?;
+        let raw = self
+            .complete(&prompts.system(Task::Summary), &user, 160)
+            .await?;
         Ok(parse_enrichment(&raw))
     }
 
-    /// Synthesize an evidence-based coding style guide for one repo from a measured evidence pack
-    /// (naming/size/idiom stats + enforced-config facts). The prompt forbids generic advice and
-    /// requires every rule to cite the evidence.
-    /// Synthesize ONE section of the style guide from its tailored evidence. Returns the section's
-    /// bullet rules (no heading — the caller adds it). Multiple sections are generated per repo.
+    /// ONE section of a repo's style guide from its tailored evidence, as bullet rules without a
+    /// heading; the caller adds it.
     pub async fn guide_section(
         &self,
+        prompts: &Prompts,
         repo: &str,
         title: &str,
         guidance: &str,
         evidence: &str,
     ) -> Result<String> {
-        let system = "You are a senior engineer documenting ONE section of a codebase's house-style \
-            guide so an AI coding agent writes code INDISTINGUISHABLE from this repo's. You are given \
-            REAL evidence (signatures, code excerpts, dependency facts, measured stats) for this \
-            section only. Make the repo's tacit conventions explicit.\n\
-            Hard rules:\n\
-            - Output ONLY this section's rules as terse markdown bullets — NO top-level heading, no \
-            preamble, no closing note.\n\
-            - Cite a real FILE PATH (and symbol/signature) for every non-trivial claim; quote a short \
-            real snippet as the example. Where useful, show a correct vs incorrect example.\n\
-            - Prefer the repo's OWN wrapper/abstraction over a raw library when the evidence shows \
-            one; name it exactly.\n\
-            - NEVER output generic advice that would apply to any codebase ('use meaningful names', \
-            'write tests', 'handle errors gracefully'). Delete such lines.\n\
-            - Strength tags: **MUST**/**NEVER** for patterns across ≥3 files or enforced by config; \
-            'prefer' for weaker signals. Give a one-line reason where non-obvious.\n\
-            - If the evidence shows no consistent convention, reply with exactly: \
-            No consistent convention observed.";
         let user = format!(
             "Repository: {repo}\nSection: {title}\nWhat to cover: {guidance}\n\n# Evidence\n\n{evidence}"
         );
-        self.complete(system, &user, 900).await
+        self.complete(&prompts.system(Task::Guide), &user, 900)
+            .await
     }
 
     /// Narrate an execution flow: given an entry point and its ordered call trace, produce a
     /// concise markdown walkthrough plus a few flow-oriented questions the flow answers.
     pub async fn narrate_flow(
         &self,
+        prompts: &Prompts,
         entry: &str,
         signature: &str,
         trace: &str,
     ) -> Result<(String, Vec<String>)> {
-        let system = "You explain how a code flow works to a developer new to the codebase. \
-             Given an entry point and its call trace (each line: depth, relation, symbol, \
-             location), reply in exactly this format:\n\
-             NARRATION: <2-5 sentence walkthrough of what happens step by step; reference the \
-             actual symbol names>\n\
-             QUERIES: <3 questions a developer might ask about this flow, separated by ` | `>\n\
-             No preamble, no code fences.";
         let user = format!("Entry point: {entry}\nSignature: {signature}\nCall trace:\n{trace}");
-        let raw = self.complete(system, &user, 320).await?;
+        let raw = self
+            .complete(&prompts.system(Task::Flow), &user, 320)
+            .await?;
         Ok(parse_flow(&raw))
     }
 }
@@ -235,6 +214,7 @@ mod tests {
         let c = LlmClient::new(None, DEFAULT_MODEL, Some(&key)).unwrap();
         let e = c
             .enrich_symbol(
+                &Prompts::default(),
                 "AsyncTaskRunner",
                 "class AsyncTaskRunner(BaseTaskRunner)",
                 "acme/database/executors.py",

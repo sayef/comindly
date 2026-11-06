@@ -79,7 +79,9 @@ can be bookmarked or shared.
   index's shared settings.
 - **Settings**: the index location (with a connection test), the index's shared settings (LLM
   endpoint and model, embedding model, LLM steps, limits and prices), your own API key, your name on
-  ledger records, and how often to check for a new index version. Changing the index location switches
+  ledger records, and how often to check for a new index version. **Prompts** holds the LLM
+  instructions for summaries, style guides and walkthroughs, with saved versions to try and activate
+  (see [Configuration](configuration.md#prompts)). Changing the index location switches
   the UI without a restart. On a team server, Settings also has **Members** and **Integrations**
   (admins) and **Your access** (your sign-in code, personal access tokens and how to connect an agent);
   viewers see everything read-only.

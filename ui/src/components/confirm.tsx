@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, type ButtonProps } from "@/components/ui/button";
 
-/** A button that asks once more, in place, before it runs something that cannot be undone. */
+/** A button that asks once more, in place, before it runs something that cannot be undone or costs. */
 export function ConfirmButton({
   question,
   confirmLabel,
   onConfirm,
+  danger = true,
   children,
   ...props
-}: Omit<ButtonProps, "onClick"> & { question: string; confirmLabel: string; onConfirm: () => void }) {
+}: Omit<ButtonProps, "onClick"> & { question: string; confirmLabel: string; onConfirm: () => void; danger?: boolean }) {
   const [asking, setAsking] = useState(false);
   const yes = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -29,7 +30,8 @@ export function ConfirmButton({
       <Button
         ref={yes}
         size="sm"
-        className="bg-danger text-white hover:bg-[color-mix(in_srgb,var(--color-danger)_85%,black)] dark:text-background"
+        variant={danger ? undefined : "brand"}
+        className={danger ? "bg-danger text-white hover:bg-[color-mix(in_srgb,var(--color-danger)_85%,black)] dark:text-background" : undefined}
         loading={props.loading}
         onClick={() => (setAsking(false), onConfirm())}
       >

@@ -313,6 +313,20 @@ impl CodeGraph {
         self.bfs(focus, max_depth, Incoming, DEPENDENCY, PROVIDES)
     }
 
+    /// The flow from `focus` as the text a walkthrough is written from, one step per line.
+    pub fn flow_trace(&self, focus: NodeIndex) -> String {
+        self.flow(focus, 6)
+            .iter()
+            .map(|h| {
+                format!(
+                    "d{} {} {}:{} {}",
+                    h.depth, h.via, h.node.repo, h.node.name, h.node.location
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     /// Where a request or message started at `focus` travels: calls, then across contracts to the
     /// handler of an HTTP route or the subscribers of a topic or queue, in other repositories too.
     pub fn flow(&self, focus: NodeIndex, max_depth: usize) -> Vec<FlowStep> {

@@ -493,6 +493,47 @@ export interface SecretState {
   updated_by?: string | null;
 }
 
+/** An LLM task indexing runs: summaries, style guide sections or flow walkthroughs. */
+export type PromptTaskName = "summary" | "guide" | "flow";
+
+export interface PromptVersion {
+  task: PromptTaskName;
+  version: number;
+  text: string;
+  note?: string;
+  author: string;
+  created_at: string;
+}
+
+export interface PromptTask {
+  task: PromptTaskName;
+  builtin: string;
+  /** The fixed reply format added to whichever instructions run. */
+  format: string;
+  /** `null`: the built-in prompt. */
+  active: number | null;
+  versions: PromptVersion[];
+}
+
+export interface Prompts {
+  tasks: PromptTask[];
+  version: number | null;
+  changed_by: string | null;
+  changed_at: string | null;
+}
+
+export type PromptAction =
+  | { action: "save"; task: PromptTaskName; text: string; note?: string }
+  | { action: "activate"; task: PromptTaskName; n: number }
+  | { action: "deactivate"; task: PromptTaskName }
+  | { action: "delete"; task: PromptTaskName; n: number };
+
+export interface PromptTried {
+  sample: string;
+  output: string;
+  current: string | null;
+}
+
 type Done = { ok: boolean; message: string };
 
 export const api = {
@@ -552,6 +593,9 @@ export const api = {
   indexWatch: () => get<{ enabled: boolean; minutes: number; last: { checked: string | null; result: string } }>("/api/v1/index/watch"),
   team: () => get<Team>("/api/v1/team"),
   saveTeam: (settings: TeamSettings, version: number | null) => post("/api/v1/team", { settings, version }),
+  prompts: () => get<Prompts>("/api/v1/prompts"),
+  changePrompt: (a: PromptAction, version: number | null) => post<Done>("/api/v1/prompts", { ...a, version }),
+  tryPrompt: (task: PromptTaskName, text: string, sample?: string) => post<PromptTried>("/api/v1/prompts/try", { task, text, sample }),
   saveKey: (key: string) => post<{ ok: boolean; message: string }>("/api/v1/team/key", { key }),
   join: (index: string) => post("/api/v1/join", { index }),
   createTeam: (name: string, index: string) => post("/api/v1/team/create", { name, index }),
