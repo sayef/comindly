@@ -12,10 +12,6 @@ All notable changes to this project are documented here. The format follows
   through the gateway, signing in with the organisation's account instead of a token, including the
   Claude desktop app and claude.ai.
 
-### Fixed
-
-- The release's install check runs on betas too; it was skipped with the Mac builds.
-
 ### Changed
 
 - The org map tells shared data from dependencies: repositories that only share tables or buckets
@@ -25,6 +21,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- `guide` with a `focus` returns only that repository's narrative guide (a dev index with 16
+  repositories went from about 195,000 to 19,000 characters); without one, it names the
+  repositories that have a guide.
+- In Markdown mode (the default) tool replies carry only the Markdown: Claude Code showed the
+  attached JSON instead, at twice the size. `format: json` still sends JSON with structured content.
+- `contracts` lists a symbol on both sides of a contract once, with its id.
+- `suggest` leaves out vendored code and puts the most depended-on code first.
+- The release's install check runs on betas too; it was skipped with the Mac builds.
 - Someone invited can connect their agent through the trusted gateway straight away; before, they
   had to sign in to the app once first.
 

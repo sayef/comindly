@@ -14,8 +14,8 @@
 //!   * `context_pack` — the minimal token-budgeted read-set to change a symbol safely
 //!   * `guide`        — the repo's inferred style guide
 //!
-//! Results are handed back as **markdown by default** (readable for the agent); the same data is
-//! also attached as structured JSON. Pass `serve --format json` to make the text block raw JSON.
+//! Results are handed back as **markdown by default** (readable for the agent). Pass
+//! `serve --format json` for JSON text with the same JSON as structured content.
 //! Every result carries an exact `file:line`.
 
 use std::collections::HashMap;
@@ -44,7 +44,8 @@ type Enrichment = HashMap<String, (String, Vec<String>)>;
 pub struct ComindlyServer {
     graph: Arc<CodeGraph>,
     enrichment: Arc<Enrichment>,
-    style_guide: Arc<Option<String>>,
+    /// Narrative style guides by repository.
+    style_guides: Arc<Vec<(String, String)>>,
     /// Pre-generated flow walkthroughs by entry-point id: `(narration, flow_questions)`.
     flows: Arc<HashMap<String, (String, Vec<String>)>>,
     /// Symbols by rendered id — used by `search` to look up candidate metadata.
@@ -318,8 +319,8 @@ impl ComindlyServer {
         }
     }
 
-    /// Wrap a tool DTO into a result: markdown text (default) or JSON text, plus the structured
-    /// JSON in every case so structured-content clients keep working.
+    /// Wrap a tool DTO into a result: markdown text (default), or JSON text with the same JSON as
+    /// structured content.
     fn reply<T: Serialize>(&self, dto: &T, md: String) -> CallToolResult {
         let value = serde_json::to_value(dto).ok();
         let text = if self.markdown {
@@ -331,7 +332,10 @@ impl ComindlyServer {
                 .unwrap_or_default()
         };
         let mut r = CallToolResult::success(vec![ContentBlock::text(text)]);
-        r.structured_content = value;
+        // Clients such as Claude Code show structured content instead of the text when both come.
+        if !self.markdown {
+            r.structured_content = value;
+        }
         r
     }
 }
@@ -765,13 +769,21 @@ impl ComindlyServer {
 
     #[tool(
         name = "suggest",
-        description = "Suggested questions you can ask about this codebase (pre-generated during --enrich). Optionally filter by a keyword to discover what flows/topics exist."
+        description = "Suggested questions you can ask about this codebase (pre-generated during --enrich), the most depended-on code first; vendored code is left out. Optionally filter by a keyword to discover what flows/topics exist."
     )]
     fn suggest(&self, Parameters(p): Parameters<SuggestParam>) -> CallToolResult {
         let limit = p.limit.unwrap_or(40) as usize;
         let about = p.about.as_deref().map(str::to_lowercase);
-        let mut items: Vec<SuggestItem> = Vec::new();
+        let mut items: Vec<(usize, SuggestItem)> = Vec::new();
         for (id, (_, queries)) in self.enrichment.iter() {
+            if self
+                .symbols
+                .get(id)
+                .is_some_and(|s| third_party(&s.file_path))
+            {
+                continue;
+            }
+            let used = self.graph.dependents_count(id);
             if p.team.is_some()
                 && !self
                     .symbols
@@ -796,16 +808,24 @@ impl ComindlyServer {
                         continue;
                     }
                 }
-                items.push(SuggestItem {
-                    query: q.clone(),
-                    symbol: symbol.clone(),
-                    location: location.clone(),
-                });
+                items.push((
+                    used,
+                    SuggestItem {
+                        query: q.clone(),
+                        symbol: symbol.clone(),
+                        location: location.clone(),
+                    },
+                ));
             }
         }
-        items.sort_by(|a, b| a.symbol.cmp(&b.symbol).then(a.query.cmp(&b.query)));
+        // The most depended-on code first: what a newcomer most needs to understand.
+        items.sort_by(|(ua, a), (ub, b)| {
+            ub.cmp(ua)
+                .then(a.symbol.cmp(&b.symbol))
+                .then(a.query.cmp(&b.query))
+        });
         let total = items.len();
-        items.truncate(limit);
+        let items: Vec<SuggestItem> = items.into_iter().take(limit).map(|(_, i)| i).collect();
         let dto = SuggestDto {
             total,
             suggestions: items,
@@ -1104,7 +1124,7 @@ impl ComindlyServer {
 
     #[tool(
         name = "guide",
-        description = "Measured coding conventions to follow when editing: naming, signatures, base classes, error roots, layout, logging, config, internal libraries to use instead of raw ones, testing — each with counts, exemplar locations and known deviations. Pass `focus` (repo, file or symbol) to scope to its repo; the org baseline is always included."
+        description = "Measured coding conventions to follow when editing: naming, signatures, base classes, error roots, layout, logging, config, internal libraries to use instead of raw ones, testing — each with counts, exemplar locations and known deviations. Pass `focus` (repo, file or symbol) for its repo's conventions and narrative guide; the org baseline is always included. Without `focus`: the org baseline and which repos have a guide."
     )]
     fn guide(&self, Parameters(p): Parameters<GuideParam>) -> CallToolResult {
         let repo = p.focus.as_deref().and_then(|f| self.repo_of(f));
@@ -1129,11 +1149,26 @@ impl ComindlyServer {
                 });
             }
         }
+        // One repository's narrative guide; all of them together outgrow what a client shows.
+        let guide = match &repo {
+            Some(r) => self
+                .style_guides
+                .iter()
+                .find(|(g, _)| g == r)
+                .map(|(_, g)| g.clone()),
+            None => (!self.style_guides.is_empty()).then(|| {
+                let names: Vec<&str> = self.style_guides.iter().map(|(r, _)| r.as_str()).collect();
+                format!(
+                    "Written for each repository; pass `focus` to read one: {}.",
+                    names.join(", ")
+                )
+            }),
+        };
         let dto = GuideDto {
-            found: !conventions.is_empty() || self.style_guide.is_some(),
+            found: !conventions.is_empty() || guide.is_some(),
             repo,
             conventions,
-            guide: (*self.style_guide).clone(),
+            guide,
         };
         let md = md_guide(&dto);
         self.reply(&dto, md)
@@ -1319,6 +1354,16 @@ fn hit_dto(h: &crate::search::SearchHit) -> SearchHitDto {
     }
 }
 
+/// Code vendored from elsewhere, which suggestions skip.
+fn third_party(path: &str) -> bool {
+    path.split('/').any(|c| {
+        matches!(
+            c,
+            "_vendor" | "vendor" | "vendored" | "third_party" | "node_modules" | "site-packages"
+        )
+    })
+}
+
 // ---- markdown rendering (the agent-facing handover) -------------------------------------
 
 fn node_bullet(o: &mut String, n: &NodeDto) {
@@ -1476,16 +1521,35 @@ fn md_contracts(d: &ContractsDto) -> String {
     let mut o = format!("## {} contract(s)\n", d.contracts.len());
     for c in &d.contracts {
         let _ = writeln!(o, "\n### `{}`", c.contract);
-        let side = |o: &mut String, label: &str, ns: &[NodeDto]| {
-            if ns.is_empty() {
-                let _ = writeln!(o, "- {label}: _none indexed_");
-            }
-            for n in ns {
-                let _ = writeln!(o, "- {label}: **{}** ({}) `{}`", n.name, n.repo, n.location);
-            }
-        };
-        side(&mut o, "provided by", &c.providers);
-        side(&mut o, "used by", &c.consumers);
+        if c.providers.is_empty() {
+            o.push_str("- provided by: _none indexed_\n");
+        }
+        // A symbol on both sides is listed once.
+        let both = |n: &NodeDto| c.consumers.iter().any(|m| m.id == n.id);
+        let sides = c.providers.iter().map(|n| {
+            (
+                n,
+                if both(n) {
+                    "provides and uses"
+                } else {
+                    "provided by"
+                },
+            )
+        });
+        let users = c
+            .consumers
+            .iter()
+            .filter(|n| !c.providers.iter().any(|m| m.id == n.id));
+        for (n, label) in sides.chain(users.map(|n| (n, "used by"))) {
+            let _ = writeln!(
+                o,
+                "- {label}: **{}** ({}) `{}` · id `{}`",
+                n.name, n.repo, n.location, n.id
+            );
+        }
+        if c.consumers.is_empty() {
+            o.push_str("- used by: _none indexed_\n");
+        }
     }
     o
 }
@@ -1711,17 +1775,10 @@ pub async fn load(uri: &str, markdown: bool, fresh: std::time::Duration) -> Resu
         .map(|(id, s, q)| (id.render(), (s, q)))
         .collect();
 
-    // Per-repo style guides, combined into one markdown doc with a section per repo.
-    let guides = crate::index::read_style_guide(uri)
+    // Narrative style guides, one per repository.
+    let style_guides = crate::index::read_style_guide(uri)
         .await
         .unwrap_or_default();
-    let style_guide = (!guides.is_empty()).then(|| {
-        guides
-            .iter()
-            .map(|(r, g)| format!("## {r}\n\n{g}"))
-            .collect::<Vec<_>>()
-            .join("\n\n")
-    });
 
     let flows: HashMap<String, (String, Vec<String>)> = crate::index::read_flows(uri)
         .await
@@ -1751,7 +1808,7 @@ pub async fn load(uri: &str, markdown: bool, fresh: std::time::Duration) -> Resu
     let server = ComindlyServer {
         graph,
         enrichment: Arc::new(enrichment),
-        style_guide: Arc::new(style_guide),
+        style_guides: Arc::new(style_guides),
         flows: Arc::new(flows),
         symbols: Arc::new(by_id),
         embedder,
@@ -1811,6 +1868,38 @@ pub fn tools() -> Vec<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_contract_lists_each_symbol_once_with_its_id() {
+        let node = |id: &str| NodeDto {
+            id: id.into(),
+            name: id.into(),
+            kind: "function".into(),
+            repo: "worker".into(),
+            location: "w.py:1".into(),
+            signature: None,
+            summary: Some("long summary".into()),
+            queries: vec!["a question".into()],
+        };
+        let md = md_contracts(&ContractsDto {
+            contracts: vec![ContractDto {
+                contract: "sqs:tasks".into(),
+                providers: vec![node("retry"), node("send")],
+                consumers: vec![node("retry"), node("run")],
+            }],
+        });
+        assert_eq!(md.matches("**retry**").count(), 1);
+        assert!(md.contains("provides and uses: **retry**"));
+        assert!(md.contains("used by: **run** (worker) `w.py:1` · id `run`"));
+        assert!(!md.contains("long summary") && !md.contains("a question"));
+    }
+
+    #[test]
+    fn vendored_code_is_third_party() {
+        assert!(third_party("lib/_vendor/aioboto3/session.py"));
+        assert!(third_party("web/node_modules/x/index.js"));
+        assert!(!third_party("src/vendors.py"));
+    }
 
     #[test]
     fn impact_by_team() {
