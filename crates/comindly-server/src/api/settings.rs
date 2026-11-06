@@ -123,7 +123,17 @@ pub struct PromptTask {
     pub format: String,
     /// `None`: the built-in prompt.
     pub active: Option<u32>,
+    /// The active version, when a release changed the built-in prompt since it was written.
+    pub builtin_changed: Option<u32>,
+    /// Style guide only: the built-in guidance of each section.
+    pub sections: Vec<GuideSectionText>,
     pub versions: Vec<crate::prompts::Version>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GuideSectionText {
+    pub title: String,
+    pub guidance: String,
 }
 
 /// `POST /api/v1/prompts`: one change, at the version read.
@@ -141,6 +151,9 @@ pub enum PromptAction {
     Save {
         task: crate::prompts::Task,
         text: String,
+        /// Style guide only: section guidance by title.
+        #[serde(default)]
+        sections: std::collections::BTreeMap<String, String>,
         #[serde(default)]
         note: Option<String>,
     },
@@ -163,6 +176,8 @@ pub enum PromptAction {
 pub struct PromptTry {
     pub task: crate::prompts::Task,
     pub text: String,
+    #[serde(default)]
+    pub sections: std::collections::BTreeMap<String, String>,
     /// A symbol id for a summary, an entry point for a walkthrough; the most used one otherwise.
     #[serde(default)]
     pub sample: Option<String>,

@@ -20,6 +20,17 @@ pub(super) async fn get(State(app): State<Shared>) -> Reply<api::Prompts> {
                     builtin: t.builtin().into(),
                     format: t.fixed(),
                     active: lib.active.get(&t).copied(),
+                    builtin_changed: lib.builtin_changed(t),
+                    sections: match t {
+                        Task::Guide => crate::styleguide::SECTIONS
+                            .iter()
+                            .map(|(title, g)| api::GuideSectionText {
+                                title: title.to_string(),
+                                guidance: g.to_string(),
+                            })
+                            .collect(),
+                        _ => Vec::new(),
+                    },
                     versions: lib.of(t).cloned().collect(),
                 })
                 .collect(),
@@ -55,9 +66,20 @@ pub(super) async fn change(
             }
         };
         let mut lib = prompts::load(&root).await?.doc;
+        let msg_detail = match &b.action {
+            PromptAction::Save { task, .. } => format!("{} saved", task.name()),
+            PromptAction::Activate { task, n } => format!("{} v{n} activated", task.name()),
+            PromptAction::Deactivate { task } => format!("{} back to built-in", task.name()),
+            PromptAction::Delete { task, n } => format!("{} v{n} deleted", task.name()),
+        };
         let msg = match b.action {
-            PromptAction::Save { task, text, note } => {
-                let n = lib.add(task, &text, note.as_deref(), &by)?;
+            PromptAction::Save {
+                task,
+                text,
+                sections,
+                note,
+            } => {
+                let n = lib.add(task, &text, &sections, note.as_deref(), &by)?;
                 format!("saved as version {n}; not used until you activate it")
             }
             PromptAction::Activate { task, n } => {
@@ -77,6 +99,9 @@ pub(super) async fn change(
             }
         };
         prompts::save_as(&root, &lib, b.version, &by).await?;
+        if let Some(server) = app.server.as_deref() {
+            server.audit.record(&by, "prompt", &msg_detail);
+        }
         anyhow::Ok(msg)
     };
     run.await.map(|m| Json(api::Done::new(m))).map_err(fail)
@@ -94,7 +119,7 @@ pub(super) async fn try_draft(
         let llm =
             crate::config::llm_client(&app.settings(), team.as_deref(), app.server.as_deref())
                 .ok_or_else(|| anyhow::anyhow!("no LLM key; set one under Settings"))?;
-        let draft = Prompts::draft(b.task, &b.text);
+        let draft = Prompts::draft(b.task, &b.text, b.sections.clone());
         let g = &s.data.graph;
         let extras = s.extras().await;
         let pick = |id: Option<&str>| id.filter(|i| !i.is_empty()).and_then(|i| g.lookup(i));

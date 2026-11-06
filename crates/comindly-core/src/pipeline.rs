@@ -825,6 +825,7 @@ async fn style_guides(
     }
     let mut reused = 0usize;
     let (syms, edgs, roots_owned) = (symbols.clone(), edges.clone(), roots.to_vec());
+    let guide_prompts = prompts.clone();
     let per_repo = blocking(move || {
         let conventions = match facts {
             Some(f) => crate::conventions::mine(&syms, &edgs, &f),
@@ -847,7 +848,13 @@ async fn style_guides(
                     .filter(|c| c.repo == repo)
                     .cloned()
                     .collect();
-                let sections = crate::styleguide::build_sections(&root, &rsyms, &redges, &rconv);
+                let mut sections =
+                    crate::styleguide::build_sections(&root, &rsyms, &redges, &rconv);
+                for sec in &mut sections {
+                    if let Some(g) = guide_prompts.guidance(&sec.title) {
+                        sec.guidance = g.to_string();
+                    }
+                }
                 (!sections.is_empty()).then_some((repo, sections))
             })
             .collect::<Vec<_>>()

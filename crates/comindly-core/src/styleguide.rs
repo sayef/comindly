@@ -27,6 +27,63 @@ const SECTION_BUDGET: usize = 9000; // per-section evidence cap (chars)
 /// An evidence builder for one section.
 type EvFn = fn(&Ctx) -> String;
 
+/// Each guide section's title and what the LLM is asked to cover in it; prompts may replace the latter.
+pub const SECTIONS: [(&str, &str); 10] = [
+    (
+        "Stack & dependencies",
+        "Name each key dependency and, in one line, what the repo uses it for. Note the language/runtime + versions. Group first-party (their own) modules separately. No generic filler.",
+    ),
+    (
+        "Project layout & architecture",
+        "Describe the directory responsibilities, the layering (e.g. routes→services→repositories→models), where entry points live, and how modules are wired. Cite real dirs/files. If layering isn't evident, say so.",
+    ),
+    (
+        "Naming & formatting",
+        "State the casing per symbol kind (with the measured ratio), private-name convention, file/module naming, line length / quote style / indent from the tooling config. Give a real conforming example. Bans name the replacement.",
+    ),
+    (
+        "Function signatures & parameters",
+        "From the real signatures: how are parameters typed, ordered, defaulted? keyword-only args, *args/**kwargs, return-type annotations, self/cls, async. Document the dominant signature shape with a real example; flag what to avoid.",
+    ),
+    (
+        "Types & data modeling",
+        "How is data modeled and validated — pydantic BaseModel / dataclasses / TypedDict / TS interfaces / zod? Where do models live, how are they named, how is validation done at boundaries? Quote a real model.",
+    ),
+    (
+        "Design patterns & idioms",
+        "Identify the recurring architectural patterns from the largest/most-central classes and decorated defs: base classes, dependency injection, factories, context managers, decorators, service/repository objects, the repo's own wrappers. Quote a real one and say when to follow it.",
+    ),
+    (
+        "Library & infra usage",
+        "For each major dependency shown, document the ONE idiomatic way this repo uses it, quoting a real call-site (file path). Prefer the repo's own wrapper over the raw library where one exists (e.g. AWS via a wrapper, not raw boto3). Include DB/HTTP access patterns.",
+    ),
+    (
+        "Error handling, logging & configuration",
+        "How are errors raised/caught (custom exceptions? broad except? Result types?), how is logging done (which logger, structured?), and how is configuration/secrets accessed (never hardcoded)? Quote real call-sites.",
+    ),
+    (
+        "Testing",
+        "Framework, test file location/naming, fixtures, how external I/O is mocked, assertion style. Quote a real test. If tests are sparse, say so.",
+    ),
+    (
+        "Docstrings & comments",
+        "Dominant docstring style (Google/NumPy/reST/JSDoc) and when docs are expected (public API?), comment density/placement. Quote a real docstring. Don't demand docs the repo doesn't write.",
+    ),
+];
+
+const EVIDENCE: [EvFn; 10] = [
+    ev_stack,
+    ev_layout,
+    ev_naming,
+    ev_signatures,
+    ev_types,
+    ev_patterns,
+    ev_library,
+    ev_errlog,
+    ev_testing,
+    ev_docstrings,
+];
+
 /// Build every guide section for one repo. Reads source lazily (cached).
 pub fn build_sections(
     root: &Path,
@@ -35,41 +92,10 @@ pub fn build_sections(
     conventions: &[crate::conventions::Convention],
 ) -> Vec<Section> {
     let ctx = Ctx::new(root, symbols, edges);
-    let specs: &[(&str, &str, EvFn)] = &[
-        ("Stack & dependencies",
-         "Name each key dependency and, in one line, what the repo uses it for. Note the language/runtime + versions. Group first-party (their own) modules separately. No generic filler.",
-         ev_stack),
-        ("Project layout & architecture",
-         "Describe the directory responsibilities, the layering (e.g. routes→services→repositories→models), where entry points live, and how modules are wired. Cite real dirs/files. If layering isn't evident, say so.",
-         ev_layout),
-        ("Naming & formatting",
-         "State the casing per symbol kind (with the measured ratio), private-name convention, file/module naming, line length / quote style / indent from the tooling config. Give a real conforming example. Bans name the replacement.",
-         ev_naming),
-        ("Function signatures & parameters",
-         "From the real signatures: how are parameters typed, ordered, defaulted? keyword-only args, *args/**kwargs, return-type annotations, self/cls, async. Document the dominant signature shape with a real example; flag what to avoid.",
-         ev_signatures),
-        ("Types & data modeling",
-         "How is data modeled and validated — pydantic BaseModel / dataclasses / TypedDict / TS interfaces / zod? Where do models live, how are they named, how is validation done at boundaries? Quote a real model.",
-         ev_types),
-        ("Design patterns & idioms",
-         "Identify the recurring architectural patterns from the largest/most-central classes and decorated defs: base classes, dependency injection, factories, context managers, decorators, service/repository objects, the repo's own wrappers. Quote a real one and say when to follow it.",
-         ev_patterns),
-        ("Library & infra usage",
-         "For each major dependency shown, document the ONE idiomatic way this repo uses it, quoting a real call-site (file path). Prefer the repo's own wrapper over the raw library where one exists (e.g. AWS via a wrapper, not raw boto3). Include DB/HTTP access patterns.",
-         ev_library),
-        ("Error handling, logging & configuration",
-         "How are errors raised/caught (custom exceptions? broad except? Result types?), how is logging done (which logger, structured?), and how is configuration/secrets accessed (never hardcoded)? Quote real call-sites.",
-         ev_errlog),
-        ("Testing",
-         "Framework, test file location/naming, fixtures, how external I/O is mocked, assertion style. Quote a real test. If tests are sparse, say so.",
-         ev_testing),
-        ("Docstrings & comments",
-         "Dominant docstring style (Google/NumPy/reST/JSDoc) and when docs are expected (public API?), comment density/placement. Quote a real docstring. Don't demand docs the repo doesn't write.",
-         ev_docstrings),
-    ];
-    specs
+    SECTIONS
         .iter()
-        .filter_map(|(title, guidance, f)| {
+        .zip(EVIDENCE)
+        .filter_map(|((title, guidance), f)| {
             let mut evidence = measured(&ctx, title, conventions);
             evidence.push_str(&f(&ctx));
             if evidence.trim().is_empty() {

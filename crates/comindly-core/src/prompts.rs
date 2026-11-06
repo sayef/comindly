@@ -99,10 +99,33 @@ pub struct Version {
     pub task: Task,
     pub version: u32,
     pub text: String,
+    /// Style guide only: what to cover in a section, by title, in place of the built-in guidance.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub sections: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
     pub author: String,
     pub created_at: String,
+    /// The built-in prompt when this version was written, to tell when a release changed it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub based_on: Option<String>,
+}
+
+impl Task {
+    /// Changes whenever a release changes this task's built-in prompt.
+    pub fn builtin_hash(self) -> String {
+        let mut h = blake3::Hasher::new();
+        h.update(self.builtin().as_bytes());
+        if self == Task::Guide {
+            for (title, guidance) in crate::styleguide::SECTIONS {
+                h.update(b"\0");
+                h.update(title.as_bytes());
+                h.update(b"\0");
+                h.update(guidance.as_bytes());
+            }
+        }
+        h.finalize().to_hex().to_string()
+    }
 }
 
 /// Every saved version and which one each task uses; a task with none active uses v0.
@@ -116,24 +139,52 @@ pub struct Library {
 
 impl Library {
     /// Save `text` as the task's next version, inactive until someone activates it.
-    pub fn add(&mut self, task: Task, text: &str, note: Option<&str>, by: &str) -> Result<u32> {
+    pub fn add(
+        &mut self,
+        task: Task,
+        text: &str,
+        sections: &BTreeMap<String, String>,
+        note: Option<&str>,
+        by: &str,
+    ) -> Result<u32> {
         let text = text.trim();
         anyhow::ensure!(!text.is_empty(), "the prompt is empty");
         anyhow::ensure!(
             text.chars().count() <= MAX_LEN,
             "the prompt is longer than {MAX_LEN} characters"
         );
+        let mut kept = BTreeMap::new();
+        for (title, guidance) in sections {
+            let builtin = crate::styleguide::SECTIONS
+                .iter()
+                .find(|(t, _)| t == title)
+                .map(|(_, g)| *g);
+            anyhow::ensure!(
+                task == Task::Guide && builtin.is_some(),
+                "no style guide section {title}"
+            );
+            let g = guidance.trim();
+            anyhow::ensure!(
+                g.chars().count() <= MAX_LEN,
+                "the guidance for {title} is too long"
+            );
+            if !g.is_empty() && Some(g) != builtin {
+                kept.insert(title.clone(), g.to_string());
+            }
+        }
         let version = self.of(task).map(|v| v.version).max().unwrap_or(0) + 1;
         self.versions.push(Version {
             task,
             version,
             text: text.to_string(),
+            sections: kept,
             note: note
                 .map(str::trim)
                 .filter(|n| !n.is_empty())
                 .map(str::to_string),
             author: by.to_string(),
             created_at: chrono::Utc::now().to_rfc3339(),
+            based_on: Some(task.builtin_hash()),
         });
         Ok(version)
     }
@@ -179,44 +230,76 @@ impl Library {
         Ok(())
     }
 
+    /// The active version of `task` when the built-in prompt changed since it was written.
+    pub fn builtin_changed(&self, task: Task) -> Option<u32> {
+        let n = *self.active.get(&task)?;
+        let v = self.find(task, n)?;
+        v.based_on
+            .as_deref()
+            .is_some_and(|b| b != task.builtin_hash())
+            .then_some(n)
+    }
+
     /// The prompts an index run uses.
     pub fn in_use(&self) -> Prompts {
         Prompts(
             self.active
                 .iter()
-                .filter_map(|(t, n)| Some((*t, (*n, self.find(*t, *n)?.text.clone()))))
+                .filter_map(|(t, n)| {
+                    let v = self.find(*t, *n)?;
+                    Some((*t, (*n, v.text.clone(), v.sections.clone())))
+                })
                 .collect(),
         )
     }
 }
 
+type InUse = (u32, String, BTreeMap<String, String>);
+
 /// The instructions each task runs with, fixed for one index run.
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct Prompts(BTreeMap<Task, (u32, String)>);
+pub struct Prompts(BTreeMap<Task, InUse>);
 
 impl Prompts {
-    /// Only `task` changed, to unsaved `text`, for trying it.
-    pub fn draft(task: Task, text: &str) -> Prompts {
-        Prompts(BTreeMap::from([(task, (0, text.trim().to_string()))]))
+    /// Only `task` changed, to unsaved `text` and section guidance, for trying it.
+    pub fn draft(task: Task, text: &str, sections: BTreeMap<String, String>) -> Prompts {
+        Prompts(BTreeMap::from([(
+            task,
+            (0, text.trim().to_string(), sections),
+        )]))
     }
 
     pub fn version(&self, task: Task) -> u32 {
-        self.0.get(&task).map_or(0, |(n, _)| *n)
+        self.0.get(&task).map_or(0, |(n, ..)| *n)
     }
 
     pub fn system(&self, task: Task) -> String {
         let text = self
             .0
             .get(&task)
-            .map_or(task.builtin(), |(_, t)| t.as_str());
+            .map_or(task.builtin(), |(_, t, _)| t.as_str());
         format!("{text}\n\n{}", task.fixed())
+    }
+
+    /// What to cover in the style guide section `title`, when a version replaces the built-in.
+    pub fn guidance(&self, title: &str) -> Option<&str> {
+        let (_, _, s) = self.0.get(&Task::Guide)?;
+        s.get(title).map(String::as_str)
     }
 
     /// Part of the reuse key of what `task` writes; `None` for v0, so built-in results stay valid.
     pub fn key(&self, task: Task) -> Option<String> {
-        self.0
-            .get(&task)
-            .map(|(_, t)| format!("prompt\0{}", blake3::hash(t.as_bytes()).to_hex()))
+        self.0.get(&task).map(|(_, t, sections)| {
+            let mut h = blake3::Hasher::new();
+            h.update(t.as_bytes());
+            for (title, g) in sections {
+                h.update(b"\0");
+                h.update(title.as_bytes());
+                h.update(b"\0");
+                h.update(g.as_bytes());
+            }
+            format!("prompt\0{}", h.finalize().to_hex())
+        })
     }
 
     /// e.g. `summary v2, guide built-in, flow built-in`.
@@ -265,7 +348,13 @@ mod tests {
     fn only_an_activated_version_is_used() {
         let mut l = Library::default();
         let v1 = l
-            .add(Task::Summary, "Summarise for search.", None, "a")
+            .add(
+                Task::Summary,
+                "Summarise for search.",
+                &BTreeMap::new(),
+                None,
+                "a",
+            )
             .unwrap();
         assert_eq!(
             l.in_use().version(Task::Summary),
@@ -293,11 +382,57 @@ mod tests {
     #[test]
     fn versions_count_per_task() {
         let mut l = Library::default();
-        assert_eq!(l.add(Task::Guide, "a", None, "x").unwrap(), 1);
-        assert_eq!(l.add(Task::Guide, "b", Some(" "), "x").unwrap(), 2);
-        assert_eq!(l.add(Task::Flow, "c", None, "x").unwrap(), 1);
+        assert_eq!(
+            l.add(Task::Guide, "a", &BTreeMap::new(), None, "x")
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            l.add(Task::Guide, "b", &BTreeMap::new(), Some(" "), "x")
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            l.add(Task::Flow, "c", &BTreeMap::new(), None, "x").unwrap(),
+            1
+        );
         assert_eq!(l.versions[1].note, None);
-        assert!(l.add(Task::Flow, "  ", None, "x").is_err());
+        assert!(l
+            .add(Task::Flow, "  ", &BTreeMap::new(), None, "x")
+            .is_err());
+    }
+
+    #[test]
+    fn guide_versions_replace_section_guidance() {
+        let mut l = Library::default();
+        let (title, builtin) = crate::styleguide::SECTIONS[2];
+        let sections = BTreeMap::from([
+            (title.to_string(), "Only casing.".to_string()),
+            (
+                "Testing".to_string(),
+                crate::styleguide::SECTIONS[8].1.to_string(),
+            ),
+        ]);
+        let n = l
+            .add(Task::Guide, Task::Guide.builtin(), &sections, None, "a")
+            .unwrap();
+        assert_eq!(
+            l.versions[0].sections.len(),
+            1,
+            "unchanged guidance is not stored"
+        );
+        let bad = BTreeMap::from([("Nope".to_string(), "x".to_string())]);
+        assert!(l.add(Task::Guide, "x", &bad, None, "a").is_err());
+        assert!(l.add(Task::Summary, "x", &sections, None, "a").is_err());
+        let before = l.in_use().key(Task::Guide);
+        l.activate(Task::Guide, n).unwrap();
+        let p = l.in_use();
+        assert_eq!(p.guidance(title), Some("Only casing."));
+        assert_ne!(p.guidance(title), Some(builtin));
+        assert_ne!(p.key(Task::Guide), before);
+        assert_eq!(l.builtin_changed(Task::Guide), None);
+        l.versions[0].based_on = Some("an older release".into());
+        assert_eq!(l.builtin_changed(Task::Guide), Some(n));
     }
 
     #[tokio::test]
@@ -306,7 +441,13 @@ mod tests {
         let root = dir.to_str().unwrap();
         let mut l = Library::default();
         let n = l
-            .add(Task::Flow, "Walk through it.", Some("shorter"), "a")
+            .add(
+                Task::Flow,
+                "Walk through it.",
+                &BTreeMap::new(),
+                Some("shorter"),
+                "a",
+            )
             .unwrap();
         l.activate(Task::Flow, n).unwrap();
         let v = save_as(root, &l, None, "a").await.unwrap();

@@ -1741,6 +1741,10 @@ impl crate::backends::AccountStore for Store {
 }
 
 impl crate::backends::AuditLog for Store {
+    fn record(&self, actor: &str, action: &str, detail: &str) {
+        self.audit(actor, action, detail);
+    }
+
     fn audit_entries(&self, query: &AuditQuery) -> Result<AuditPage> {
         let limit = query.limit.unwrap_or(AUDIT_PAGE).clamp(1, AUDIT_PAGE_MAX);
         let before = query.before.as_deref().and_then(|b| b.split_once('|'));
