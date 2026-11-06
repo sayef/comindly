@@ -3,7 +3,7 @@
 | Command | Purpose |
 |---|---|
 | `comindly index <repo> [--enrich] [--flows] [--guide] [--no-embed] [--incremental]` | Index a single repo (embeds by default) |
-| `comindly link <repos…> [--enrich] [--flows] [--guide] [--no-embed] [--incremental]` | Link several repos (cross-repo edges + blast radius) |
+| `comindly link <repos…> [--enrich] [--flows] [--guide] [--no-embed] [--incremental] [--rewrite summary,guide,flow]` | Link several repos (cross-repo edges + blast radius); `--rewrite` writes those LLM results again for all code instead of reusing them |
 | `comindly explore <focus> [--index-dir <dir>]` | Zoom, blast radius, and context pack for a symbol |
 | `comindly search <query…> [--repo <name>] [--team <name>] [--index-dir <dir>] [--format md\|table]` | Graph-aware hybrid code search |
 | `comindly find <query> [--repo <name>…] [--team <name>…] [--index-dir <dir>]` | Locate symbols by name/path substring |

@@ -79,7 +79,9 @@ symbol, flow or style guide section and shows it next to what the index holds no
 version, or deactivating it to go back to the built-in prompt, applies to what the next index
 writes, partial or full; the same goes for a model change. Nothing already written is redone for
 it: a partial index writes new or changed code with it, and a full index writes everything it
-does not reuse. Only the instructions can be changed: the reply format
+does not reuse. To write everything again with the current models and prompts, use **Rewrite
+everything** on the same page, or `comindly link --rewrite summary,guide,flow`; it costs a full LLM
+pass for each task chosen. Only the instructions can be changed: the reply format
 and its JSON schema are always added, so a model or server without structured output still replies
 in the right shape. When a release changes a built-in prompt that an active version replaces, the
 page says so. On a team server, admins change models and prompts, everyone can read them, and

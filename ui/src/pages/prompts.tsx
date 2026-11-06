@@ -60,6 +60,7 @@ export function PromptsPage() {
       {!prompts.data
         ? !prompts.error && <Skeleton className="h-96 rounded-lg" />
         : prompts.data.tasks.map((t) => <TaskCard key={t.task} t={t} model={model(t.task)} version={prompts.data.version} writable={writable} />)}
+      {writable && <Rewrite />}
     </div>
   );
 }
@@ -303,5 +304,44 @@ function Tried({ r }: { r: PromptTried }) {
         </div>
       </div>
     </div>
+  );
+}
+
+/** One index run that writes the chosen LLM results again from scratch with the current models and prompts. */
+function Rewrite() {
+  const qc = useQueryClient();
+  const [tasks, setTasks] = useState<PromptTaskName[]>([]);
+  const start = useMutation({
+    mutationFn: () => api.startIndex(true, false, tasks),
+    onSuccess: () => (setTasks([]), qc.invalidateQueries({ queryKey: ["index-job"] })),
+  });
+  const toggle = (t: PromptTaskName, on: boolean) => setTasks((x) => (on ? [...x, t] : x.filter((y) => y !== t)));
+  return (
+    <Section
+      title="Rewrite everything"
+      description="Indexing reuses what the LLM already wrote while its input is unchanged, so a new model or prompt only reaches new and changed code. This runs one index that writes the chosen results again for all code, at the cost of a full LLM pass for each."
+    >
+      <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm">
+        {(Object.keys(about) as PromptTaskName[]).map((t) => (
+          <label key={t} className="flex min-h-9 items-center gap-2">
+            <input type="checkbox" checked={tasks.includes(t)} onChange={(e) => toggle(t, e.target.checked)} />
+            {about[t].title}
+          </label>
+        ))}
+      </div>
+      <div>
+        <ConfirmButton
+          variant="outline"
+          disabled={tasks.length === 0}
+          question="Index now and write these again for all code? It sends all of it to the LLM."
+          confirmLabel="Index and rewrite"
+          loading={start.isPending}
+          onConfirm={() => start.mutate()}
+        >
+          Index and rewrite
+        </ConfirmButton>
+      </div>
+      {start.error && <Notice ok={false} message={start.error.message} />}
+    </Section>
   );
 }

@@ -14,7 +14,7 @@ use futures::StreamExt;
 use crate::context::{Cancelled, IndexContext};
 use crate::events::Usage;
 use crate::model::{Edge, EdgeKind, GlobalSymbolId, Symbol, SymbolKind};
-use crate::prompts::Prompts;
+use crate::prompts::{Prompts, Task};
 
 /// A repository to index: the folder of its clone and, for one comindly keeps itself, the URL it
 /// is cloned from when the folder is missing.
@@ -520,6 +520,12 @@ async fn enrich_all(
         .doc
         .in_use();
     ctx.report.note(format!("prompts: {}", prompts.describe()));
+    for t in &s.rewrite {
+        ctx.report.warn(format!(
+            "rewriting every {} result, as asked; nothing stored is reused",
+            t.name()
+        ));
+    }
     if s.enrich {
         summaries(ctx, &llm, &prompts, dst, symbols, edges, stale, incremental).await?;
     }
@@ -662,10 +668,11 @@ async fn summaries(
     let mut todo: Vec<&Symbol> = Vec::new();
     for s in &defs {
         let (rid, k) = (s.id.render(), key(s));
-        let valid = match stored_keys.get(&rid) {
-            Some(old) => *old == k,
-            None => !stale.contains(&rid),
-        };
+        let valid = !ctx.settings.rewrite.contains(&Task::Summary)
+            && match stored_keys.get(&rid) {
+                Some(old) => *old == k,
+                None => !stale.contains(&rid),
+            };
         match prior.get(&rid).filter(|_| valid) {
             Some((sum, q)) => {
                 rows.push((s.id.clone(), sum.clone(), q.clone()));
@@ -869,10 +876,11 @@ async fn style_guides(
             .iter()
             .find(|(g, _)| *g == repo)
             .map(|(_, d)| d.clone());
+        let rewrite = ctx.settings.rewrite.contains(&Task::Guide);
         // Guides written before sections were stored: adopt the current one as the baseline.
         if let Some(doc) = old_doc
             .as_ref()
-            .filter(|_| stored_keys.get(&repo) == Some(&key))
+            .filter(|_| !rewrite && stored_keys.get(&repo) == Some(&key))
         {
             for sec in &sections {
                 let id = sid(&sec.title);
@@ -888,10 +896,11 @@ async fn style_guides(
             .iter()
             .filter(|sec| {
                 let id = sid(&sec.title);
-                !(bodies.contains_key(&id)
-                    && basis
-                        .get(&id)
-                        .is_some_and(|b| guide_similar(b, &guide_basis(sec))))
+                rewrite
+                    || !(bodies.contains_key(&id)
+                        && basis
+                            .get(&id)
+                            .is_some_and(|b| guide_similar(b, &guide_basis(sec))))
             })
             .collect();
         let total = todo.len() as u64;
@@ -1130,6 +1139,7 @@ async fn walkthroughs(
         let (rid, k) = (id.render(), key(name, sig, trace));
         match stored
             .get(&rid)
+            .filter(|_| !ctx.settings.rewrite.contains(&Task::Flow))
             .filter(|_| stored_keys.get(&rid) == Some(&k))
         {
             Some((n, q)) => {

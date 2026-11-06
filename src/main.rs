@@ -114,6 +114,9 @@ enum Cmd {
         /// SCIP: auto (index.scip or installed indexers) | require | off; config `scip`
         #[arg(long)]
         scip: Option<String>,
+        /// Write these LLM results again from scratch instead of reusing them: summary, guide, flow
+        #[arg(long, value_delimiter = ',', value_name = "TASK")]
+        rewrite: Vec<String>,
     },
     /// Zoom, blast radius, and context pack for a symbol
     Explore {
@@ -634,11 +637,26 @@ fn main() -> ExitCode {
             no_llm,
             incremental,
             scip,
+            rewrite,
         } => {
             let s = settings_for(index_dir.as_deref());
             let Some(scip) = scip_mode(scip.as_deref(), s.scip) else {
                 return ExitCode::FAILURE;
             };
+            let mut tasks = std::collections::BTreeSet::new();
+            for t in &rewrite {
+                match comindly::prompts::Task::parse(t.trim()) {
+                    Some(t) => tasks.insert(t),
+                    None => {
+                        comindly::ui::err(&format!("`{t}` is not a task: summary, guide or flow"));
+                        return ExitCode::FAILURE;
+                    }
+                };
+            }
+            if !tasks.is_empty() && no_llm {
+                comindly::ui::err("--rewrite needs the LLM steps; drop --no-llm");
+                return ExitCode::FAILURE;
+            }
             cmd_link(
                 &repos,
                 index_dir.as_deref(),
@@ -648,6 +666,7 @@ fn main() -> ExitCode {
                 !no_llm && tri(guide, no_guide).unwrap_or(s.guide),
                 incremental,
                 scip,
+                tasks,
             )
         }
         Cmd::Explore {
@@ -3109,6 +3128,7 @@ struct Steps {
     enrich: bool,
     flows: bool,
     guide: bool,
+    rewrite: std::collections::BTreeSet<comindly::prompts::Task>,
 }
 
 /// Run an indexing command: one runtime, the resolved settings, the terminal renderer, Ctrl-C to
@@ -3129,6 +3149,7 @@ where
         settings.enrich = steps.enrich;
         settings.flows = steps.flows;
         settings.guide = steps.guide;
+        settings.rewrite = steps.rewrite;
         let wants_llm = steps.enrich || steps.flows || steps.guide;
         let llm = if wants_llm {
             comindly::config::llm_client(&settings, team.name.as_deref(), None)
@@ -3175,6 +3196,7 @@ fn cmd_link(
     guide: bool,
     incremental: bool,
     scip: comindly::scip::Mode,
+    rewrite: std::collections::BTreeSet<comindly::prompts::Task>,
 ) -> ExitCode {
     let cfg = comindly::config::Config::load();
     let root = cfg.index_dir(to);
@@ -3183,6 +3205,7 @@ fn cmd_link(
         enrich,
         flows,
         guide,
+        rewrite,
     };
     let report = run_indexing(&root, steps, |ctx| async move {
         let sources = if repos.is_empty() {
@@ -3257,6 +3280,7 @@ fn cmd_index(
             enrich,
             flows,
             guide,
+            rewrite: Default::default(),
         },
         |ctx| async move {
             comindly::pipeline::index_repo(&ctx, source, incremental, since, scip).await

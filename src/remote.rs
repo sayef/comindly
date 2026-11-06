@@ -301,6 +301,7 @@ pub fn dispatch(c: &Client, cmd: &Cmd) -> Option<ExitCode> {
             repos,
             index_dir: None,
             no_llm,
+            rewrite,
             ..
         } => {
             if !repos.is_empty() {
@@ -309,7 +310,17 @@ pub fn dispatch(c: &Client, cmd: &Cmd) -> Option<ExitCode> {
                 );
                 return Some(ExitCode::FAILURE);
             }
-            index(c, !*no_llm)
+            let mut tasks = Vec::new();
+            for t in rewrite {
+                match comindly::prompts::Task::parse(t.trim()) {
+                    Some(t) => tasks.push(t),
+                    None => {
+                        comindly::ui::err(&format!("`{t}` is not a task: summary, guide or flow"));
+                        return Some(ExitCode::FAILURE);
+                    }
+                }
+            }
+            index(c, !*no_llm, tasks)
         }
         Cmd::Index {
             index_dir: None, ..
@@ -383,7 +394,7 @@ where
 
 /// Start or queue indexing on the server and follow it here; Ctrl-C cancels the job, not just
 /// this view, and a queued one leaves the queue.
-fn index(c: &Client, llm: bool) -> ExitCode {
+fn index(c: &Client, llm: bool, rewrite: Vec<comindly::prompts::Task>) -> ExitCode {
     use comindly::events::EventSink;
     let run = async {
         let started: api::IndexStarted = c
@@ -392,6 +403,7 @@ fn index(c: &Client, llm: bool) -> ExitCode {
                 &api::IndexRequest {
                     llm,
                     drop_unlisted: false,
+                    rewrite,
                 },
             )
             .await?;

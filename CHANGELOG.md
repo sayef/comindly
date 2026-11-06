@@ -19,6 +19,10 @@ All notable changes to this project are documented here. The format follows
   appear in the server's audit log, and the page says when a release changed a built-in prompt
   that an active version replaces.
 - `comindly prompts`: list, show, save a draft from a file, activate, deactivate and delete.
+- Rewrite everything: one index run that writes summaries, style guides or walkthroughs again for
+  all code with the current models and prompts, instead of reusing what was written (Settings →
+  Models & prompts, `comindly link --rewrite summary,guide,flow`, or `rewrite` on
+  `POST /api/v1/index`).
 
 ### Changed
 

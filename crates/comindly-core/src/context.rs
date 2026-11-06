@@ -35,6 +35,8 @@ pub struct Settings {
     pub auto_index_llm: bool,
     /// Time between checks whether a default branch moved.
     pub auto_index_every: std::time::Duration,
+    /// LLM tasks this run writes again from scratch instead of reusing what is stored.
+    pub rewrite: std::collections::BTreeSet<crate::prompts::Task>,
 }
 
 /// Default and largest minutes between automatic re-index checks.
@@ -96,6 +98,7 @@ impl Settings {
                     .unwrap_or(AUTO_INDEX_MINUTES)
                     .clamp(1, MAX_AUTO_INDEX_MINUTES) as u64,
             ),
+            rewrite: Default::default(),
         }
     }
 }

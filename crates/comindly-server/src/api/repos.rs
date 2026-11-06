@@ -123,6 +123,9 @@ pub struct IndexRequest {
     /// Index without the repositories that have no folder here, dropping them from the index.
     #[serde(default)]
     pub drop_unlisted: bool,
+    /// LLM tasks to write again from scratch, with the current model and prompt; needs `llm`.
+    #[serde(default)]
+    pub rewrite: Vec<crate::prompts::Task>,
 }
 
 /// The job that runs it; `position` when it waits, 1 for the next to run.
