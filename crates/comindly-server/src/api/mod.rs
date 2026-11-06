@@ -86,7 +86,7 @@ mod tests {
     fn answers_keep_their_wire_shape() {
         same::<Me>(r#"{"mode":"local"}"#);
         same::<Me>(
-            r#"{"mode":"server","signed_in":false,"email":null,"role":null,"sign_in":"email","sign_in_methods":["oidc","email","code"],"oidc_label":"Microsoft","public_url":"http://localhost:1"}"#,
+            r#"{"mode":"server","signed_in":false,"email":null,"role":null,"sign_in":"email","sign_in_methods":["oidc","email","code"],"oidc_label":"Microsoft","public_url":"http://localhost:1","gateway_url":"https://mcp.example.com/mcp"}"#,
         );
         let older: Me = serde_json::from_str(
             r#"{"mode":"server","signed_in":false,"email":null,"role":null,"sign_in":"code","public_url":"http://localhost:1"}"#,

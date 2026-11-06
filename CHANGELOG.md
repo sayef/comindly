@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `COMINDLY_GATEWAY_URL`: with it, Settings → Your access shows members how to connect each agent
+  through the gateway, signing in with the organisation's account instead of a token, including the
+  Claude desktop app and claude.ai.
+
+### Fixed
+
+- The release's install check runs on betas too; it was skipped with the Mac builds.
+
 ## [0.5.0-beta.3](https://github.com/sayef/comindly/compare/v0.5.0-beta.2...v0.5.0-beta.3) - 2026-11-05
 
 ### Added
