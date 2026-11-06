@@ -442,6 +442,8 @@ export interface Me {
   /** The provider's logo on that button, when it is one comindly knows. */
   oidc_brand?: "microsoft" | "google";
   public_url?: string | null;
+  /** The gateway agents connect through with the organisation's sign-in, instead of a token. */
+  gateway_url?: string;
 }
 
 export type SignIn = "email" | "code" | "oidc";

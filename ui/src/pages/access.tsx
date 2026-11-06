@@ -465,7 +465,7 @@ export function AccessPage() {
         </form>
         <Outcome error={create.error ?? revoke.error} />
         {create.data?.token && <Reveal label="Your new token" value={create.data.token} hint="Copy it now; it is not shown again." />}
-        <Connect url={me.data?.public_url ?? window.location.origin} token={create.data?.token} />
+        <Connect url={me.data?.public_url ?? window.location.origin} gateway={me.data?.gateway_url} token={create.data?.token} />
         {list.data.tokens.length > 0 && (
           <Table>
             <thead>
@@ -562,44 +562,66 @@ export function AuditPage() {
   );
 }
 
-const AGENTS = { claude: "Claude Code", cursor: "Cursor", codex: "Codex", vscode: "VS Code" } as const;
+const AGENTS = { claude: "Claude Code", cursor: "Cursor", codex: "Codex", vscode: "VS Code", app: "Claude app" } as const;
+type Agent = keyof typeof AGENTS;
 
-/** How an agent reaches this server's tools over HTTP with a personal access token. */
-function Connect({ url, token }: { url: string; token?: string }) {
-  const [agent, setAgent] = useState<keyof typeof AGENTS>("claude");
-  const mcp = `${url}/mcp`;
+/** How an agent reaches this server's tools: through the gateway with the organisation's sign-in, or
+ * over HTTP with a personal access token. */
+function Connect({ url, gateway, token }: { url: string; gateway?: string; token?: string }) {
+  const [agent, setAgent] = useState<Agent>("claude");
+  const [via, setVia] = useState<"gateway" | "token">(gateway ? "gateway" : "token");
+  const signIn = via === "gateway" && !!gateway;
+  const mcp = signIn ? gateway : `${url}/mcp`;
   const t = token ?? "<token>";
-  const how = {
+  const auth = signIn ? {} : { headers: { Authorization: `Bearer ${t}` } };
+  const how: Record<Agent, [string, string]> = {
     claude: [
-      "Run once in a terminal:",
-      `claude mcp add --transport http --scope user comindly ${mcp} --header "Authorization: Bearer ${t}"`,
+      "Run once in a terminal" + (signIn ? ", then /mcp in Claude Code to sign in:" : ":"),
+      `claude mcp add --transport http --scope user comindly ${mcp}` + (signIn ? "" : ` --header "Authorization: Bearer ${t}"`),
     ],
-    cursor: [
-      "Add to ~/.cursor/mcp.json:",
-      JSON.stringify({ mcpServers: { comindly: { url: mcp, headers: { Authorization: `Bearer ${t}` } } } }, null, 2),
-    ],
-    codex: [
-      "Add to ~/.codex/config.toml, and set COMINDLY_TOKEN to the token in your shell:",
-      `[mcp_servers.comindly]\nurl = "${mcp}"\nbearer_token_env_var = "COMINDLY_TOKEN"`,
-    ],
+    cursor: ["Add to ~/.cursor/mcp.json:", JSON.stringify({ mcpServers: { comindly: { url: mcp, ...auth } } }, null, 2)],
+    codex: signIn
+      ? ["Add to ~/.codex/config.toml, then run codex mcp login comindly to sign in:", `[mcp_servers.comindly]\nurl = "${mcp}"`]
+      : [
+          "Add to ~/.codex/config.toml, and set COMINDLY_TOKEN to the token in your shell:",
+          `[mcp_servers.comindly]\nurl = "${mcp}"\nbearer_token_env_var = "COMINDLY_TOKEN"`,
+        ],
     vscode: [
       "Add to .vscode/mcp.json in your workspace:",
-      JSON.stringify({ servers: { comindly: { type: "http", url: mcp, headers: { Authorization: `Bearer ${t}` } } } }, null, 2),
+      JSON.stringify({ servers: { comindly: { type: "http", url: mcp, ...auth } } }, null, 2),
     ],
-  }[agent];
+    app: ["In the Claude desktop app or on claude.ai: Settings, Connectors, Add custom connector, with this address:", mcp],
+  };
+  const agents = (Object.keys(AGENTS) as Agent[]).filter((a) => a !== "app" || signIn);
+  const shown = agents.includes(agent) ? agent : "claude";
   return (
     <div className="flex flex-col gap-2 border-t pt-3">
       <div className="text-sm font-medium">Connect an agent</div>
+      {gateway && (
+        <div role="group" aria-label="How" className="flex flex-wrap gap-1">
+          <Button variant={signIn ? "outline" : "ghost"} size="sm" aria-pressed={signIn} onClick={() => setVia("gateway")}>
+            Sign in, no token
+          </Button>
+          <Button variant={signIn ? "ghost" : "outline"} size="sm" aria-pressed={!signIn} onClick={() => setVia("token")}>
+            With a token
+          </Button>
+        </div>
+      )}
       <div role="group" aria-label="Agent" className="flex flex-wrap gap-1">
-        {(Object.keys(AGENTS) as (keyof typeof AGENTS)[]).map((a) => (
-          <Button key={a} variant={a === agent ? "outline" : "ghost"} size="sm" aria-pressed={a === agent} onClick={() => setAgent(a)}>
+        {agents.map((a) => (
+          <Button key={a} variant={a === shown ? "outline" : "ghost"} size="sm" aria-pressed={a === shown} onClick={() => setAgent(a)}>
             {AGENTS[a]}
           </Button>
         ))}
       </div>
-      <p className="text-xs text-muted-foreground">{how[0]}</p>
-      <Code>{how[1]}</Code>
-      <p className="text-xs text-muted-foreground">The agent then lists comindly's tools; ledger records it writes are attributed to you.</p>
+      <p className="text-xs text-muted-foreground">{how[shown][0]}</p>
+      <Code>{how[shown][1]}</Code>
+      <p className="text-xs text-muted-foreground">
+        {signIn
+          ? "The agent signs you in with your organisation's account, from anywhere; it needs no token and no VPN. "
+          : ""}
+        The agent then lists comindly's tools; ledger records it writes are attributed to you.
+      </p>
     </div>
   );
 }

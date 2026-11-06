@@ -37,6 +37,7 @@ Secret Manager mounts), so rotating one is a change in your secret store and a r
 | `COMINDLY_TRUST_PROXY` | behind a proxy | `true` when a proxy you run sets `X-Forwarded-For`, so sign-in limits apply per client. |
 | `COMINDLY_GATEWAY_SECRET` | no | At least 32 random characters, shared with a gateway you run in front of `/mcp`; see [Agents through a gateway](#agents-through-a-gateway). Off when unset. |
 | `COMINDLY_GATEWAY_EMAIL_HEADER` | no | The header your gateway names the signed-in member in; `X-Forwarded-Email` by default. |
+| `COMINDLY_GATEWAY_URL` | no | The gateway's MCP address, e.g. `https://mcp.example.com/mcp`. Settings → Your access then shows members how to connect through it, with no token. |
 
 Members, sessions, personal tokens, stored secrets, the repositories the server indexes and the record
 of each indexing job live next to the index, in `_server` at the index location, so a container keeps
@@ -143,6 +144,13 @@ else is refused, and the address header is ignored without the secret. To keep a
 review bot read-only, allow it only the read tools. Only the gateway should be able to reach the
 server, and it must drop these headers when a client sends them. Without a gateway, nothing changes:
 agents use personal access tokens as above.
+
+Someone invited joins on their first call through the gateway, as they would on signing in to the
+app, so they never need to open it. Set `COMINDLY_GATEWAY_URL` and Settings → Your access shows the
+command for each agent. An MCP OAuth proxy only sends people back to the addresses it allows: local
+ones (`http://localhost:*`, `http://127.0.0.1:*`) cover Claude Code, Cursor, Codex and VS Code; the
+Claude desktop app and claude.ai need `https://claude.ai/api/mcp/auth_callback` and
+`https://claude.com/api/mcp/auth_callback`.
 
 ## The command line
 

@@ -314,6 +314,7 @@ pub(super) async fn me(
             .and_then(|o| o.brand())
             .map(String::from),
         public_url: server.config.public_url.clone(),
+        gateway_url: server.config.gateway_url.clone(),
     })
 }
 

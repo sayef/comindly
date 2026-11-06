@@ -1,7 +1,8 @@
 # Using comindly with agents
 
 An agent connected to comindly (see [Getting started](../getting-started.md#4-connect-your-agent), or on
-a team server Settings → Your access)
+a team server Settings → Your access, which also covers signing in through your organisation's
+[gateway](self-hosting.md#agents-through-a-gateway) with no token)
 sees fifteen tools. It decides when to call them; you ask in plain words. This page shows what to
 ask, what happens, and the habits that keep the answers good.
 
