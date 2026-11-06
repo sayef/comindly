@@ -45,6 +45,8 @@ pub struct ServerConfig {
     pub gateway_secret: Option<String>,
     /// The header such a gateway names the member in.
     pub gateway_email_header: String,
+    /// The gateway's MCP address, which the app offers agents instead of a token.
+    pub gateway_url: Option<String>,
     pub secret_key: String,
     pub secret_key_previous: Option<String>,
     pub smtp_url: Option<String>,
@@ -137,6 +139,7 @@ impl ServerConfig {
             gateway_email_header: env_secret("COMINDLY_GATEWAY_EMAIL_HEADER")
                 .unwrap_or_else(|| "x-forwarded-email".into())
                 .to_lowercase(),
+            gateway_url: env_secret("COMINDLY_GATEWAY_URL"),
             secret_key: env_secret("COMINDLY_SECRET_KEY")
                 .context("server mode needs COMINDLY_SECRET_KEY")?,
             secret_key_previous: env_secret("COMINDLY_SECRET_KEY_PREVIOUS"),

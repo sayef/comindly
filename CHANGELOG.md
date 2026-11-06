@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `COMINDLY_GATEWAY_URL`: with it, Settings → Your access shows members how to connect each agent
+  through the gateway, signing in with the organisation's account instead of a token, including the
+  Claude desktop app and claude.ai.
+
+### Fixed
+
+- The release's install check runs on betas too; it was skipped with the Mac builds.
+
 ### Changed
 
 - The org map tells shared data from dependencies: repositories that only share tables or buckets

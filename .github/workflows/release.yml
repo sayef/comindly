@@ -229,7 +229,8 @@ jobs:
   # Installs the published release the way users do; fails the release if that breaks.
   verify-install:
     needs: [tag, publish]
-    if: needs.tag.outputs.tag != ''
+    # A skipped build-macos (betas) would otherwise skip this job too.
+    if: ${{ !cancelled() && needs.tag.outputs.tag != '' && needs.publish.result == 'success' }}
     uses: ./.github/workflows/install-check.yml
     with:
       tag: ${{ needs.tag.outputs.tag }}

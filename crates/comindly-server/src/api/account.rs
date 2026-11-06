@@ -28,6 +28,9 @@ pub enum Me {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         oidc_brand: Option<String>,
         public_url: String,
+        /// The gateway agents connect through with the organisation's sign-in, when there is one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        gateway_url: Option<String>,
     },
 }
 
