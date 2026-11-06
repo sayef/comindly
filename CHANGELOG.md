@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `guide` with a `focus` returns only that repository's narrative guide (a dev index with 16
+  repositories went from about 195,000 to 19,000 characters); without one, it names the
+  repositories that have a guide.
+- In Markdown mode (the default) tool replies carry only the Markdown: Claude Code showed the
+  attached JSON instead, at twice the size. `format: json` still sends JSON with structured content.
+- `contracts` lists a symbol on both sides of a contract once, with its id.
+- `suggest` leaves out vendored code and puts the most depended-on code first.
+
 ## [0.5.0-beta.3](https://github.com/sayef/comindly/compare/v0.5.0-beta.2...v0.5.0-beta.3) - 2026-11-05
 
 ### Added
