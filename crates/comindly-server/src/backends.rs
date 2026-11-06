@@ -37,6 +37,9 @@ pub trait AccountStore: Send + Sync {
     /// Sign in someone an identity provider vouched for: a member, someone invited, or with
     /// `join` a newcomer as a viewer. `how` names the provider in the audit log.
     fn sign_in_verified(&self, email: &str, how: &str, join: bool) -> Result<(String, Who)>;
+    /// The same check without a session: a member, or someone invited (or with `join` a
+    /// newcomer) who joins now. For callers an identity provider vouched for, such as the gateway.
+    fn admit(&self, email: &str, join: bool) -> Result<Who>;
     /// A new sign-in code for `email`; their sessions end, except `keep`.
     fn reset_code(&self, by: &str, email: &str, keep: Option<&str>) -> Result<String>;
     fn sign_out(&self, session: &str, everywhere: bool) -> Result<()>;
