@@ -133,7 +133,10 @@ pub(super) async fn try_draft(
                         .ok_or_else(|| anyhow::anyhow!("nothing indexed to try it on"))?,
                 };
                 let node = g.node(i);
-                let path = node.location.rsplit_once(':').map_or(&*node.location, |(p, _)| p);
+                let path = node
+                    .location
+                    .rsplit_once(':')
+                    .map_or(&*node.location, |(p, _)| p);
                 let sig = node.signature.clone().unwrap_or_default();
                 let e = llm.enrich_symbol(&draft, &node.name, &sig, path).await?;
                 Ok(api::PromptTried {
@@ -162,9 +165,19 @@ pub(super) async fn try_draft(
                     current: extras.flows.get(&node.id).map(shown),
                 })
             }
-            Task::Guide => anyhow::bail!(
-                "a style guide section is written from evidence gathered while indexing; activate the draft and index to see it"
-            ),
+            Task::Guide => {
+                let (repo, title, body) = guide_sample(&app, &s, &b, &draft, &llm).await?;
+                let uri = super::graph_uri(&s).ok_or_else(|| anyhow::anyhow!("no index"))?;
+                let current = crate::index::read_keys(&uri, "guide_sections")
+                    .await
+                    .ok()
+                    .and_then(|m| m.get(&format!("{repo}\0{title}")).cloned());
+                Ok(api::PromptTried {
+                    sample: format!("{title} ({repo})"),
+                    output: body.unwrap_or_else(|| "No consistent convention observed.".into()),
+                    current,
+                })
+            }
         }
     };
     run.await.map(Json).map_err(fail)
@@ -194,4 +207,70 @@ fn most_used(data: &crate::view::Data) -> Option<String> {
         })
         .map(|s| s.id.render())
         .max_by_key(|id| data.graph.dependents_count(id))
+}
+
+/// One style guide section of a repository, written with the draft from evidence measured now in
+/// comindly's checkout of it: `(repo, section title, body)`.
+async fn guide_sample(
+    app: &Shared,
+    s: &super::Session,
+    b: &api::PromptTry,
+    draft: &Prompts,
+    llm: &crate::llm::LlmClient,
+) -> anyhow::Result<(String, String, Option<String>)> {
+    let entries = app.repos();
+    let named = |e: &crate::config::RepoEntry| crate::worktree::name(std::path::Path::new(&e.path));
+    let wanted = b.sample.as_deref().map(str::trim).filter(|x| !x.is_empty());
+    let entry = match wanted {
+        Some(w) => entries.iter().find(|e| named(e) == w),
+        None => entries.first(),
+    }
+    .ok_or_else(|| anyhow::anyhow!("no repository {} in the list", wanted.unwrap_or("")))?;
+    let repo = named(entry);
+    let root = crate::worktree::checkout_dir(
+        &crate::config::cache_dir(),
+        std::path::Path::new(&entry.path),
+    )
+    .ok_or_else(|| anyhow::anyhow!("{repo} has no checkout here yet; index it once"))?;
+    let symbols: Vec<crate::model::Symbol> = s
+        .data
+        .symbols
+        .iter()
+        .filter(|x| x.id.package == repo)
+        .cloned()
+        .collect();
+    let edges: Vec<crate::model::Edge> = s
+        .data
+        .edges
+        .iter()
+        .filter(|e| e.src.package == repo)
+        .cloned()
+        .collect();
+    let conventions: Vec<_> = s
+        .data
+        .conventions
+        .iter()
+        .filter(|c| c.repo == repo)
+        .cloned()
+        .collect();
+    let title = b
+        .section
+        .clone()
+        .unwrap_or_else(|| crate::styleguide::SECTIONS[0].0.to_string());
+    let t = title.clone();
+    let mut sec = tokio::task::spawn_blocking(move || {
+        let refs: Vec<&crate::model::Symbol> = symbols.iter().collect();
+        crate::styleguide::build_sections(&root, &refs, &edges, &conventions)
+            .into_iter()
+            .find(|x| x.title == t)
+    })
+    .await?
+    .ok_or_else(|| anyhow::anyhow!("{repo} has no evidence for {title}"))?;
+    if let Some(g) = draft.guidance(&sec.title) {
+        sec.guidance = g.to_string();
+    }
+    let body = llm
+        .guide_section(draft, &repo, &sec.title, &sec.guidance, &sec.evidence)
+        .await?;
+    Ok((repo, title, body))
 }

@@ -81,7 +81,8 @@ createRoot(document.getElementById("root")!).render(
                   <Route path="settings" element={<SettingsShell />}>
                     <Route index element={<SettingsPage />} />
                     <Route path="repositories" element={<RepositoriesPage />} />
-                    <Route path="prompts" element={<PromptsPage />} />
+                    <Route path="models" element={<PromptsPage />} />
+                    <Route path="prompts" element={<Navigate to="/settings/models" replace />} />
                     <Route path="members" element={<MembersPage />} />
                     <Route path="integrations" element={<IntegrationsPage />} />
                     <Route path="audit" element={<AuditPage />} />

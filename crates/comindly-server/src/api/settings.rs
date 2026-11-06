@@ -178,9 +178,13 @@ pub struct PromptTry {
     pub text: String,
     #[serde(default)]
     pub sections: std::collections::BTreeMap<String, String>,
-    /// A symbol id for a summary, an entry point for a walkthrough; the most used one otherwise.
+    /// A symbol id for a summary, an entry point for a walkthrough, a repository for a style
+    /// guide; otherwise the most used one, the furthest-reaching flow or the first repository.
     #[serde(default)]
     pub sample: Option<String>,
+    /// Style guide only: the section to write; the first one otherwise.
+    #[serde(default)]
+    pub section: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

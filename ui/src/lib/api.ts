@@ -206,6 +206,9 @@ export interface TeamSettings {
   name?: string;
   llm_base_url?: string;
   llm_model?: string;
+  llm_model_summary?: string;
+  llm_model_guide?: string;
+  llm_model_flow?: string;
   embed_model?: string;
   enrich?: boolean;
   flows?: boolean;
@@ -500,6 +503,8 @@ export interface PromptVersion {
   task: PromptTaskName;
   version: number;
   text: string;
+  /** Style guide only: section guidance by title, where it differs from the built-in. */
+  sections?: Record<string, string>;
   note?: string;
   author: string;
   created_at: string;
@@ -512,6 +517,10 @@ export interface PromptTask {
   format: string;
   /** `null`: the built-in prompt. */
   active: number | null;
+  /** The active version, when a release changed the built-in prompt since it was written. */
+  builtin_changed: number | null;
+  /** Style guide only: each section's built-in guidance. */
+  sections: { title: string; guidance: string }[];
   versions: PromptVersion[];
 }
 
@@ -523,7 +532,7 @@ export interface Prompts {
 }
 
 export type PromptAction =
-  | { action: "save"; task: PromptTaskName; text: string; note?: string }
+  | { action: "save"; task: PromptTaskName; text: string; sections?: Record<string, string>; note?: string }
   | { action: "activate"; task: PromptTaskName; n: number }
   | { action: "deactivate"; task: PromptTaskName }
   | { action: "delete"; task: PromptTaskName; n: number };
@@ -595,7 +604,7 @@ export const api = {
   saveTeam: (settings: TeamSettings, version: number | null) => post("/api/v1/team", { settings, version }),
   prompts: () => get<Prompts>("/api/v1/prompts"),
   changePrompt: (a: PromptAction, version: number | null) => post<Done>("/api/v1/prompts", { ...a, version }),
-  tryPrompt: (task: PromptTaskName, text: string, sample?: string) => post<PromptTried>("/api/v1/prompts/try", { task, text, sample }),
+  tryPrompt: (t: { task: PromptTaskName; text: string; sections?: Record<string, string>; sample?: string; section?: string }) => post<PromptTried>("/api/v1/prompts/try", t),
   saveKey: (key: string) => post<{ ok: boolean; message: string }>("/api/v1/team/key", { key }),
   join: (index: string) => post("/api/v1/join", { index }),
   createTeam: (name: string, index: string) => post("/api/v1/team/create", { name, index }),

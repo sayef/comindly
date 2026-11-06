@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Notice } from "@/components/notice";
-import { ApiKey, TeamSection, Unsaved, useUnsavedWarning } from "@/components/team-settings";
+import { TeamSection, Unsaved, useUnsavedWarning } from "@/components/team-settings";
 import { TeamsCard } from "@/components/teams-card";
 import { api, type SettingsChange } from "@/lib/api";
 
@@ -116,7 +116,7 @@ export function SettingsPage() {
         </Section>
       )}
 
-      <TeamSection />
+      <TeamSection part="org" />
 
       <TeamsCard />
 
@@ -151,12 +151,6 @@ export function SettingsPage() {
             </div>
           </form>
           {result(saveYou)}
-        </Section>
-      )}
-
-      {!server && (
-        <Section title="Your LLM key" description="Used when indexing with LLM summaries; the endpoint and model are the index's settings above. Kept on this machine only.">
-          <ApiKey />
         </Section>
       )}
 
@@ -214,8 +208,8 @@ function SettingsNav() {
       <NavLink to="/settings/repositories" className={tab}>
         Repositories
       </NavLink>
-      <NavLink to="/settings/prompts" className={tab}>
-        Prompts
+      <NavLink to="/settings/models" className={tab}>
+        Models &amp; prompts
       </NavLink>
       {server && admin && (
         <>
