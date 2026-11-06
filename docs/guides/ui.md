@@ -53,8 +53,10 @@ can be bookmarked or shared.
   steps that enter another repository marked. With LLM summaries on when indexing, the furthest-reaching
   flows also get a written walkthrough.
 - **Conventions**: every measured and team convention in one table, filtered by scope (org-wide or a
-  repository), topic, origin and text, and sorted by scope, topic or how widely it is followed. Expand a
-  row to see where it comes from: the places that follow it and those that deviate, each with its code
+  repository), topic, origin and text, and sorted by scope, topic or how strictly it is followed. Each
+  rule reads as an instruction, with a word for how strictly the code follows it (always, usually,
+  often or sometimes) and a note where there are few examples. Expand a row to see what it was
+  measured from and where it comes from: the places that follow it and those that deviate, each with its code
   as indexed and a link to it on GitHub or GitLab. Recipes, learned from commit history, list commits.
   Add your own, edit or hide measured ones (hidden ones can be restored). `/conventions?repo=<name>`
   opens one repository.
@@ -79,9 +81,9 @@ can be bookmarked or shared.
   index's shared settings.
 - **Settings**: the index location (with a connection test), the index's shared settings (LLM
   endpoint and model, embedding model, LLM steps, limits and prices), your own API key, your name on
-  ledger records, and how often to check for a new index version. **Prompts** holds the LLM
-  instructions for summaries, style guides and walkthroughs, with saved versions to try and activate
-  (see [Configuration](configuration.md#prompts)). Changing the index location switches
+  ledger records, and how often to check for a new index version. **Models & prompts** holds the
+  LLM setup, a model per task, and the instructions for summaries, style guides and walkthroughs, with
+  saved versions to try and activate (see [Configuration](configuration.md#models-and-prompts)). Changing the index location switches
   the UI without a restart. On a team server, Settings also has **Members** and **Integrations**
   (admins) and **Your access** (your sign-in code, personal access tokens and how to connect an agent);
   viewers see everything read-only.
