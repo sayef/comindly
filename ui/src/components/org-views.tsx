@@ -7,7 +7,17 @@ import { cn } from "@/lib/utils";
 type Edge = OrgMap["edges"][number];
 export type Direction = "uses" | "usedBy";
 
-/** Repositories with what each uses and what uses it, and the groups that depend on each other in a circle. */
+/** Whether repositories only share tables or buckets: coupled, but neither calls the other. */
+export const sharesOnly = (es: Edge[]) => es.length > 0 && es.every((e) => e.kind === "data");
+
+/** Contract names on links, shortened to the first and a count. */
+export const viaLabel = (es: Edge[]) => {
+  const names = [...new Set(es.flatMap((e) => e.via ?? []))];
+  return names.length ? names[0] + (names.length > 1 ? ` +${names.length - 1}` : "") : "code dependency";
+};
+
+/** Repositories with what each uses and what uses it, and the groups that import or call each other in a
+ * circle; shared tables and buckets never make a cycle. */
 export function useOrg(map: OrgMap | undefined) {
   return useMemo(() => {
     const uses = new Map<string, Map<string, Edge[]>>();
@@ -23,6 +33,7 @@ export function useOrg(map: OrgMap | undefined) {
       uses.get(e.src)!.set(e.dst, [...(uses.get(e.src)!.get(e.dst) ?? []), e]);
       usedBy.get(e.dst)!.set(e.src, [...(usedBy.get(e.dst)!.get(e.src) ?? []), e]);
     }
+    const calls = (v: string) => [...uses.get(v)!].filter(([, es]) => !sharesOnly(es)).map(([w]) => w);
     // Strongly connected components (Tarjan): every group of two or more is a cycle.
     let index = 0;
     const idx = new Map<string, number>();
@@ -35,7 +46,7 @@ export function useOrg(map: OrgMap | undefined) {
       low.set(v, index++);
       stack.push(v);
       onStack.add(v);
-      for (const w of uses.get(v)!.keys()) {
+      for (const w of calls(v)) {
         if (!idx.has(w)) {
           strong(w);
           low.set(v, Math.min(low.get(v)!, low.get(w)!));
@@ -53,10 +64,27 @@ export function useOrg(map: OrgMap | undefined) {
       }
     };
     for (const v of [...uses.keys()].sort()) if (!idx.has(v)) strong(v);
+    // One shortest loop per cycle, to read as a path: the first repository back to itself.
+    const loops = cycles.map((group) => {
+      const from = new Map<string, string>([[group[0], ""]]);
+      const queue = [group[0]];
+      while (queue.length) {
+        const v = queue.shift()!;
+        for (const w of calls(v).filter((w) => group.includes(w))) {
+          if (w === group[0]) {
+            const path = [w];
+            for (let at = v; at; at = from.get(at)!) path.unshift(at);
+            return path;
+          }
+          if (!from.has(w)) (from.set(w, v), queue.push(w));
+        }
+      }
+      return group;
+    });
     const repos = [...uses.keys()].sort();
     const entries = repos.filter((r) => usedBy.get(r)!.size === 0 && uses.get(r)!.size > 0);
     const foundations = repos.filter((r) => uses.get(r)!.size === 0 && usedBy.get(r)!.size > 0);
-    return { repos, uses, usedBy, symbols, cycles, entries, foundations };
+    return { repos, uses, usedBy, symbols, cycles, loops, entries, foundations };
   }, [map]);
 }
 
@@ -93,18 +121,18 @@ function layout(org: Org, roots: string[], dir: Direction, open: Set<string>) {
     seen.add(repo);
     const children = kids.filter(([k]) => !path.includes(k) && k !== repo);
     const expanded = first && open.has(key) && children.length > 0;
-    const names = [...new Set((via ?? []).flatMap((e) => e.via ?? []))];
     const box: Box = {
       key,
       repo,
       path,
       col: path.length,
       y: 0,
-      via: via === null ? "" : names.length ? names[0] + (names.length > 1 ? ` +${names.length - 1}` : "") : "code dependency",
-      contract: names.length > 0,
+      via: via === null ? "" : (sharesOnly(via) ? "shares " : "") + viaLabel(via),
+      contract: (via ?? []).some((e) => e.via?.length),
       kind: !first ? "seen" : expanded ? "open" : children.length ? "closed" : "leaf",
       more: children.length,
-      loopTo: kids.find(([k]) => path.includes(k))?.[0] ?? null,
+      // Only where both are in one cycle: a path through a shared table back to an import is no loop.
+      loopTo: kids.find(([k, es]) => path.includes(k) && !sharesOnly(es) && org.cycles.some((c) => c.includes(k) && c.includes(repo)))?.[0] ?? null,
     };
     boxes.push(box);
     if (!expanded) {

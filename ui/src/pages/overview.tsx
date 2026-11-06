@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RefreshCcw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { type Direction, TreeView, useOrg } from "@/components/org-views";
+import { type Direction, TreeView, useOrg, viaLabel } from "@/components/org-views";
 import { Backdrop } from "@/components/backdrop";
 import { OrgNetwork } from "@/components/org-network";
 import { RepoDot } from "@/components/symbol";
@@ -93,13 +93,14 @@ function Panel({ title, to, link, children }: { title: string; to: string; link:
 function MapKey() {
   const line = (stroke: string, dash?: string) => (
     <svg width="28" height="8" aria-hidden="true" className="shrink-0">
-      <line x1="1" y1="4" x2="27" y2="4" stroke={stroke} strokeWidth="1.5" strokeDasharray={dash} />
+      <line x1="1" y1="4" x2="27" y2="4" stroke={stroke} strokeWidth="1.5" strokeDasharray={dash} strokeLinecap={dash === "1.5 4" ? "round" : undefined} />
     </svg>
   );
   return (
     <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5">
       <span className="flex items-center gap-1.5">{line("var(--color-brand)")}Through a contract</span>
       <span className="flex items-center gap-1.5">{line("color-mix(in srgb, var(--color-muted-foreground) 70%, transparent)")}Imports and calls</span>
+      <span className="flex items-center gap-1.5">{line("var(--color-muted-foreground)", "1.5 4")}Shared tables or buckets</span>
       <span className="flex items-center gap-1.5">{line("var(--color-warning)", "5 3")}Cycle</span>
       <span>Hover or tab to an arrow for its contracts.</span>
     </div>
@@ -498,17 +499,30 @@ export function OverviewPage() {
                     onBlur={(e) => !e.currentTarget.parentElement?.contains(e.relatedTarget) && setShowCycles(false)}
                     className="absolute right-0 z-20 mt-1 flex w-72 flex-col gap-0.5 rounded-lg bg-popover p-1.5 shadow-float">
                     <p className="px-2 py-1.5 text-xs text-muted-foreground">
-                      These repositories depend on each other in a circle, so none of them can change or release on its own.
+                      These repositories import or call each other in a circle, so none of them can change or release on its own. Shared
+                      tables and buckets are not counted.
                     </p>
-                    {org.cycles.map((c) => (
-                      <button
-                        key={c.join()}
-                        onClick={() => (setMode("tree"), setStart(c[0]), setDir("uses"), setOpen(new Set([c[0]])), setSelected(null), setShowCycles(false))}
-                        className="rounded-md px-2 py-1.5 text-left font-mono text-xs hover:bg-muted"
-                      >
-                        {c.join(", ")}
-                      </button>
-                    ))}
+                    {org.cycles.map((c, i) => {
+                      const loop = org.loops[i];
+                      return (
+                        <button
+                          key={c.join()}
+                          onClick={() => (setMode("tree"), setStart(c[0]), setDir("uses"), setOpen(new Set([c[0]])), setSelected(null), setShowCycles(false))}
+                          className="flex flex-col gap-0.5 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted"
+                        >
+                          {loop.slice(0, -1).map((r, k) => (
+                            <span key={k} className="flex min-w-0 items-baseline gap-1.5">
+                              <span className="font-semibold">{r}</span>
+                              <span className="text-muted-foreground">→ {loop[k + 1]}</span>
+                              <span className="min-w-0 truncate font-mono text-muted-foreground">
+                                {viaLabel((org.uses.get(r)?.get(loop[k + 1]) ?? []).filter((e) => e.kind !== "data"))}
+                              </span>
+                            </span>
+                          ))}
+                          {c.length > loop.length - 1 && <span className="text-muted-foreground">with {c.filter((r) => !loop.includes(r)).join(", ")} in the same circle</span>}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -583,7 +597,7 @@ export function OverviewPage() {
           <div className="border-t px-5 py-3 text-xs text-muted-foreground">
             {mode === "network"
               ? <MapKey />
-              : "Click a box to open or close it; each line names the contract it goes through. A dashed box is shown elsewhere in the tree; an amber line loops back where repositories depend on each other in a circle."}
+              : "Click a box to open or close it; each line names the contract it goes through. A dashed box is shown elsewhere in the tree; an amber line loops back where repositories import or call each other in a circle. Shared tables and buckets read \"shares\" and never make a cycle."}
           </div>
           {versions.data && versions.data.length > 1 && (
             <div className="border-t px-5 py-3.5">

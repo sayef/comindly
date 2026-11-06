@@ -62,8 +62,8 @@ export interface Overview {
 
 export interface OrgMap {
   nodes: { id: string; name: string; repo: string }[];
-  /** `src` uses `dst`; `via` names the contracts a contract link goes through. */
-  edges: { src: string; dst: string; kind: "code" | "contract"; weight: number; via?: string[] }[];
+  /** `src` uses `dst`; `via` names the contracts a link goes through. `data`: tables or buckets both use. */
+  edges: { src: string; dst: string; kind: "code" | "contract" | "data"; weight: number; via?: string[] }[];
 }
 
 export interface Anchor {

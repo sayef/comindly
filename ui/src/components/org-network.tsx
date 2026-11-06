@@ -1,6 +1,6 @@
 import { RefreshCcw } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Org } from "@/components/org-views";
+import { sharesOnly, type Org } from "@/components/org-views";
 import { RepoDot } from "@/components/symbol";
 import { cn, compact } from "@/lib/utils";
 
@@ -16,6 +16,8 @@ interface L {
   to: string;
   weight: number;
   contract: boolean;
+  /** Only shared tables or buckets: no direction, never a cycle. */
+  data: boolean;
   cycle: boolean;
   via: string[];
 }
@@ -93,7 +95,8 @@ function LinkCard({ l, x, y, width, height }: { l: L; x: number; y: number; widt
   return (
     <div className="pointer-events-none absolute z-10 max-h-[calc(100%-1.5rem)] w-72 overflow-hidden rounded-lg border bg-popover p-3 text-xs shadow-float" style={{ left, ...place }}>
       <p className="mb-2 text-sm">
-        <span className="font-semibold">{l.from}</span> <span className="text-muted-foreground">uses</span> <span className="font-semibold">{l.to}</span>
+        <span className="font-semibold">{l.from}</span> <span className="text-muted-foreground">{l.data ? "shares data with" : "uses"}</span>{" "}
+        <span className="font-semibold">{l.to}</span>
       </p>
       <div className="flex flex-col gap-2">
         {[...groups].map(([k, names]) => (
@@ -116,6 +119,7 @@ function LinkCard({ l, x, y, width, height }: { l: L; x: number; y: number; widt
             <span className="nums font-semibold text-foreground">{l.code}</span> code reference{l.code === 1 ? "" : "s"} (imports and calls)
           </p>
         )}
+        {l.data && <p className="text-muted-foreground">Coupled through the data, but neither calls the other; not counted as a cycle.</p>}
         {l.cycle && <p className="text-warning">Part of a cycle: these repositories also depend back on each other.</p>}
       </div>
     </div>
@@ -143,13 +147,15 @@ export function OrgNetwork({
     for (const [from, to] of org.uses) {
       for (const [dst, es] of to) {
         if (from === dst) continue;
+        const data = sharesOnly(es);
         out.push({
           from,
           to: dst,
           weight: es.reduce((n, e) => n + (e.weight || 1), 0),
-          code: es.filter((e) => e.kind !== "contract").reduce((n, e) => n + (e.weight || 1), 0),
+          code: es.filter((e) => e.kind === "code").reduce((n, e) => n + (e.weight || 1), 0),
           contract: es.some((e) => e.kind === "contract"),
-          cycle: inCycle(from, dst),
+          data,
+          cycle: !data && inCycle(from, dst),
           via: [...new Set(es.flatMap((e) => e.via ?? []))],
         });
       }
@@ -227,7 +233,7 @@ export function OrgNetwork({
   };
 
   const edge = (l: L, pts: P[]) => {
-    const kind = l.cycle ? "cycle" : l.contract ? "contract" : "code";
+    const kind = l.cycle ? "cycle" : l.data ? "data" : l.contract ? "contract" : "code";
     const hot = tip?.l === l;
     return (
       <g key={`${l.from}>${l.to}`}>
@@ -236,9 +242,10 @@ export function OrgNetwork({
           fill="none"
           stroke={kind === "contract" ? "var(--color-brand)" : kind === "cycle" ? "var(--color-warning)" : "var(--color-muted-foreground)"}
           strokeWidth={hot ? 2.5 : 1.5}
-          strokeOpacity={hot ? 1 : kind === "code" ? 0.55 : 0.85}
-          strokeDasharray={kind === "cycle" ? "6 4" : undefined}
-          markerEnd={`url(#tip-${kind})`}
+          strokeOpacity={hot ? 1 : kind === "code" || kind === "data" ? 0.55 : 0.85}
+          strokeDasharray={kind === "cycle" ? "6 4" : kind === "data" ? "1.5 4" : undefined}
+          strokeLinecap={kind === "data" ? "round" : undefined}
+          markerEnd={kind === "data" ? undefined : `url(#tip-${kind})`}
           className="pointer-events-none"
         />
         <path
@@ -248,7 +255,7 @@ export function OrgNetwork({
           strokeWidth={14}
           tabIndex={0}
           role="button"
-          aria-label={`${l.from} uses ${l.to}${l.contract ? `, through ${l.via.length} ${l.via.length === 1 ? "contract" : "contracts"}` : ""}${l.cycle ? ", in a cycle" : ""}`}
+          aria-label={`${l.from} ${l.data ? "shares data with" : "uses"} ${l.to}${l.contract ? `, through ${l.via.length} ${l.via.length === 1 ? "contract" : "contracts"}` : ""}${l.cycle ? ", in a cycle" : ""}`}
           className="cursor-help outline-none focus-visible:stroke-ring/40"
           onPointerEnter={(e) => show(l, e)}
           onPointerMove={(e) => show(l, e)}

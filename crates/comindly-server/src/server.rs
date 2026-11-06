@@ -1547,13 +1547,22 @@ impl crate::backends::AccountStore for Store {
     /// newcomer who joins as a viewer; the identity provider has already checked who they are.
     fn sign_in_verified(&self, email: &str, how: &str, join: bool) -> Result<(String, Who)> {
         let email = normalize(email);
+        if self.member(&email)?.is_some() {
+            self.audit(&email, "sign-in", how);
+            return self.session_for(&email);
+        }
+        let who = self.admit(&email, join)?;
+        self.session_for(&who.email)
+    }
+
+    fn admit(&self, email: &str, join: bool) -> Result<Who> {
+        let email = normalize(email);
         anyhow::ensure!(
             valid_email(&email),
             "the sign-in did not come with an email address"
         );
-        if self.member(&email)?.is_some() {
-            self.audit(&email, "sign-in", how);
-            return self.session_for(&email);
+        if let Some(who) = self.member(&email)? {
+            return Ok(who);
         }
         let t = now();
         let _w = self.write_lock();
@@ -1582,7 +1591,7 @@ impl crate::backends::AccountStore for Store {
         self.commit(changes)?;
         drop(_w);
         self.audit(&email, "join", role.as_str());
-        self.session_for(&email)
+        Ok(Who { email, role })
     }
 
     /// Give `email` a new sign-in code; their sessions end, except `keep` (the caller's own).
@@ -2116,6 +2125,19 @@ mod tests {
         let (_, who) = s.sign_in_verified("dev@x.org", "oidc", false).unwrap();
         assert_eq!(who.role, Role::Admin, "a member keeps the role given here");
         assert!(s.sign_in_verified("", "oidc", true).is_err());
+    }
+
+    #[test]
+    fn the_gateway_admits_the_invited_without_a_session() {
+        let (_d, s) = temp_store();
+        assert!(s.admit("stranger@x.org", false).is_err());
+        s.invite("admin@x.org", "dev@x.org", Role::Member, true)
+            .unwrap();
+        let who = s.admit("Dev@X.org", false).unwrap();
+        assert_eq!((who.email.as_str(), who.role), ("dev@x.org", Role::Member));
+        assert!(s.invites().unwrap().is_empty(), "the invitation is used up");
+        assert_eq!(s.admit("dev@x.org", false).unwrap().role, Role::Member);
+        assert_eq!(s.admit("new@x.org", true).unwrap().role, Role::Viewer);
     }
 
     #[test]
