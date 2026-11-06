@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0-beta.4](https://github.com/sayef/comindly/compare/v0.5.0-beta.3...v0.5.0-beta.4) - 2026-11-06
+
 ### Added
 
 - `COMINDLY_GATEWAY_URL`: with it, Settings → Your access shows members how to connect each agent
