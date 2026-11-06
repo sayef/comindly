@@ -13,6 +13,11 @@ All notable changes to this project are documented here. The format follows
   since a library reading a service's table would otherwise loop back. A cycle lists its loop step
   by step with the import or call each step goes through.
 
+### Fixed
+
+- Someone invited can connect their agent through the trusted gateway straight away; before, they
+  had to sign in to the app once first.
+
 ## [0.5.0-beta.3](https://github.com/sayef/comindly/compare/v0.5.0-beta.2...v0.5.0-beta.3) - 2026-11-05
 
 ### Added
