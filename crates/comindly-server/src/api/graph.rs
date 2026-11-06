@@ -70,7 +70,7 @@ pub struct OrgNode {
 pub struct OrgEdge {
     pub src: String,
     pub dst: String,
-    /// `code` or `contract`.
+    /// `code`, `contract` (routes, queues, topics) or `data` (tables and buckets both sides use).
     pub kind: String,
     pub weight: usize,
     pub via: Vec<String>,
