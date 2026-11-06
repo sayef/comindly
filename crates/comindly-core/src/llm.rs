@@ -278,6 +278,37 @@ mod tests {
         eprintln!("queries: {:?}", e.queries);
     }
 
+    // A compatible server: `COMINDLY_TEST_LLM_BASE_URL` and `COMINDLY_TEST_LLM_MODEL`, e.g. Ollama.
+    #[tokio::test]
+    #[ignore]
+    async fn live_compatible_server() {
+        let base = std::env::var("COMINDLY_TEST_LLM_BASE_URL").expect("COMINDLY_TEST_LLM_BASE_URL");
+        let model = std::env::var("COMINDLY_TEST_LLM_MODEL").expect("COMINDLY_TEST_LLM_MODEL");
+        let c = LlmClient::new(Some(&base), &model, None).unwrap();
+        let p = Prompts::default();
+        let e = c
+            .enrich_symbol(
+                &p,
+                "open_pool",
+                "fn open_pool(cfg: &DbConfig) -> Pool",
+                "src/db/pool.rs",
+            )
+            .await
+            .expect("summary");
+        assert!(!e.summary.is_empty());
+        eprintln!("summary: {}\nqueries: {:?}", e.summary, e.queries);
+        let (n, _) = c
+            .narrate_flow(
+                &p,
+                "handle_order",
+                "fn handle_order(o: Order)",
+                "d1 calls acme:validate src/a.rs:3",
+            )
+            .await
+            .expect("flow");
+        eprintln!("flow: {n}");
+    }
+
     #[tokio::test]
     #[ignore]
     async fn live_guide_and_flow() {

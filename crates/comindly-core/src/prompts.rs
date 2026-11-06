@@ -82,13 +82,29 @@ impl Task {
 }
 
 impl Task {
+    /// The shape of a reply, filled in, so a model without structured output does not echo the schema.
+    fn example(self) -> &'static str {
+        match self {
+            Task::Summary => {
+                r#"{"summary": "Opens a pooled database connection from the service settings.", "queries": ["How do I connect to the database?", "Where is the connection pool created?", "Which settings does the pool read?"]}"#
+            }
+            Task::Guide => {
+                r#"{"observed": true, "rules": ["**MUST** name functions in `snake_case`, as in `src/db/pool.rs` `open_pool`."]}"#
+            }
+            Task::Flow => {
+                r#"{"narration": "`handle_order` validates the order with `validate`, then stores it with `save`.", "queries": ["What happens when an order arrives?", "Where is an order validated?", "Where is an order saved?"]}"#
+            }
+        }
+    }
+
     /// What is always added after the instructions: the format and its JSON schema, so a server
     /// that ignores structured output still gets the shape.
     pub fn fixed(self) -> String {
         format!(
-            "{}\n\nThe reply must match this JSON schema:\n{}",
+            "{}\n\nReply with one JSON object that matches this schema (not the schema itself):\n{}\n\nFor example:\n{}",
             self.format(),
-            crate::llm::reply_schema(self)
+            crate::llm::reply_schema(self),
+            self.example()
         )
     }
 }
