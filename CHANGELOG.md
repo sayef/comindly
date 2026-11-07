@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Layout conventions for code at a repository's top level read "at the top level of the repository"
+  instead of "in `./`", and org-wide ones name a real example directory.
+
 ## [0.5.0-beta.5](https://github.com/sayef/comindly/compare/v0.5.0-beta.4...v0.5.0-beta.5) - 2026-11-07
 
 ### Added

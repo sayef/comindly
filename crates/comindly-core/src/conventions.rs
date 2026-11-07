@@ -354,13 +354,19 @@ fn org_baseline(per_repo: &[Convention]) -> Vec<Convention> {
         .filter(|(_, cs)| cs.len() >= 2)
         .map(|(key, cs)| {
             let names: Vec<&str> = cs.iter().map(|c| c.repo.as_str()).collect();
+            // The fullest wording, so a layout rule keeps its example directory.
+            let generic = cs
+                .iter()
+                .map(|c| &c.generic)
+                .max_by_key(|g| g.len())
+                .unwrap();
             Convention {
                 origin: Origin::Measured,
                 repo: ORG.into(),
                 dimension: cs[0].dimension.clone(),
                 key: key.to_string(),
-                rule: cs[0].generic.clone(),
-                generic: cs[0].generic.clone(),
+                rule: generic.clone(),
+                generic: generic.clone(),
                 support: cs.len(),
                 total: repos.len(),
                 unit: "measured repositories".into(),
@@ -788,12 +794,20 @@ impl<'a> Cx<'a> {
                 repo: repo.into(),
                 dimension: "layout".into(),
                 key: format!("layout:{}", label.to_lowercase().replace(' ', "-")),
-                rule: format!("Put {} in `{dir}/`", lower(label)),
-                generic: format!(
-                    "Put {} in one directory per service (e.g. `…/{}/`)",
-                    lower(label),
-                    tail.join("/")
-                ),
+                rule: if dir == "." {
+                    format!("Put {} at the top level of the repository", lower(label))
+                } else {
+                    format!("Put {} in `{dir}/`", lower(label))
+                },
+                generic: if dir == "." {
+                    format!("Put {} in one directory per service", lower(label))
+                } else {
+                    format!(
+                        "Put {} in one directory per service (e.g. `…/{}/`)",
+                        lower(label),
+                        tail.join("/")
+                    )
+                },
                 support: hits.len(),
                 total: syms.len(),
                 unit: lower(label),
@@ -1315,6 +1329,28 @@ mod tests {
         assert_eq!(org[0].rule, "Functions are snake_case");
         assert_eq!(org[0].evidence().as_deref(), Some("Shared by a and b."));
         assert!(!org[0].few(), "a baseline is never marked as few examples");
+    }
+
+    #[test]
+    fn org_layout_rule_keeps_an_example_directory() {
+        let c = |repo: &str, generic: &str| Convention {
+            origin: Origin::Measured,
+            repo: repo.into(),
+            dimension: "layout".into(),
+            key: "layout:http-route-handlers".into(),
+            rule: String::new(),
+            generic: generic.into(),
+            support: 3,
+            total: 3,
+            unit: String::new(),
+            repos: Vec::new(),
+            exemplars: Vec::new(),
+            counterexamples: Vec::new(),
+        };
+        let root = "Put HTTP route handlers in one directory per service";
+        let dir = "Put HTTP route handlers in one directory per service (e.g. `…/orders/`)";
+        let org = org_baseline(&[c("inventory", root), c("orders", dir)]);
+        assert_eq!(org[0].rule, dir);
     }
 
     #[test]
