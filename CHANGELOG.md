@@ -10,6 +10,8 @@ All notable changes to this project are documented here. The format follows
 
 - Layout conventions for code at a repository's top level read "at the top level of the repository"
   instead of "in `./`", and org-wide ones name a real example directory.
+- On phones, the prompt editor's Try row stacks instead of squeezing its field, and the API key
+  heading wraps its badge onto its own line.
 
 ## [0.5.0-beta.5](https://github.com/sayef/comindly/compare/v0.5.0-beta.4...v0.5.0-beta.5) - 2026-11-07
 

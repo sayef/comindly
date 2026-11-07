@@ -178,8 +178,8 @@ function Row(props: { label: string; note?: string; detail: string; active: bool
   return (
     <li className="flex flex-col gap-2 px-3 py-2.5">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <button className="flex min-w-0 flex-1 flex-col items-start text-left" onClick={props.onToggle} aria-expanded={props.open}>
-          <span className="flex items-center gap-2 text-sm font-semibold">
+        <button className="flex min-w-0 flex-1 basis-48 flex-col items-start text-left" onClick={props.onToggle} aria-expanded={props.open}>
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-semibold">
             {props.label}
             {props.active && <Badge variant="brand">In use</Badge>}
           </span>
@@ -250,22 +250,22 @@ function Editor({ t, start, startSections, version, onDone }: { t: PromptTask; s
         Note
         <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="What changed, for whoever activates it" />
       </label>
-      <div className="flex flex-wrap items-end gap-2">
-        <label className="flex min-w-0 flex-1 flex-col gap-1.5 text-sm font-semibold">
+      <div className="grid items-end gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+        <label className="flex min-w-0 flex-col gap-1.5 text-sm font-semibold">
           Try it on
           <Input value={sample} onChange={(e) => setSample(e.target.value)} placeholder={placeholder} />
         </label>
         {t.task === "guide" && (
           <label className="flex min-w-0 flex-col gap-1.5 text-sm font-semibold">
             Section
-            <select className="h-9 rounded-md border border-input bg-card px-2 text-sm font-normal" value={section} onChange={(e) => setSection(e.target.value)}>
+            <select className="h-9 w-full rounded-md border border-input bg-card px-2 text-sm font-normal" value={section} onChange={(e) => setSection(e.target.value)}>
               {t.sections.map((b) => (
                 <option key={b.title}>{b.title}</option>
               ))}
             </select>
           </label>
         )}
-        <Button variant="outline" disabled={!text.trim()} loading={tryIt.isPending} onClick={() => tryIt.mutate()}>
+        <Button variant="outline" className="justify-self-start" disabled={!text.trim()} loading={tryIt.isPending} onClick={() => tryIt.mutate()}>
           Try
         </Button>
       </div>
