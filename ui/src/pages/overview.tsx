@@ -717,7 +717,7 @@ export function OverviewPage() {
                       <Td>{s.consumer}</Td>
                       <Td className="font-mono text-xs">{s.locked}</Td>
                       <Td className="font-mono text-xs text-muted-foreground">
-                        {s.published} <span className="font-sans text-xs">from {s.publisher}</span>
+                        {s.published} <span className="font-sans text-xs whitespace-nowrap">from {s.publisher}</span>
                       </Td>
                     </Tr>
                   ))}

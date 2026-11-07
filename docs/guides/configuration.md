@@ -73,6 +73,12 @@ cheaper one for summaries and a stronger one for style guides), the embedding mo
 and their limits, and the instructions indexing gives the LLM for summaries, style guides and
 walkthroughs. All of it is stored with the index.
 
+![Models & prompts: the LLM setup and the prompts on one page](../assets/screenshots/models.webp#only-light)
+![Models & prompts: the LLM setup and the prompts on one page](../assets/screenshots/models-dark.webp#only-dark)
+/// caption
+Models & prompts: the LLM setup and the prompts on one page
+///
+
 Each task starts with comindly's built-in prompt. Saving an edit makes a new version that nothing
 uses yet; for style guides it can also change what each section covers. **Try** runs a draft on one
 symbol, flow or style guide section and shows it next to what the index holds now. Activating a

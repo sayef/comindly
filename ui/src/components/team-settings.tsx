@@ -46,8 +46,10 @@ export function ApiKey() {
   });
   return (
     <div className="flex flex-col gap-2 border-t pt-3">
-      <p className="flex items-center gap-2 text-sm font-semibold">
-        <KeyRound className="size-4" /> Your API key
+      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-semibold">
+        <span className="flex items-center gap-2 whitespace-nowrap">
+          <KeyRound className="size-4" /> Your API key
+        </span>
         <Badge variant={source === "none" ? "outline" : "brand"}>{sources[source]}</Badge>
       </p>
       <p className="text-xs text-muted-foreground">
@@ -62,7 +64,7 @@ export function ApiKey() {
       >
         <Input
           type="password"
-          className="max-w-sm"
+          className="min-w-0 flex-1 basis-48 sm:max-w-sm"
           value={key}
           onChange={(e) => setKey(e.target.value)}
           placeholder="Paste your API key…"

@@ -101,7 +101,7 @@ for (const theme of mode === "server" ? [] : ["light", "dark"]) {
     await sleep(2500);
     await shot(`agent-view${suffix}`);
   }
-  for (const [page, path] of [["contracts", "contracts"], ["ledger", "ledger"], ["packages", "packages"], ["conventions", "conventions"], ["repositories", "settings/repositories"], ["setup", "setup"]]) {
+  for (const [page, path] of [["contracts", "contracts"], ["ledger", "ledger"], ["packages", "packages"], ["conventions", "conventions"], ["repositories", "settings/repositories"], ["models", "settings/models"], ["setup", "setup"]]) {
     await go(`/${path}`);
     await shot(`${page}${suffix}`);
   }
@@ -117,7 +117,7 @@ for (const theme of mode === "server" ? [] : ["light", "dark"]) {
     await shot(`flow${suffix}`);
   }
   await go("/conventions");
-  await evaluate(`(async () => { document.querySelector('[aria-label="Show where it comes from"]')?.click(); await new Promise((r) => setTimeout(r, 400)); [...document.querySelectorAll("button")].find((b) => b.textContent.includes("Show code"))?.click(); })()`);
+  await evaluate(`(async () => { document.querySelector('[aria-label^="Where it comes from"]')?.click(); await new Promise((r) => setTimeout(r, 400)); [...document.querySelectorAll("button")].find((b) => b.textContent.includes("Show code"))?.click(); })()`);
   await sleep(1500);
   await shot(`conventions-open${suffix}`);
   await go("/");

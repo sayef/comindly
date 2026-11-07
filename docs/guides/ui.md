@@ -79,12 +79,12 @@ can be bookmarked or shared.
   default 5) whether a default branch moved on the remote and re-indexes when one did, with the LLM steps
   for new or changed code only if **With LLM steps** is on (`auto_index_llm`); all three are among the
   index's shared settings.
-- **Settings**: the index location (with a connection test), the index's shared settings (LLM
-  endpoint and model, embedding model, LLM steps, limits and prices), your own API key, your name on
-  ledger records, and how often to check for a new index version. **Models & prompts** holds the
-  LLM setup, a model per task, and the instructions for summaries, style guides and walkthroughs, with
-  saved versions to try and activate (see [Configuration](configuration.md#models-and-prompts)). Changing the index location switches
-  the UI without a restart. On a team server, Settings also has **Members** and **Integrations**
+- **Settings**: the index location (with a connection test), the org name, your name on ledger
+  records, and how often to check for a new index version. **Models & prompts** holds the LLM setup
+  (endpoint, a model per task, embedding model, LLM steps, limits, prices and the API key) and the
+  instructions for summaries, style guides and walkthroughs, with saved versions to try and activate,
+  and **Rewrite everything** (see [Configuration](configuration.md#models-and-prompts)). Changing the
+  index location switches the UI without a restart. On a team server, Settings also has **Members** and **Integrations**
   (admins) and **Your access** (your sign-in code, personal access tokens and how to connect an agent);
   viewers see everything read-only.
 - **Activity**: what comindly works on in the background. Tiles count what runs, waits, succeeded and
