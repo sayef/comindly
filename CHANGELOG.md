@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0-beta.6](https://github.com/sayef/comindly/compare/v0.5.0-beta.5...v0.5.0-beta.6) - 2026-11-07
+
 ### Fixed
 
 - Layout conventions for code at a repository's top level read "at the top level of the repository"
