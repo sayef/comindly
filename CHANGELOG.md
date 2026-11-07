@@ -6,6 +6,38 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Settings → Models & prompts: the LLM setup and the prompts on one page, stored with the index.
+  A model per task (`llm_model_summary`, `llm_model_guide`, `llm_model_flow`), for example a
+  cheaper one for summaries and a stronger one for style guides.
+- Prompts for summaries, style guides and walkthroughs. An edit is saved as a new version that is
+  not used until someone activates it; deactivating goes back to the built-in prompt. A style guide
+  version can also change what each section covers. A draft can be tried on one symbol, flow or
+  style guide section next to what the index holds now. A model or prompt change applies to what
+  the next index writes, partial or full, without redoing results already written. Prompt changes
+  appear in the server's audit log, and the page says when a release changed a built-in prompt
+  that an active version replaces.
+- `comindly prompts`: list, show, save a draft from a file, activate, deactivate and delete.
+- Rewrite everything: one index run that writes summaries, style guides or walkthroughs again for
+  all code with the current models and prompts, instead of reusing what was written (Settings →
+  Models & prompts, `comindly link --rewrite summary,guide,flow`, or `rewrite` on
+  `POST /api/v1/index`).
+
+### Changed
+
+- Summaries, style guide sections and walkthroughs ask the LLM for structured output (a JSON
+  schema) instead of a text format read back line by line. The system message also carries the
+  schema and a filled-in example, so a model or server without structured output still replies in
+  the right shape. Results already in an index stay valid.
+- Conventions read as instructions ("Type-annotate parameters") with a word for how strictly the
+  code follows them (always, usually, often or sometimes) instead of a percentage, and a note where
+  there are few examples. The counts moved to the expanded row ("Followed by 412 of the 530
+  functions with parameters"); org-wide rules name the repositories that share them. Agents get
+  the same wording, with the strength, through MCP.
+- Settings → General keeps the org name and how agents get text; everything about models moved to
+  Models & prompts.
+
 ## [0.5.0-beta.4](https://github.com/sayef/comindly/compare/v0.5.0-beta.3...v0.5.0-beta.4) - 2026-11-06
 
 ### Added

@@ -14,6 +14,7 @@ use futures::StreamExt;
 use crate::context::{Cancelled, IndexContext};
 use crate::events::Usage;
 use crate::model::{Edge, EdgeKind, GlobalSymbolId, Symbol, SymbolKind};
+use crate::prompts::{Prompts, Task};
 
 /// A repository to index: the folder of its clone and, for one comindly keeps itself, the URL it
 /// is cloned from when the folder is missing.
@@ -513,14 +514,26 @@ async fn enrich_all(
         }
         return Ok(());
     };
+    let prompts = crate::prompts::load(&ctx.root)
+        .await
+        .context("reading the prompts")?
+        .doc
+        .in_use();
+    ctx.report.note(format!("prompts: {}", prompts.describe()));
+    for t in &s.rewrite {
+        ctx.report.warn(format!(
+            "rewriting every {} result, as asked; nothing stored is reused",
+            t.name()
+        ));
+    }
     if s.enrich {
-        summaries(ctx, &llm, dst, symbols, edges, stale, incremental).await?;
+        summaries(ctx, &llm, &prompts, dst, symbols, edges, stale, incremental).await?;
     }
     if s.guide {
-        style_guides(ctx, &llm, dst, symbols, edges, roots).await?;
+        style_guides(ctx, &llm, &prompts, dst, symbols, edges, roots).await?;
     }
     if s.flows {
-        walkthroughs(ctx, &llm, dst, symbols, edges).await?;
+        walkthroughs(ctx, &llm, &prompts, dst, symbols, edges).await?;
     }
     Ok(())
 }
@@ -590,9 +603,11 @@ async fn embed(
 }
 
 /// Summaries of the most-used definitions, saved every `CHECKPOINT` and reused while unchanged.
+#[allow(clippy::too_many_arguments)]
 async fn summaries(
     ctx: &IndexContext,
     llm: &Arc<crate::llm::LlmClient>,
+    prompts: &Prompts,
     dst: &str,
     symbols: &Arc<Vec<Symbol>>,
     edges: &Arc<Vec<Edge>>,
@@ -653,10 +668,11 @@ async fn summaries(
     let mut todo: Vec<&Symbol> = Vec::new();
     for s in &defs {
         let (rid, k) = (s.id.render(), key(s));
-        let valid = match stored_keys.get(&rid) {
-            Some(old) => *old == k,
-            None => !stale.contains(&rid),
-        };
+        let valid = !ctx.settings.rewrite.contains(&Task::Summary)
+            && match stored_keys.get(&rid) {
+                Some(old) => *old == k,
+                None => !stale.contains(&rid),
+            };
         match prior.get(&rid).filter(|_| valid) {
             Some((sum, q)) => {
                 rows.push((s.id.clone(), sum.clone(), q.clone()));
@@ -690,8 +706,8 @@ async fn summaries(
                 })
                 .collect(),
             |(n, sig, path)| {
-                let llm = llm.clone();
-                async move { llm.enrich_symbol(&n, &sig, &path).await.ok() }
+                let (llm, prompts) = (llm.clone(), prompts.clone());
+                async move { llm.enrich_symbol(&prompts, &n, &sig, &path).await.ok() }
             },
             |d| {
                 done += 1;
@@ -778,6 +794,7 @@ fn usage(ctx: &IndexContext, llm: &crate::llm::LlmClient) -> Usage {
 async fn style_guides(
     ctx: &IndexContext,
     llm: &Arc<crate::llm::LlmClient>,
+    prompts: &Prompts,
     dst: &str,
     symbols: &Arc<Vec<Symbol>>,
     edges: &Arc<Vec<Edge>>,
@@ -809,6 +826,7 @@ async fn style_guides(
     }
     let mut reused = 0usize;
     let (syms, edgs, roots_owned) = (symbols.clone(), edges.clone(), roots.to_vec());
+    let guide_prompts = prompts.clone();
     let per_repo = blocking(move || {
         let conventions = match facts {
             Some(f) => crate::conventions::mine(&syms, &edgs, &f),
@@ -831,7 +849,13 @@ async fn style_guides(
                     .filter(|c| c.repo == repo)
                     .cloned()
                     .collect();
-                let sections = crate::styleguide::build_sections(&root, &rsyms, &redges, &rconv);
+                let mut sections =
+                    crate::styleguide::build_sections(&root, &rsyms, &redges, &rconv);
+                for sec in &mut sections {
+                    if let Some(g) = guide_prompts.guidance(&sec.title) {
+                        sec.guidance = g.to_string();
+                    }
+                }
                 (!sections.is_empty()).then_some((repo, sections))
             })
             .collect::<Vec<_>>()
@@ -852,10 +876,11 @@ async fn style_guides(
             .iter()
             .find(|(g, _)| *g == repo)
             .map(|(_, d)| d.clone());
+        let rewrite = ctx.settings.rewrite.contains(&Task::Guide);
         // Guides written before sections were stored: adopt the current one as the baseline.
         if let Some(doc) = old_doc
             .as_ref()
-            .filter(|_| stored_keys.get(&repo) == Some(&key))
+            .filter(|_| !rewrite && stored_keys.get(&repo) == Some(&key))
         {
             for sec in &sections {
                 let id = sid(&sec.title);
@@ -871,10 +896,11 @@ async fn style_guides(
             .iter()
             .filter(|sec| {
                 let id = sid(&sec.title);
-                !(bodies.contains_key(&id)
-                    && basis
-                        .get(&id)
-                        .is_some_and(|b| guide_similar(b, &guide_basis(sec))))
+                rewrite
+                    || !(bodies.contains_key(&id)
+                        && basis
+                            .get(&id)
+                            .is_some_and(|b| guide_similar(b, &guide_basis(sec))))
             })
             .collect();
         let total = todo.len() as u64;
@@ -891,11 +917,12 @@ async fn style_guides(
                 })
                 .collect(),
             |(title, guidance, evidence)| {
-                let (llm, repo) = (llm.clone(), repo.clone());
+                let (llm, prompts, repo) = (llm.clone(), prompts.clone(), repo.clone());
                 async move {
-                    llm.guide_section(&repo, &title, &guidance, &evidence)
+                    llm.guide_section(&prompts, &repo, &title, &guidance, &evidence)
                         .await
                         .ok()
+                        .map(|b| b.unwrap_or_else(|| NO_CONVENTION.to_string()))
                 }
             },
             |_| {
@@ -921,7 +948,7 @@ async fn style_guides(
         let mut doc = String::new();
         for sec in &sections {
             let t = bodies.get(&sid(&sec.title)).map(|b| b.trim()).unwrap_or("");
-            if t.is_empty() || t.eq_ignore_ascii_case("No consistent convention observed.") {
+            if t.is_empty() || t.eq_ignore_ascii_case(NO_CONVENTION) {
                 continue;
             }
             doc.push_str(&format!("## {}\n\n{}\n\n", sec.title, t));
@@ -1063,6 +1090,7 @@ fn guide_similar(a: &str, b: &str) -> bool {
 async fn walkthroughs(
     ctx: &IndexContext,
     llm: &Arc<crate::llm::LlmClient>,
+    prompts: &Prompts,
     dst: &str,
     symbols: &Arc<Vec<Symbol>>,
     edges: &Arc<Vec<Edge>>,
@@ -1078,17 +1106,7 @@ async fn walkthroughs(
             .into_iter()
             .filter_map(|(idx, _)| {
                 let s = by_id.get(&g.node(idx).id)?;
-                let trace = g
-                    .flow(idx, 6)
-                    .iter()
-                    .map(|h| {
-                        format!(
-                            "d{} {} {}:{} {}",
-                            h.depth, h.via, h.node.repo, h.node.name, h.node.location
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
+                let trace = g.flow_trace(idx);
                 Some((
                     s.id.clone(),
                     s.name.clone(),
@@ -1121,6 +1139,7 @@ async fn walkthroughs(
         let (rid, k) = (id.render(), key(name, sig, trace));
         match stored
             .get(&rid)
+            .filter(|_| !ctx.settings.rewrite.contains(&Task::Flow))
             .filter(|_| stored_keys.get(&rid) == Some(&k))
         {
             Some((n, q)) => {
@@ -1145,8 +1164,8 @@ async fn walkthroughs(
                 .map(|(_, name, sig, trace)| (name.clone(), sig.clone(), trace.clone()))
                 .collect(),
             |(name, sig, trace)| {
-                let llm = llm.clone();
-                async move { llm.narrate_flow(&name, &sig, &trace).await.ok() }
+                let (llm, prompts) = (llm.clone(), prompts.clone());
+                async move { llm.narrate_flow(&prompts, &name, &sig, &trace).await.ok() }
             },
             |_| {
                 done += 1;
@@ -1193,6 +1212,9 @@ async fn walkthroughs(
     }
     Ok(())
 }
+
+/// A guide section's body when its evidence shows no consistent convention.
+const NO_CONVENTION: &str = "No consistent convention observed.";
 
 fn fingerprint(parts: impl IntoIterator<Item = String>) -> String {
     let mut h = blake3::Hasher::new();

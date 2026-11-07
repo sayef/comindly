@@ -87,23 +87,25 @@ pub fn mine(repo: &str, history: &[CommitFiles]) -> Vec<Convention> {
             .iter()
             .max_by_key(|(_, co)| co.iter().filter(|d| dirs.contains(d.as_str())).count())
             .expect("non-empty");
-        let parts: Vec<String> = with
-            .iter()
-            .map(|(d, n)| format!("`{d}/` ({}%)", n * 100 / commits.len()))
-            .collect();
+        let parts: Vec<String> = with.iter().map(|(d, _)| format!("`{d}/`")).collect();
         let generic = format!(
-            "Adding code in `{anchor}/` usually comes with changes in {}",
-            parts.join(", ")
+            "When you add code in `{anchor}/`, also change {}",
+            match parts.as_slice() {
+                [rest @ .., last] if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
+                _ => parts.join(""),
+            }
         );
         out.push(Convention {
             origin: crate::conventions::Origin::Measured,
             repo: repo.into(),
             dimension: "recipes".into(),
             key: format!("recipes:{repo}:{anchor}"),
-            rule: format!("{generic} — {} commits", commits.len()),
+            rule: generic.clone(),
             generic,
             support: with[0].1,
             total: commits.len(),
+            unit: format!("commits adding code in `{anchor}/`"),
+            repos: Vec::new(),
             exemplars: vec![format!(
                 "{} {}",
                 &example.sha[..example.sha.len().min(8)],
@@ -151,7 +153,8 @@ mod tests {
         let r = mine("svc", &h);
         assert_eq!(r.len(), 1, "{r:?}");
         assert!(r[0].rule.contains("`app/api/routers/`"));
-        assert!(r[0].rule.contains("`app/api/` (100%)"));
-        assert!(r[0].rule.contains("`tests/api/` (100%)"));
+        assert!(r[0].rule.contains("`app/api/`"));
+        assert!(r[0].rule.contains("`tests/api/`"));
+        assert!(!r[0].rule.contains('%'), "no percentages in the rule");
     }
 }

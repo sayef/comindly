@@ -3,7 +3,7 @@
 | Command | Purpose |
 |---|---|
 | `comindly index <repo> [--enrich] [--flows] [--guide] [--no-embed] [--incremental]` | Index a single repo (embeds by default) |
-| `comindly link <repos…> [--enrich] [--flows] [--guide] [--no-embed] [--incremental]` | Link several repos (cross-repo edges + blast radius) |
+| `comindly link <repos…> [--enrich] [--flows] [--guide] [--no-embed] [--incremental] [--rewrite summary,guide,flow]` | Link several repos (cross-repo edges + blast radius); `--rewrite` writes those LLM results again for all code instead of reusing them |
 | `comindly explore <focus> [--index-dir <dir>]` | Zoom, blast radius, and context pack for a symbol |
 | `comindly search <query…> [--repo <name>] [--team <name>] [--index-dir <dir>] [--format md\|table]` | Graph-aware hybrid code search |
 | `comindly find <query> [--repo <name>…] [--team <name>…] [--index-dir <dir>]` | Locate symbols by name/path substring |
@@ -30,6 +30,7 @@
 | `comindly repos [add <folders or clone URLs…> \| remove <names…> \| scan <dir>]` | Indexed repositories, and the list `comindly link` indexes when given no folders |
 | `comindly app [--index-dir <dir>]` | The UI in its own window on macOS; in the browser on Linux and Windows |
 | `comindly team [set k=v… \| key]` | The index's shared settings (models, LLM steps and limits, prices, format, SCIP, automatic re-indexing); `key` stores your own API key |
+| `comindly prompts [show \| save \| activate \| deactivate \| delete]` | The LLM prompts indexing uses: their versions, a draft from a file, and which one is in use ([Configuration](../guides/configuration.md#models-and-prompts)) |
 | `comindly join <index>` | Use a team's index on this machine |
 | `comindly ui [--web [--port 7878] [--host <addr>] [--open]] [--index-dir <dir>]` | Terminal UI (incl. a ledger timeline), or the web UI on 127.0.0.1 (overview, contracts, flows, ledger review, explorer with a neighbourhood graph, conventions) |
 | `comindly server [--port 7878] [--host 0.0.0.0] [--index-dir <dir>]` | Run a team server: the app, `/api/v1` and `/mcp` with sign-in; needs `COMINDLY_PUBLIC_URL` ([Self-hosting](../guides/self-hosting.md)) |

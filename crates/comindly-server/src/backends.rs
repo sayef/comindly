@@ -55,6 +55,8 @@ pub trait AccountStore: Send + Sync {
 pub trait AuditLog: Send + Sync {
     /// Entries newest first, from before `query.before` and matching its filters.
     fn audit_entries(&self, query: &AuditQuery) -> Result<AuditPage>;
+    /// Record a change made outside the account store, such as to the prompts.
+    fn record(&self, actor: &str, action: &str, detail: &str);
 }
 
 /// Command-line sign-in approved in the browser: the command starts it and polls, a signed-in

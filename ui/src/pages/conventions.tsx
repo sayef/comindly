@@ -17,7 +17,7 @@ import { ConfirmButton } from "@/components/confirm";
 import { withCode } from "@/components/code-text";
 import { api, type Convention, type ConventionChange } from "@/lib/api";
 import { useTeams } from "@/lib/teams";
-import { cn, percent, sentence } from "@/lib/utils";
+import { cn, sentence } from "@/lib/utils";
 
 const ORG = "*";
 const scopeName = (r: string) => (r === ORG ? "Org-wide" : r);
@@ -111,7 +111,6 @@ function Row({ c, writable, commitUrls }: { c: Convention; writable: boolean; co
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(c.rule);
-  const pct = c.total ? Math.round((c.support / c.total) * 100) : 0;
   const where = c.exemplars.length + c.counterexamples.length;
   const recipe = c.dimension === "recipes";
   const busy = (action: string) => change.isPending && change.variables?.action === action;
@@ -163,14 +162,12 @@ function Row({ c, writable, commitUrls }: { c: Convention; writable: boolean; co
         <Td slot="meta" className={cn("origin-col py-2.5 pr-4 pl-0 max-sm:order-6", c.origin === "measured" && "max-sm:hidden")}>
           {c.origin !== "measured" && <Badge variant={c.origin === "manual" ? "brand" : "outline"}>{originName[c.origin]}</Badge>}
         </Td>
-        <Td slot="meta" className={cn("w-36 py-2.5 pr-4 pl-0 text-right max-sm:w-auto max-sm:text-left", (c.origin === "manual" || c.total === 0) && "max-sm:hidden")}>
-          {c.origin !== "manual" && c.total > 0 && (
-            <div className="flex items-center gap-2" title={`${c.support} of ${c.total} follow it`}>
-              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted max-sm:hidden">
-                <div className={cn("h-full rounded-full", pct >= 80 ? "bg-brand" : "bg-muted-foreground/45")} style={{ width: `${pct}%` }} />
-              </div>
-              <span className="nums w-10 shrink-0 text-right text-xs text-muted-foreground max-sm:w-auto">{percent(c.support, c.total)}</span>
-            </div>
+        <Td slot="meta" className={cn("w-40 py-2.5 pr-4 pl-0 max-sm:w-auto", !c.strength && "max-sm:hidden")}>
+          {c.strength && (
+            <span className="flex flex-wrap items-center gap-1.5" title={c.evidence ?? undefined}>
+              <Badge variant={c.strength === "Always" ? "brand" : "outline"}>{c.strength}</Badge>
+              {c.few && <span className="text-xs whitespace-nowrap text-muted-foreground">few examples</span>}
+            </span>
           )}
         </Td>
         <Td slot="end" className="w-px py-2 pr-3 pl-0 max-sm:w-auto max-sm:self-start">
@@ -220,7 +217,7 @@ function Row({ c, writable, commitUrls }: { c: Convention; writable: boolean; co
             <p className="mb-2 text-xs text-muted-foreground">
               {c.origin === "manual"
                 ? "Set by the org."
-                : `Measured from ${recipe ? "commit history" : "the code"}: ${c.support} of ${c.total} follow it.`}{" "}
+                : `Measured from ${recipe ? "commit history" : "the code"}. ${c.evidence ?? ""}`}{" "}
               Where it comes from:
             </p>
             <ul className="flex flex-col gap-2">
@@ -410,7 +407,7 @@ export function ConventionsPage() {
                 <Th className="pl-0">Scope</Th>
                 <Th className="pl-0">Topic</Th>
                 <Th className="origin-col pl-0">Origin</Th>
-                <Th className="pl-0">Followed</Th>
+                <Th className="pl-0">How strictly</Th>
                 <th>
                   <span className="sr-only">Actions</span>
                 </th>

@@ -84,7 +84,8 @@ const same = (a: TeamSettings, b: TeamSettings) => {
   return [...keys].every((k) => (a[k] ?? "") === (b[k] ?? ""));
 };
 
-export function TeamSection() {
+/** The index's shared settings: `org` holds its name and how agents get text, `models` the LLM and embedding setup. */
+export function TeamSection({ part }: { part: "org" | "models" }) {
   const qc = useQueryClient();
   const { server, admin } = useAccess();
   const team = useQuery({ queryKey: ["team"], queryFn: api.team });
@@ -113,16 +114,28 @@ export function TeamSection() {
     ["flows", "Flow walkthroughs"],
     ["guide", "Style guide"],
   ];
+  const taskModels: [keyof TeamSettings, string][] = [
+    ["llm_model_summary", "Summaries"],
+    ["llm_model_guide", "Style guides"],
+    ["llm_model_flow", "Walkthroughs"],
+  ];
+  const text = (k: keyof TeamSettings, label: string, placeholder?: string, type = "text") => (
+    <label className={field}>
+      {label}
+      <Input type={type} value={(form[k] as string | undefined) ?? ""} onChange={(e) => set(k, e.target.value)} placeholder={placeholder} autoComplete="off" spellCheck={false} />
+    </label>
+  );
 
   if (!t) return null;
+  const who = server ? " Only admins change them." : " Changing them needs write access to the index.";
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Org</CardTitle>
+        <CardTitle>{part === "org" ? "Org" : "Models"}</CardTitle>
         <CardDescription>
-          {server
-            ? "Stored with the index and used by everyone on it: the same LLM and embedding model for all, with the key from Integrations. Empty fields use comindly's default, shown as the placeholder. Only admins change them."
-            : "Stored with the index and used by everyone on it: the same LLM and embedding model for all; each person brings their own API key. Empty fields use comindly's default, shown as the placeholder. Changing them needs write access to the index."}
+          {part === "org"
+            ? `Stored with the index and used by everyone on it.${who}`
+            : `The LLM and embedding model everyone on this index uses${server ? ", with the key from Integrations" : "; each person brings their own API key"}. Empty fields use comindly's default, shown as the placeholder.${who}`}
           {t.changed_by && (
             <span>
               {" "}
@@ -132,7 +145,7 @@ export function TeamSection() {
           )}
         </CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="flex flex-col gap-4">
         <form
           className="flex flex-col gap-4"
           onSubmit={(e) => {
@@ -141,129 +154,88 @@ export function TeamSection() {
           }}
         >
           <fieldset disabled={!admin} className="contents">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className={field}>
-                Org name
-                <Input value={form.name ?? ""} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Acme" autoComplete="off" />
-              </label>
-              <label className={field}>
-                Embedding model
-                <Input
-                  value={form.embed_model ?? ""}
-                  onChange={(e) => set("embed_model", e.target.value)}
-                  placeholder={d?.embed_model}
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-              </label>
-              <label className={field}>
-                LLM endpoint
-                <Input
-                  type="url"
-                  value={form.llm_base_url ?? ""}
-                  onChange={(e) => set("llm_base_url", e.target.value)}
-                  placeholder={d?.llm_base_url}
-                  autoComplete="url"
-                  spellCheck={false}
-                />
-              </label>
-              <label className={field}>
-                LLM model
-                <Input
-                  value={form.llm_model ?? ""}
-                  onChange={(e) => set("llm_model", e.target.value)}
-                  placeholder={d?.llm_model}
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-              </label>
-            </div>
-            <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm">
-              {steps.map(([k, label]) => (
-                <label key={k} className="flex min-h-9 items-center gap-2">
-                  <input type="checkbox" checked={form[k] !== false} onChange={(e) => set(k, e.target.checked)} />
-                  {label} when indexing
+            {part === "org" ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className={field}>
+                  Org name
+                  <Input value={form.name ?? ""} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Acme" autoComplete="off" />
                 </label>
-              ))}
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className={field}>
-                Most symbols to summarise
-                <Input
-                  type="number"
-                  min={1}
-                  value={form.max_enrich ?? ""}
-                  onChange={(e) => num("max_enrich", e.target.value)}
-                  placeholder="no limit"
-                />
-                <span className="text-xs text-muted-foreground">
-                  The most-used first. Each summary is one LLM request and sends that code.
-                </span>
-              </label>
-              <label className={field}>
-                Most flows to walk through
-                <Input
-                  type="number"
-                  min={1}
-                  value={form.max_flows ?? ""}
-                  onChange={(e) => num("max_flows", e.target.value)}
-                  placeholder="no limit"
-                />
-                <span className="text-xs text-muted-foreground">
-                  Those reaching furthest first. Every flow is still traced without the LLM.
-                </span>
-              </label>
-              <label className={field}>
-                LLM requests at once
-                <Input
-                  type="number"
-                  min={1}
-                  max={64}
-                  value={form.llm_concurrency ?? ""}
-                  onChange={(e) => num("llm_concurrency", e.target.value)}
-                  placeholder={String(d?.llm_concurrency ?? 8)}
-                />
-                <span className="text-xs text-muted-foreground">Lower it if the provider rate-limits; higher indexes faster.</span>
-              </label>
-              <label className={field}>
-                Price per million input tokens (USD)
-                <Input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={form.llm_price_in ?? ""}
-                  onChange={(e) => price("llm_price_in", e.target.value)}
-                  placeholder="not set"
-                />
-                <span className="text-xs text-muted-foreground">
-                  From your provider's price list; the indexing log then shows what it costs.
-                </span>
-              </label>
-              <label className={field}>
-                Price per million output tokens (USD)
-                <Input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={form.llm_price_out ?? ""}
-                  onChange={(e) => price("llm_price_out", e.target.value)}
-                  placeholder="not set"
-                />
-                <span className="text-xs text-muted-foreground">Without prices, the log shows tokens only.</span>
-              </label>
-              <label className={field}>
-                Agents get text as
-                <select
-                  className="h-9 rounded-md border border-input bg-card px-2 text-sm"
-                  value={form.format ?? "md"}
-                  onChange={(e) => set("format", e.target.value === "md" ? undefined : e.target.value)}
-                >
-                  <option value="md">Markdown (reads best)</option>
-                  <option value="json">JSON</option>
-                </select>
-                <span className="text-xs text-muted-foreground">Every answer also carries the same data as structured JSON.</span>
-              </label>
-            </div>
+                <label className={field}>
+                  Agents get text as
+                  <select
+                    className="h-9 rounded-md border border-input bg-card px-2 text-sm"
+                    value={form.format ?? "md"}
+                    onChange={(e) => set("format", e.target.value === "md" ? undefined : e.target.value)}
+                  >
+                    <option value="md">Markdown (reads best)</option>
+                    <option value="json">JSON</option>
+                  </select>
+                  <span className="text-xs font-normal text-muted-foreground">Every answer also carries the same data as structured JSON.</span>
+                </label>
+              </div>
+            ) : (
+              <>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {text("llm_base_url", "LLM endpoint", d?.llm_base_url, "url")}
+                  {text("llm_model", "LLM model", d?.llm_model)}
+                </div>
+                <div className="flex flex-col gap-2">
+                  <span className="text-sm font-semibold">A model per task</span>
+                  <span className="text-xs text-muted-foreground">
+                    For example a cheaper one for the many summaries and a stronger one for style guides. Empty uses the LLM model.
+                  </span>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    {taskModels.map(([k, label]) => (
+                      <div key={k}>{text(k, label, form.llm_model || d?.llm_model)}</div>
+                    ))}
+                  </div>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">{text("embed_model", "Embedding model", d?.embed_model)}</div>
+                <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm">
+                  {steps.map(([k, label]) => (
+                    <label key={k} className="flex min-h-9 items-center gap-2">
+                      <input type="checkbox" checked={form[k] !== false} onChange={(e) => set(k, e.target.checked)} />
+                      {label} when indexing
+                    </label>
+                  ))}
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className={field}>
+                    Most symbols to summarise
+                    <Input type="number" min={1} value={form.max_enrich ?? ""} onChange={(e) => num("max_enrich", e.target.value)} placeholder="no limit" />
+                    <span className="text-xs font-normal text-muted-foreground">The most-used first. Each summary is one LLM request and sends that code.</span>
+                  </label>
+                  <label className={field}>
+                    Most flows to walk through
+                    <Input type="number" min={1} value={form.max_flows ?? ""} onChange={(e) => num("max_flows", e.target.value)} placeholder="no limit" />
+                    <span className="text-xs font-normal text-muted-foreground">Those reaching furthest first. Every flow is still traced without the LLM.</span>
+                  </label>
+                  <label className={field}>
+                    LLM requests at once
+                    <Input
+                      type="number"
+                      min={1}
+                      max={64}
+                      value={form.llm_concurrency ?? ""}
+                      onChange={(e) => num("llm_concurrency", e.target.value)}
+                      placeholder={String(d?.llm_concurrency ?? 8)}
+                    />
+                    <span className="text-xs font-normal text-muted-foreground">Lower it if the provider rate-limits; higher indexes faster.</span>
+                  </label>
+                  <span />
+                  <label className={field}>
+                    Price per million input tokens (USD)
+                    <Input type="number" min={0} step="0.01" value={form.llm_price_in ?? ""} onChange={(e) => price("llm_price_in", e.target.value)} placeholder="not set" />
+                    <span className="text-xs font-normal text-muted-foreground">From your provider's price list; the indexing log then shows what it costs.</span>
+                  </label>
+                  <label className={field}>
+                    Price per million output tokens (USD)
+                    <Input type="number" min={0} step="0.01" value={form.llm_price_out ?? ""} onChange={(e) => price("llm_price_out", e.target.value)} placeholder="not set" />
+                    <span className="text-xs font-normal text-muted-foreground">Without prices, the log shows tokens only.</span>
+                  </label>
+                </div>
+              </>
+            )}
             {admin && (
               <div className="flex flex-wrap items-center gap-2">
                 <Button type="submit" variant="outline" loading={save.isPending}>
@@ -275,6 +247,7 @@ export function TeamSection() {
             <Outcome error={save.error} message={save.data?.message} />
           </fieldset>
         </form>
+        {part === "models" && !server && <ApiKey />}
       </CardContent>
     </Card>
   );

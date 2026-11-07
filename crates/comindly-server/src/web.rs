@@ -22,6 +22,7 @@ mod answers;
 mod auth;
 mod flows;
 mod jobs;
+mod prompts;
 mod repos;
 mod settings;
 mod team;
@@ -500,6 +501,8 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
         .route("/api/v1/jobs/{id}/cancel", post(jobs::cancel))
         .route("/api/v1/team", get(team::get).post(team::save))
         .route("/api/v1/team/key", post(team::key))
+        .route("/api/v1/prompts", get(prompts::get).post(prompts::change))
+        .route("/api/v1/prompts/try", post(prompts::try_draft))
         .route("/api/v1/join", post(team::join))
         .route("/api/v1/team/create", post(team::create))
         .route("/api/v1/teams", post(team::save_teams))
@@ -1135,6 +1138,9 @@ async fn conventions(Cur(s): Cur, Query(q): Query<api::RepoQuery>) -> Json<api::
         .filter(|c| mine(&c.repo))
         .map(|c| api::ShownConvention {
             id: c.id(),
+            strength: c.strength().map(String::from),
+            evidence: c.evidence(),
+            few: c.few(),
             convention: c,
         })
         .collect();

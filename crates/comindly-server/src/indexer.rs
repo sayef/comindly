@@ -23,6 +23,9 @@ pub struct Spec {
     pub llm_key: Option<String>,
     /// Stored git tokens by host.
     pub git: BTreeMap<String, String>,
+    /// LLM tasks to write again from scratch.
+    #[serde(default)]
+    pub rewrite: Vec<crate::prompts::Task>,
 }
 
 /// Run `spec` in a child process, its events going to `job`; cancelling `job` stops it.
@@ -149,6 +152,7 @@ pub fn child() -> Result<()> {
             .map(|t| t.settings)
             .unwrap_or_default();
         let mut settings = Settings::resolve(&team, crate::config::env);
+        settings.rewrite = spec.rewrite.iter().copied().collect();
         if !spec.llm {
             settings.enrich = false;
             settings.flows = false;
@@ -161,6 +165,7 @@ pub fn child() -> Result<()> {
                 spec.llm_key.as_deref(),
             )
             .ok()
+            .map(|c| c.with_models(settings.task_models.clone()))
         } else {
             None
         };

@@ -516,6 +516,12 @@ struct ConventionDto {
     scope: String,
     dimension: String,
     rule: String,
+    /// How strictly the code follows it: `Always`, `Usually`, `Often` or `Sometimes`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    strength: Option<&'static str>,
+    /// What it was measured from.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    evidence: Option<String>,
     exemplars: Vec<String>,
     counterexamples: Vec<String>,
     /// Written or edited by a person rather than measured.
@@ -1143,6 +1149,8 @@ impl ComindlyServer {
                     scope: c.repo.clone(),
                     dimension: c.dimension.clone(),
                     rule: c.rule.clone(),
+                    strength: c.strength(),
+                    evidence: c.evidence(),
                     exemplars: c.exemplars.iter().take(2).cloned().collect(),
                     counterexamples: c.counterexamples.iter().take(2).cloned().collect(),
                     team: c.origin != crate::conventions::Origin::Measured,
@@ -1717,7 +1725,11 @@ fn md_guide(d: &GuideDto) -> String {
             org_header = true;
         }
         let team = if c.team { " _(set by the team)_" } else { "" };
-        let _ = writeln!(o, "- _{}_: {}{team}", c.dimension, c.rule);
+        let how = c
+            .strength
+            .map(|s| format!(" ({})", s.to_lowercase()))
+            .unwrap_or_default();
+        let _ = writeln!(o, "- _{}_{how}: {}{team}", c.dimension, c.rule);
         if !c.exemplars.is_empty() {
             let _ = writeln!(o, "  - e.g. `{}`", c.exemplars.join("`, `"));
         }

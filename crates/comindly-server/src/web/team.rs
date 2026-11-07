@@ -12,7 +12,7 @@ fn done(r: anyhow::Result<impl Into<String>>) -> Reply<api::Done> {
     r.map(|m| Json(api::Done::new(m))).map_err(fail)
 }
 
-async fn root(app: &Shared) -> anyhow::Result<String> {
+pub(super) async fn root(app: &Shared) -> anyhow::Result<String> {
     use anyhow::Context as _;
     app.current
         .read()
@@ -75,6 +75,9 @@ pub(super) async fn save(
             &mut next.name,
             &mut next.llm_base_url,
             &mut next.llm_model,
+            &mut next.llm_model_summary,
+            &mut next.llm_model_guide,
+            &mut next.llm_model_flow,
             &mut next.embed_model,
         ] {
             if v.as_deref().is_some_and(|s| s.trim().is_empty()) {

@@ -19,6 +19,7 @@ import { RepositoriesPage } from "@/pages/repositories";
 import { SettingsPage, SettingsShell } from "@/pages/settings";
 import { SetupPage } from "@/pages/setup";
 import { AccessPage, AuditPage, IntegrationsPage, MembersPage } from "@/pages/access";
+import { PromptsPage } from "@/pages/prompts";
 import { SignInPage } from "@/pages/signin";
 import { DevicePage } from "@/pages/device";
 import { ApiError, api } from "@/lib/api";
@@ -80,6 +81,8 @@ createRoot(document.getElementById("root")!).render(
                   <Route path="settings" element={<SettingsShell />}>
                     <Route index element={<SettingsPage />} />
                     <Route path="repositories" element={<RepositoriesPage />} />
+                    <Route path="models" element={<PromptsPage />} />
+                    <Route path="prompts" element={<Navigate to="/settings/models" replace />} />
                     <Route path="members" element={<MembersPage />} />
                     <Route path="integrations" element={<IntegrationsPage />} />
                     <Route path="audit" element={<AuditPage />} />

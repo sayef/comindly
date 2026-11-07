@@ -60,10 +60,41 @@ comindly team set scip=require auto_index=true auto_index_minutes=15
 comindly team set llm_base_url=                  # an empty value removes a setting
 ```
 
-Keys: `name`, `llm_model`, `llm_base_url`, `embed_model`, `embed`, `enrich`, `flows`, `guide`,
+Keys: `name`, `llm_model`, `llm_model_summary`, `llm_model_guide`, `llm_model_flow` (a model for
+one task in place of `llm_model`), `llm_base_url`, `embed_model`, `embed`, `enrich`, `flows`, `guide`,
 `max_enrich`, `max_flows`, `llm_concurrency`, `llm_price_in`, `llm_price_out`, `format` (`md` or `json`),
 `scip` (`auto`, `require` or `off`), `auto_index`, `auto_index_llm` and `auto_index_minutes`. Where one is unset, comindly's default applies.
 See [Team setup](team-setup.md#team-settings).
+
+## Models and prompts
+
+**Settings → Models & prompts** holds the LLM endpoint and model, a model per task (for example a
+cheaper one for summaries and a stronger one for style guides), the embedding model, the LLM steps
+and their limits, and the instructions indexing gives the LLM for summaries, style guides and
+walkthroughs. All of it is stored with the index.
+
+Each task starts with comindly's built-in prompt. Saving an edit makes a new version that nothing
+uses yet; for style guides it can also change what each section covers. **Try** runs a draft on one
+symbol, flow or style guide section and shows it next to what the index holds now. Activating a
+version, or deactivating it to go back to the built-in prompt, applies to what the next index
+writes, partial or full; the same goes for a model change. Nothing already written is redone for
+it: a partial index writes new or changed code with it, and a full index writes everything it
+does not reuse. To write everything again with the current models and prompts, use **Rewrite
+everything** on the same page, or `comindly link --rewrite summary,guide,flow`; it costs a full LLM
+pass for each task chosen. Only the instructions can be changed: the reply format
+and its JSON schema are always added, so a model or server without structured output still replies
+in the right shape. When a release changes a built-in prompt that an active version replaces, the
+page says so. On a team server, admins change models and prompts, everyone can read them, and
+changes to prompts appear in the audit log.
+
+From the terminal:
+
+```bash
+comindly prompts                          # what each task uses, and its versions
+comindly prompts show guide               # the prompt in use; `show guide 0` is the built-in one
+comindly prompts save summary draft.md --note "plainer words"
+comindly prompts activate summary 2       # or: deactivate summary, delete summary 1
+```
 
 ## Environment
 

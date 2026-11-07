@@ -29,6 +29,7 @@ pub mod packages;
 pub mod parse;
 pub mod pipeline;
 pub mod preflight;
+pub mod prompts;
 pub mod recipes;
 pub mod resolve;
 pub mod rt;

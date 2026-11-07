@@ -13,6 +13,11 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use rig::completion::CompletionRequest;
 use rig::providers::openai;
+use rig::schemars::{self, JsonSchema};
+use serde::de::DeserializeOwned;
+use serde::Deserialize;
+
+use crate::prompts::{Prompts, Task};
 
 /// Default model — cheap and fast, suitable for bulk symbol summaries.
 pub const DEFAULT_MODEL: &str = "gpt-6-luna";
@@ -25,6 +30,8 @@ pub struct LlmClient {
     // Responses API — proxies/Ollama/vLLM implement `/chat/completions`, not `/responses`.
     client: openai::OpenAI,
     model: String,
+    /// Tasks that run on another model than `model`.
+    models: std::collections::BTreeMap<Task, String>,
     // OpenAI's own API takes `max_completion_tokens` (required by newer models); compatible
     // servers (Ollama, vLLM, LiteLLM) expect `max_tokens`.
     openai_native: bool,
@@ -34,9 +41,12 @@ pub struct LlmClient {
 }
 
 /// LLM-generated enrichment for one symbol.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[schemars(crate = "rig::schemars")]
 pub struct Enrichment {
+    /// One concise sentence describing what the code does.
     pub summary: String,
+    /// Natural-language questions a developer might ask that this code answers.
     pub queries: Vec<String>,
 }
 
@@ -53,6 +63,7 @@ impl LlmClient {
         Ok(Self {
             client,
             model: model.to_string(),
+            models: Default::default(),
             openai_native: base_url.is_none(),
             input_tokens: Arc::new(AtomicU64::new(0)),
             output_tokens: Arc::new(AtomicU64::new(0)),
@@ -67,9 +78,29 @@ impl LlmClient {
         )
     }
 
-    async fn complete(&self, system: &str, user: &str, max_tokens: u32) -> Result<String> {
+    /// Run `task` on its own model instead of the default one.
+    pub fn with_models(mut self, models: std::collections::BTreeMap<Task, String>) -> Self {
+        self.models = models;
+        self
+    }
+
+    /// The model `task` runs on.
+    pub fn model(&self, task: Task) -> &str {
+        self.models.get(&task).unwrap_or(&self.model)
+    }
+
+    /// A reply in the shape of `T`, asked for as structured output (a JSON schema).
+    async fn complete<T: DeserializeOwned + JsonSchema>(
+        &self,
+        task: Task,
+        system: &str,
+        user: &str,
+        max_tokens: u32,
+    ) -> Result<T> {
         // Chat Completions (not the Responses API): what OpenAI-compatible servers implement.
-        let req = CompletionRequest::new(user.to_string()).preamble(system);
+        let req = CompletionRequest::new(user.to_string())
+            .preamble(system)
+            .output_schema(schemars::schema_for!(T));
         // Reasoning models spend part of the completion budget thinking, hence the headroom.
         let req = if self.openai_native {
             req.additional_params(serde_json::json!({
@@ -80,7 +111,7 @@ impl LlmClient {
         };
         let resp = self
             .client
-            .chat(&self.model)
+            .chat(self.model(task))
             .call(req)
             .await
             .context("LLM completion")?;
@@ -88,130 +119,119 @@ impl LlmClient {
             .fetch_add(resp.usage.input_tokens.unwrap_or(0), Ordering::Relaxed);
         self.output_tokens
             .fetch_add(resp.usage.output_tokens.unwrap_or(0), Ordering::Relaxed);
-        Ok(resp.text().trim().to_string())
+        parse(&resp.text())
     }
 
     /// One-line summary of what a symbol does, plus a few natural-language queries it answers.
     pub async fn enrich_symbol(
         &self,
+        prompts: &Prompts,
         name: &str,
         signature: &str,
         context: &str,
     ) -> Result<Enrichment> {
-        let system = "You document code for a search index. Reply in exactly this format:\n\
-             SUMMARY: <one concise sentence describing what this does>\n\
-             QUERIES: <3 natural-language questions a developer might ask that this code answers, separated by ` | `>\n\
-             No preamble, no code fences.";
         let user = format!("Symbol: {name}\nSignature: {signature}\nContext: {context}");
-        let raw = self.complete(system, &user, 160).await?;
-        Ok(parse_enrichment(&raw))
+        let r: Enrichment = self
+            .complete(Task::Summary, &prompts.system(Task::Summary), &user, 160)
+            .await?;
+        Ok(Enrichment {
+            summary: r.summary.trim().to_string(),
+            queries: tidy(r.queries),
+        })
     }
 
-    /// Synthesize an evidence-based coding style guide for one repo from a measured evidence pack
-    /// (naming/size/idiom stats + enforced-config facts). The prompt forbids generic advice and
-    /// requires every rule to cite the evidence.
-    /// Synthesize ONE section of the style guide from its tailored evidence. Returns the section's
-    /// bullet rules (no heading — the caller adds it). Multiple sections are generated per repo.
+    /// ONE section of a repo's style guide from its tailored evidence, as bullet rules without a
+    /// heading, or `None` when the evidence shows no consistent convention.
     pub async fn guide_section(
         &self,
+        prompts: &Prompts,
         repo: &str,
         title: &str,
         guidance: &str,
         evidence: &str,
-    ) -> Result<String> {
-        let system = "You are a senior engineer documenting ONE section of a codebase's house-style \
-            guide so an AI coding agent writes code INDISTINGUISHABLE from this repo's. You are given \
-            REAL evidence (signatures, code excerpts, dependency facts, measured stats) for this \
-            section only. Make the repo's tacit conventions explicit.\n\
-            Hard rules:\n\
-            - Output ONLY this section's rules as terse markdown bullets — NO top-level heading, no \
-            preamble, no closing note.\n\
-            - Cite a real FILE PATH (and symbol/signature) for every non-trivial claim; quote a short \
-            real snippet as the example. Where useful, show a correct vs incorrect example.\n\
-            - Prefer the repo's OWN wrapper/abstraction over a raw library when the evidence shows \
-            one; name it exactly.\n\
-            - NEVER output generic advice that would apply to any codebase ('use meaningful names', \
-            'write tests', 'handle errors gracefully'). Delete such lines.\n\
-            - Strength tags: **MUST**/**NEVER** for patterns across ≥3 files or enforced by config; \
-            'prefer' for weaker signals. Give a one-line reason where non-obvious.\n\
-            - If the evidence shows no consistent convention, reply with exactly: \
-            No consistent convention observed.";
+    ) -> Result<Option<String>> {
         let user = format!(
             "Repository: {repo}\nSection: {title}\nWhat to cover: {guidance}\n\n# Evidence\n\n{evidence}"
         );
-        self.complete(system, &user, 900).await
+        let r: GuideSection = self
+            .complete(Task::Guide, &prompts.system(Task::Guide), &user, 900)
+            .await?;
+        let rules = tidy(r.rules);
+        Ok((r.observed && !rules.is_empty()).then(|| {
+            rules
+                .iter()
+                .map(|r| format!("- {}", r.trim_start_matches("- ")))
+                .collect::<Vec<_>>()
+                .join("\n")
+        }))
     }
 
     /// Narrate an execution flow: given an entry point and its ordered call trace, produce a
     /// concise markdown walkthrough plus a few flow-oriented questions the flow answers.
     pub async fn narrate_flow(
         &self,
+        prompts: &Prompts,
         entry: &str,
         signature: &str,
         trace: &str,
     ) -> Result<(String, Vec<String>)> {
-        let system = "You explain how a code flow works to a developer new to the codebase. \
-             Given an entry point and its call trace (each line: depth, relation, symbol, \
-             location), reply in exactly this format:\n\
-             NARRATION: <2-5 sentence walkthrough of what happens step by step; reference the \
-             actual symbol names>\n\
-             QUERIES: <3 questions a developer might ask about this flow, separated by ` | `>\n\
-             No preamble, no code fences.";
         let user = format!("Entry point: {entry}\nSignature: {signature}\nCall trace:\n{trace}");
-        let raw = self.complete(system, &user, 320).await?;
-        Ok(parse_flow(&raw))
+        let r: Walkthrough = self
+            .complete(Task::Flow, &prompts.system(Task::Flow), &user, 320)
+            .await?;
+        Ok((r.narration.trim().to_string(), tidy(r.queries)))
     }
 }
 
-/// Parse the `NARRATION:` / `QUERIES:` reply format, tolerantly (narration may span lines).
-fn parse_flow(raw: &str) -> (String, Vec<String>) {
-    let (narr_part, q_part) = raw.split_once("QUERIES:").unwrap_or((raw, ""));
-    let narration = narr_part
-        .trim()
-        .trim_start_matches("NARRATION:")
-        .trim()
-        .to_string();
-    let queries = q_part
-        .split('|')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
-    (
-        if narration.is_empty() {
-            raw.trim().to_string()
-        } else {
-            narration
-        },
-        queries,
-    )
+/// What a guide section call returns.
+#[derive(Deserialize, JsonSchema)]
+#[schemars(crate = "rig::schemars")]
+struct GuideSection {
+    /// False when the evidence shows no consistent convention.
+    observed: bool,
+    /// One rule per item, in markdown, without a leading dash.
+    rules: Vec<String>,
 }
 
-/// Parse the `SUMMARY:` / `QUERIES:` reply format, tolerantly.
-fn parse_enrichment(raw: &str) -> Enrichment {
-    let mut summary = String::new();
-    let mut queries = Vec::new();
-    for line in raw.lines() {
-        let l = line.trim();
-        if let Some(rest) = l.strip_prefix("SUMMARY:") {
-            summary = rest.trim().to_string();
-        } else if let Some(rest) = l.strip_prefix("QUERIES:") {
-            queries = rest
-                .split('|')
-                .map(|q| q.trim().to_string())
-                .filter(|q| !q.is_empty())
-                .collect();
-        }
+/// What a flow call returns.
+#[derive(Deserialize, JsonSchema)]
+#[schemars(crate = "rig::schemars")]
+struct Walkthrough {
+    /// A 2-5 sentence walkthrough naming the actual symbols.
+    narration: String,
+    /// Questions a developer might ask about this flow.
+    queries: Vec<String>,
+}
+
+/// The JSON schema of `task`'s reply, as text for the system message.
+pub fn reply_schema(task: Task) -> String {
+    let schema = match task {
+        Task::Summary => schemars::schema_for!(Enrichment),
+        Task::Guide => schemars::schema_for!(GuideSection),
+        Task::Flow => schemars::schema_for!(Walkthrough),
+    };
+    serde_json::to_string_pretty(&schema).unwrap_or_default()
+}
+
+fn tidy(items: Vec<String>) -> Vec<String> {
+    items
+        .into_iter()
+        .map(|q| q.trim().to_string())
+        .filter(|q| !q.is_empty())
+        .collect()
+}
+
+/// The JSON reply, also when a server that ignores the schema wraps it in prose or a code fence.
+fn parse<T: DeserializeOwned>(raw: &str) -> Result<T> {
+    let raw = raw.trim();
+    if let Ok(v) = serde_json::from_str(raw) {
+        return Ok(v);
     }
-    if summary.is_empty() {
-        // Model didn't follow format — fall back to the first non-empty line.
-        summary = raw
-            .lines()
-            .map(str::trim)
-            .find(|l| !l.is_empty())
-            .unwrap_or("")
-            .to_string();
-    }
-    Enrichment { summary, queries }
+    let (Some(a), Some(b)) = (raw.find('{'), raw.rfind('}')) else {
+        anyhow::bail!("the LLM did not reply with JSON");
+    };
+    anyhow::ensure!(a < b, "the LLM did not reply with JSON");
+    serde_json::from_str(&raw[a..=b]).context("the LLM's JSON reply has the wrong shape")
 }
 
 #[cfg(test)]
@@ -219,12 +239,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_enrichment_format() {
-        let raw = "SUMMARY: Opens a pooled Postgres connection.\nQUERIES: how to connect to postgres | get a db connection | open database pool";
-        let e = parse_enrichment(raw);
-        assert_eq!(e.summary, "Opens a pooled Postgres connection.");
-        assert_eq!(e.queries.len(), 3);
-        assert_eq!(e.queries[0], "how to connect to postgres");
+    fn reads_json_also_inside_prose() {
+        let e: Enrichment =
+            parse(r#"{"summary":"Opens a pooled connection.","queries":["how to connect"]}"#)
+                .unwrap();
+        assert_eq!(e.summary, "Opens a pooled connection.");
+        let fenced =
+            "Here it is:\n```json\n{\"narration\": \"Calls a, then b.\", \"queries\": []}\n```";
+        let w: Walkthrough = parse(fenced).unwrap();
+        assert_eq!(w.narration, "Calls a, then b.");
+        assert!(parse::<Enrichment>("SUMMARY: no json").is_err());
+        assert!(parse::<Enrichment>(r#"{"summary": 3}"#).is_err());
+    }
+
+    #[test]
+    fn the_schema_is_strict_enough_for_openai() {
+        let s = serde_json::to_value(schemars::schema_for!(GuideSection)).unwrap();
+        assert_eq!(s["required"], serde_json::json!(["observed", "rules"]));
     }
 
     // Real API call — run with a key: `cargo test -p comindly-llm -- --ignored`.
@@ -235,6 +266,7 @@ mod tests {
         let c = LlmClient::new(None, DEFAULT_MODEL, Some(&key)).unwrap();
         let e = c
             .enrich_symbol(
+                &Prompts::default(),
                 "AsyncTaskRunner",
                 "class AsyncTaskRunner(BaseTaskRunner)",
                 "acme/database/executors.py",
@@ -244,5 +276,61 @@ mod tests {
         assert!(!e.summary.is_empty());
         eprintln!("summary: {}", e.summary);
         eprintln!("queries: {:?}", e.queries);
+    }
+
+    // A compatible server: `COMINDLY_TEST_LLM_BASE_URL` and `COMINDLY_TEST_LLM_MODEL`, e.g. Ollama.
+    #[tokio::test]
+    #[ignore]
+    async fn live_compatible_server() {
+        let base = std::env::var("COMINDLY_TEST_LLM_BASE_URL").expect("COMINDLY_TEST_LLM_BASE_URL");
+        let model = std::env::var("COMINDLY_TEST_LLM_MODEL").expect("COMINDLY_TEST_LLM_MODEL");
+        let c = LlmClient::new(Some(&base), &model, None).unwrap();
+        let p = Prompts::default();
+        let e = c
+            .enrich_symbol(
+                &p,
+                "open_pool",
+                "fn open_pool(cfg: &DbConfig) -> Pool",
+                "src/db/pool.rs",
+            )
+            .await
+            .expect("summary");
+        assert!(!e.summary.is_empty());
+        eprintln!("summary: {}\nqueries: {:?}", e.summary, e.queries);
+        let (n, _) = c
+            .narrate_flow(
+                &p,
+                "handle_order",
+                "fn handle_order(o: Order)",
+                "d1 calls acme:validate src/a.rs:3",
+            )
+            .await
+            .expect("flow");
+        eprintln!("flow: {n}");
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn live_guide_and_flow() {
+        let key = std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY");
+        let c = LlmClient::new(None, DEFAULT_MODEL, Some(&key)).unwrap();
+        let p = Prompts::default();
+        let evidence = "snake_case functions 97% (1234/1268)\nsrc/db/pool.rs: pub fn open_pool(cfg: &DbConfig) -> Pool";
+        let g = c
+            .guide_section(&p, "acme", "Naming", "How things are named", evidence)
+            .await
+            .expect("guide");
+        eprintln!("guide: {g:?}");
+        let (n, q) = c
+            .narrate_flow(
+                &p,
+                "handle_order",
+                "fn handle_order(o: Order)",
+                "d1 calls acme:validate src/a.rs:3\nd2 calls acme:save src/b.rs:9",
+            )
+            .await
+            .expect("flow");
+        assert!(!n.is_empty());
+        eprintln!("flow: {n}\n{q:?}");
     }
 }

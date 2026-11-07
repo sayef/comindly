@@ -105,3 +105,92 @@ pub struct CreateTeam {
     pub name: String,
     pub index: String,
 }
+
+/// `GET /api/v1/prompts`: each LLM task's built-in prompt, its saved versions and the one in use.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Prompts {
+    pub tasks: Vec<PromptTask>,
+    pub version: Option<u64>,
+    pub changed_by: Option<String>,
+    pub changed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptTask {
+    pub task: crate::prompts::Task,
+    pub builtin: String,
+    /// The reply format and its JSON schema, added after whichever instructions run.
+    pub format: String,
+    /// `None`: the built-in prompt.
+    pub active: Option<u32>,
+    /// The active version, when a release changed the built-in prompt since it was written.
+    pub builtin_changed: Option<u32>,
+    /// Style guide only: the built-in guidance of each section.
+    pub sections: Vec<GuideSectionText>,
+    pub versions: Vec<crate::prompts::Version>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GuideSectionText {
+    pub title: String,
+    pub guidance: String,
+}
+
+/// `POST /api/v1/prompts`: one change, at the version read.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptChange {
+    pub version: Option<u64>,
+    #[serde(flatten)]
+    pub action: PromptAction,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "lowercase")]
+pub enum PromptAction {
+    /// A new version, not in use until activated.
+    Save {
+        task: crate::prompts::Task,
+        text: String,
+        /// Style guide only: section guidance by title.
+        #[serde(default)]
+        sections: std::collections::BTreeMap<String, String>,
+        #[serde(default)]
+        note: Option<String>,
+    },
+    Activate {
+        task: crate::prompts::Task,
+        n: u32,
+    },
+    /// Back to the built-in prompt.
+    Deactivate {
+        task: crate::prompts::Task,
+    },
+    Delete {
+        task: crate::prompts::Task,
+        n: u32,
+    },
+}
+
+/// `POST /api/v1/prompts/try`: run `text` on one sample without saving it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptTry {
+    pub task: crate::prompts::Task,
+    pub text: String,
+    #[serde(default)]
+    pub sections: std::collections::BTreeMap<String, String>,
+    /// A symbol id for a summary, an entry point for a walkthrough, a repository for a style
+    /// guide; otherwise the most used one, the furthest-reaching flow or the first repository.
+    #[serde(default)]
+    pub sample: Option<String>,
+    /// Style guide only: the section to write; the first one otherwise.
+    #[serde(default)]
+    pub section: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptTried {
+    pub sample: String,
+    pub output: String,
+    /// What the index holds for the same sample now.
+    pub current: Option<String>,
+}

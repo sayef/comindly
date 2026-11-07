@@ -253,7 +253,7 @@ pub(super) async fn start(
 ) -> Reply<api::IndexStarted> {
     let by = who.map(|w| w.email.clone());
     let rid = rid.map(|r| r.0 .0);
-    match begin(&app, q.llm, q.drop_unlisted, None, by, rid).await {
+    match begin(&app, q.llm, q.drop_unlisted, q.rewrite, None, by, rid).await {
         Ok(s) => {
             let message = match (s.position, s.coalesced) {
                 (None, _) => "indexing started".to_string(),
@@ -275,14 +275,20 @@ pub(super) async fn start(
 
 /// Queue `comindly link` over the listed repositories into the loaded index; it runs when the jobs
 /// before it end, with the repositories and settings of that moment. `why` opens the log.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn begin(
     app: &Shared,
     llm: bool,
     drop_unlisted: bool,
+    rewrite: Vec<crate::prompts::Task>,
     why: Option<String>,
     by: Option<String>,
     request_id: Option<String>,
 ) -> anyhow::Result<crate::jobs::Submitted> {
+    anyhow::ensure!(
+        llm || rewrite.is_empty(),
+        "rewriting needs the LLM steps; start it with them"
+    );
     let session = app.current.read().await.clone();
     session.data.root.clone().context("read-only UI")?;
     if !drop_unlisted {
@@ -302,15 +308,19 @@ pub(super) async fn begin(
             missing.join(", ")
         );
     }
-    let key = format!("llm={llm} drop_unlisted={drop_unlisted}");
-    let request = serde_json::to_value(IndexRequest { llm, drop_unlisted })?;
+    let key = format!("llm={llm} drop_unlisted={drop_unlisted} rewrite={rewrite:?}");
+    let request = serde_json::to_value(IndexRequest {
+        llm,
+        drop_unlisted,
+        rewrite: rewrite.clone(),
+    })?;
     app.jobs.submit_resumable(
         "index",
         &key,
         by,
         request_id,
         Some(request),
-        index_work(app.clone(), llm, why),
+        index_work(app.clone(), llm, rewrite, why),
     )
 }
 
@@ -319,6 +329,8 @@ pub(super) async fn begin(
 struct IndexRequest {
     llm: bool,
     drop_unlisted: bool,
+    #[serde(default)]
+    rewrite: Vec<crate::prompts::Task>,
 }
 
 /// Continue the jobs a restart paused, and those of a server that stopped without pausing them.
@@ -337,10 +349,13 @@ pub(super) async fn carry_on(app: Shared) {
             else {
                 continue;
             };
-            let key = format!("llm={} drop_unlisted={}", r.llm, r.drop_unlisted);
-            if let Err(e) = app
-                .jobs
-                .resume(&key, job, index_work(app.clone(), r.llm, None))
+            let key = format!(
+                "llm={} drop_unlisted={} rewrite={:?}",
+                r.llm, r.drop_unlisted, r.rewrite
+            );
+            if let Err(e) =
+                app.jobs
+                    .resume(&key, job, index_work(app.clone(), r.llm, r.rewrite, None))
             {
                 crate::ui::warn(&format!("continuing a paused job: {e:#}"));
             }
@@ -352,6 +367,7 @@ pub(super) async fn carry_on(app: Shared) {
 fn index_work(
     app: Shared,
     llm: bool,
+    rewrite: Vec<crate::prompts::Task>,
     why: Option<String>,
 ) -> impl FnOnce(Arc<crate::jobs::Running>) -> futures::future::BoxFuture<'static, anyhow::Result<()>>
        + Send
@@ -396,6 +412,7 @@ fn index_work(
                 llm,
                 llm_key,
                 git,
+                rewrite,
             };
             crate::indexer::run(&spec, job.clone()).await?;
             if let Err(e) = app.reload(&root).await {
@@ -431,6 +448,7 @@ pub(super) async fn watch(app: Shared) {
                     &app,
                     settings.auto_index_llm,
                     false,
+                    Vec::new(),
                     Some(why.clone()),
                     None,
                     None,

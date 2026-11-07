@@ -16,6 +16,13 @@ pub struct TeamSettings {
     pub llm_base_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub llm_model: Option<String>,
+    /// The model for one LLM task in place of `llm_model`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llm_model_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llm_model_guide: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llm_model_flow: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub embed_model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
