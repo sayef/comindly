@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0-beta.5](https://github.com/sayef/comindly/compare/v0.5.0-beta.4...v0.5.0-beta.5) - 2026-11-07
+
 ### Added
 
 - Settings → Models & prompts: the LLM setup and the prompts on one page, stored with the index.
