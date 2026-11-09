@@ -140,8 +140,9 @@ To keep the server private while an outside service (a code review bot, say) rea
 gateway that signs people in and forwards their calls: an MCP OAuth proxy, oauth2-proxy, Pomerium or
 similar. Set `COMINDLY_GATEWAY_SECRET`, and have the gateway send it in `X-Gateway-Secret` with the
 signed-in person's address in `X-Forwarded-Email` (or the header set in
-`COMINDLY_GATEWAY_EMAIL_HEADER`). comindly answers only members, each with their own role; anyone
-else is refused, and the address header is ignored without the secret. To keep a client such as a
+`COMINDLY_GATEWAY_EMAIL_HEADER`). It may also name the app in `X-Forwarded-Client` ("Claude Code", a
+review bot), which tool-call log lines then show. comindly answers only members, each with their own
+role; anyone else is refused, and both headers are ignored without the secret. To keep a client such as a
 review bot read-only, allow it only the read tools. Only the gateway should be able to reach the
 server, and it must drop these headers when a client sends them. Without a gateway, nothing changes:
 agents use personal access tokens as above.

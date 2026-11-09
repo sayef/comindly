@@ -276,6 +276,10 @@ pub struct Who {
     pub role: Role,
 }
 
+/// The app a gateway request came from, as the gateway names its OAuth client ("Claude Code").
+#[derive(Debug, Clone)]
+pub struct GatewayClient(pub String);
+
 const SESSION_DAYS: i64 = 30;
 const LINK_MINUTES: i64 = 15;
 const INVITE_DAYS: i64 = 7;

@@ -218,6 +218,10 @@ pub(super) async fn guard(
             };
             let who = member;
             req.extensions_mut().insert(who.clone());
+            if let Some(client) = forwarded_client(req.headers()) {
+                req.extensions_mut()
+                    .insert(crate::server::GatewayClient(client));
+            }
             return by(next.run(req).await, Some(who));
         }
     }
@@ -956,9 +960,34 @@ pub(super) async fn device_approve(
     )
 }
 
+/// The gateway's name for the app it acts for; trusted only on a request carrying its secret.
+fn forwarded_client(headers: &axum::http::HeaderMap) -> Option<String> {
+    let name: String = headers
+        .get("x-forwarded-client")?
+        .to_str()
+        .ok()?
+        .trim()
+        .chars()
+        .take(80)
+        .collect();
+    (!name.is_empty()).then_some(name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_gateway_names_the_app_it_acts_for() {
+        let mut h = axum::http::HeaderMap::new();
+        assert_eq!(forwarded_client(&h), None);
+        h.insert("x-forwarded-client", " Claude Code ".parse().unwrap());
+        assert_eq!(forwarded_client(&h).as_deref(), Some("Claude Code"));
+        h.insert("x-forwarded-client", "  ".parse().unwrap());
+        assert_eq!(forwarded_client(&h), None);
+        h.insert("x-forwarded-client", "x".repeat(200).parse().unwrap());
+        assert_eq!(forwarded_client(&h).map(|n| n.len()), Some(80));
+    }
 
     #[test]
     fn only_the_gateway_secret_may_name_a_member() {

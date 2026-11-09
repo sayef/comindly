@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Tool-call log lines name the app behind a gateway call (`x-forwarded-client`, e.g. "Claude Code"),
+  trusted only on requests carrying the gateway's secret, instead of the MCP library's own name.
+
 ## [0.5.0-beta.7](https://github.com/sayef/comindly/compare/v0.5.0-beta.6...v0.5.0-beta.7) - 2026-11-09
 
 ### Changed
