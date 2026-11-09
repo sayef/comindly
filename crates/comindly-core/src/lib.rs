@@ -24,7 +24,7 @@ pub mod lang;
 pub mod ledger;
 pub mod llm;
 pub mod manifests;
-pub mod model;
+pub use comindly_api::model;
 pub mod packages;
 pub mod parse;
 pub mod pipeline;

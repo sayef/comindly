@@ -42,8 +42,8 @@ search cannot:
 
 The graph comes from the code itself (tree-sitter, and SCIP where available) for Python,
 TypeScript/JavaScript, Go, Java, Kotlin and Rust, so answers are exact and repeatable. The team's
-decisions, constraints and failed attempts are recorded next to the code they are about. One binary,
-written in Rust.
+decisions, constraints and failed attempts are recorded next to the code they are about. Written in
+Rust.
 
 ## Install
 
@@ -51,7 +51,9 @@ written in Rust.
 curl -LsSf https://raw.githubusercontent.com/sayef/comindly/main/scripts/install.sh | sh
 ```
 
-Prebuilt for macOS and Linux. Or `cargo install comindly` (Rust 1.95+, `protoc` and `cmake`).
+Prebuilt for macOS and Linux. This installs the `comindly` command line; it fetches the engine
+(`comindly-engine`) the first time a command needs it. `COMINDLY_ENGINE=1` installs both at once, for
+offline machines and CI. Or `cargo install comindly comindly-engine` (Rust 1.95+, `protoc` and `cmake`).
 
 ## Try it
 
@@ -67,9 +69,11 @@ LLM summaries and flow walkthroughs are optional and use `OPENAI_API_KEY` or any
 
 ## For a team
 
-One container serves the index, the app and MCP to a whole team, with sign-in through your identity
-provider or by email, roles, and teams. The index lives in a folder or a bucket (S3, Google Cloud
-Storage, Azure). See [Self-hosting](https://comindly.pages.dev/guides/self-hosting/).
+One container runs the engine as a team server: the index, the app and MCP for a whole team, with
+sign-in through your identity provider or by email, roles, and teams. The index lives in a folder or a
+bucket (S3, Google Cloud Storage, Azure). Developers point their command line at it with
+`comindly use https://comindly.example.com acme`. See
+[Self-hosting](https://comindly.pages.dev/guides/self-hosting/).
 
 ## Learn more
 

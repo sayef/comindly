@@ -187,7 +187,8 @@ graph. Nothing is pushed to git remotes, and nothing goes anywhere the user did 
 - `comindly ledger --compact` (run by the CI index job, or by anyone) folds inbox objects missing
   from the snapshot into Lance via `merge_insert` on the inbox key, and deletes snapshot rows whose
   object is gone — idempotent, so a retried or duplicated compaction is harmless. Lance resolves
-  concurrent commits itself, so CI and clients may both run it. (Implemented.)
+  concurrent commits itself, so CI and clients may both run it. (Implemented; the command was later
+  removed, and `comindly erase` compacts.)
 - Readers `LIST` the inbox (authoritative) and `GET` only keys missing from the snapshot, so a
   record is visible to the whole team seconds after it is written, and erasing its object
   removes it everywhere at once. No watermark is needed (harvested ids are UUIDv5, not ordered).
@@ -407,7 +408,7 @@ comindly preflight [--diff [<range>] | --plan <file|->]
 comindly ledger init|sync|compact|log|inbox|audit|check|import|export|gc
 comindly hook <agent> <event>               # stdin JSON → stdout JSON
 comindly init-hooks <claude|codex|cursor|gemini>
-comindly ui [--web [--port]]
+comindly app                                # was `comindly ui [--web]`; the terminal UI was removed
 comindly eval ledger …                      # §13
 ```
 
@@ -420,6 +421,8 @@ they read the mmap'd compacted cache. Targets: hook p95 < 100 ms, `why` < 50 ms 
 ---
 
 ## 11. UI — TUI and web, same backend
+
+> Later: the terminal UI was removed. The web app is opened with `comindly app`.
 
 ### 11.1 `comindly ui` (TUI, ratatui 0.30)
 
@@ -465,7 +468,7 @@ Later: the same views as MCP Apps inside agent clients.
 - **GDPR**: pseudonymous actor ids; no PII in record bodies (lint); configurable retention.
   Erasure is a real delete, unlike git history: remove the inbox object, `delete` the Lance rows,
   then clean up old Lance versions (deleted rows survive in prior versions until cleanup).
-  Implemented as `comindly erase <id…> | --actor <id|me> [--yes]`: deletes the inbox objects and
+  Implemented as `comindly erase <id…> [--yes]` (an `--actor` form existed and was removed): deletes the inbox objects and
   relations about them, compacts, rewrites the snapshot and prunes all old versions, and leaves
   id-only tombstones (`_ledger/erased/<id>`) so `harvest` does not re-create harvested records.
   Run it while no other compaction is in progress (pruning skips the in-flight safety window).

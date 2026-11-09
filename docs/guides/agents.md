@@ -3,7 +3,8 @@
 An agent connected to comindly (see [Getting started](../getting-started.md#4-connect-your-agent), or on
 a team server Settings → Your access, which also covers signing in through your organisation's
 [gateway](self-hosting.md#agents-through-a-gateway) with no token)
-sees fifteen tools. It decides when to call them; you ask in plain words. This page shows what to
+sees comindly's tools. An agent that runs `comindly serve` reaches the engine of the profile in use:
+the local one, or a team server after `comindly use`. It decides when to call them; you ask in plain words. This page shows what to
 ask, what happens, and the habits that keep the answers good.
 
 ## What to ask
@@ -70,8 +71,9 @@ The app's Get started page shows both, ready to copy.
   comindly's tools, then up to eight trusted records about the repository.
 - **Before an edit** (`Edit`, `MultiEdit`, `Write`): up to four trusted records about that file.
 
-A record is shown once per session. Hooks read a local mirror of a remote index, refreshed every
-five minutes (`cache_ttl_secs`), so they add about 60 ms. For other agents, `comindly init-hooks
+A record is shown once per session. Hooks ask the engine of the profile in use, so they work signed in
+to a team server too. They never start the local engine, and when no answer comes within 3 seconds
+they add nothing. For other agents, `comindly init-hooks
 cursor`, `gemini`, `codex` or `generic` prints the two commands to run from the agent's own hooks;
 they print the same context as plain markdown.
 
@@ -86,7 +88,7 @@ approach, with evidence), `constraint`, `gotcha`, `intent` and `question`.
   review queue; with evidence (a commit, a test, an MR) it is trusted enough for hooks.
 - Agents can confirm, archive, invalidate, supersede or dispute records. When an agent tries to
   retire a record a person wrote or confirmed, the record stays and is flagged for a person.
-- Deleting a record is for people only, from the web UI or `comindly erase`.
+- Deleting a record is for people only, from the app or `comindly erase`.
 
 Good records are neutral facts a future engineer would want before editing, not summaries of a
 session. comindly refuses records that look like secrets or that try to give an agent instructions.
@@ -104,8 +106,9 @@ or with `comindly conventions add|edit|rm|restore`.
 | Symptom | Check |
 |---|---|
 | The agent lists no comindly tools | Restart the agent after adding the server; run the `comindly serve` command yourself to see errors. |
-| "no index here yet" | The `--index-dir` path; `comindly doctor --index-dir …`. |
-| An index in a bucket fails to load | The server's environment needs storage credentials ([Storage](storage.md)). |
-| `search` finds nothing | The index was built with `--no-embed`; rebuild without it. |
+| "no index here yet" | The profile in use and the engine's index location: `comindly use`, `comindly config`, `comindly doctor`. |
+| An index in a bucket fails to load | The engine's environment needs storage credentials ([Storage](storage.md)). |
+| `search` finds nothing | The index was built with the team setting `embed=false`; set it to `true` and index again. |
+| Hooks add nothing | The local engine is not running (hooks never start it): run any command, or `comindly engine start`. |
 | Answers miss recent code | The index is older than the code: re-run `comindly link` (CI usually does). |
 | New conventions or records do not show | A running MCP server loads them at start; restart the agent. |

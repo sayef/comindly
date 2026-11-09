@@ -360,7 +360,9 @@ impl Python {
                     return None;
                 }
                 let ctor = path(right.child_by_field_name("function")?, src)?;
-                if !CTORS.contains(&ctor.last()?.as_str()) {
+                let name = ctor.last()?.as_str();
+                // `…Router(prefix=…)`: possibly a subclass of a framework's router.
+                if !CTORS.contains(&name) && !name.ends_with("Router") {
                     return None;
                 }
                 let (target, _) = self.assignment(node, src)?;

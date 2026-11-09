@@ -105,17 +105,19 @@ jobs:
       - if: runner.os == 'macOS'
         run: brew install protobuf cmake
       - run: rustup target add ${{ matrix.target }}
-      # Linux builds become the server image, so they carry OTLP trace export.
-      - run: cargo build --release --locked --target ${{ matrix.target }} ${{ runner.os == 'Linux' && '--features otel' || '' }}
+      # Linux engines become the server image, so they carry OTLP trace export.
+      - run: cargo build --release --locked --target ${{ matrix.target }} -p comindly -p comindly-engine ${{ runner.os == 'Linux' && '--features comindly-engine/otel' || '' }}
       - name: Package
         run: |
-          tar -C target/${{ matrix.target }}/release -czf "comindly-${{ matrix.target }}.tar.gz" comindly
-          shasum -a 256 "comindly-${{ matrix.target }}.tar.gz" > "comindly-${{ matrix.target }}.tar.gz.sha256" \
-            2>/dev/null || sha256sum "comindly-${{ matrix.target }}.tar.gz" > "comindly-${{ matrix.target }}.tar.gz.sha256"
+          for bin in comindly comindly-engine; do
+            a="$bin-${{ matrix.target }}.tar.gz"
+            tar -C target/${{ matrix.target }}/release -czf "$a" "$bin"
+            shasum -a 256 "$a" > "$a.sha256" 2>/dev/null || sha256sum "$a" > "$a.sha256"
+          done
       - uses: actions/upload-artifact@v7
         with:
           name: comindly-${{ matrix.target }}
-          path: comindly-${{ matrix.target }}.tar.gz*
+          path: comindly*-${{ matrix.target }}.tar.gz*
 
   build-macos:
     needs: [tag, ui]
@@ -138,15 +140,18 @@ jobs:
           path: ui/dist
       - run: brew install protobuf cmake
       - run: rustup target add ${{ matrix.target }}
-      - run: cargo build --release --locked --target ${{ matrix.target }}
+      - run: cargo build --release --locked --target ${{ matrix.target }} -p comindly -p comindly-engine
       - name: Package
         run: |
-          tar -C target/${{ matrix.target }}/release -czf "comindly-${{ matrix.target }}.tar.gz" comindly
-          shasum -a 256 "comindly-${{ matrix.target }}.tar.gz" > "comindly-${{ matrix.target }}.tar.gz.sha256"
+          for bin in comindly comindly-engine; do
+            a="$bin-${{ matrix.target }}.tar.gz"
+            tar -C target/${{ matrix.target }}/release -czf "$a" "$bin"
+            shasum -a 256 "$a" > "$a.sha256"
+          done
       - uses: actions/upload-artifact@v7
         with:
           name: comindly-${{ matrix.target }}
-          path: comindly-${{ matrix.target }}.tar.gz*
+          path: comindly*-${{ matrix.target }}.tar.gz*
 
   publish:
     needs: [tag, build, build-macos]
@@ -192,7 +197,7 @@ jobs:
         run: |
           for pair in x86_64:amd64 aarch64:arm64; do
             mkdir -p "dist/linux/${pair#*:}"
-            tar -xzf "artifacts/comindly-${pair%%:*}-unknown-linux-gnu.tar.gz" -C "dist/linux/${pair#*:}"
+            tar -xzf "artifacts/comindly-engine-${pair%%:*}-unknown-linux-gnu.tar.gz" -C "dist/linux/${pair#*:}"
           done
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4

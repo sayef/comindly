@@ -1,0 +1,78 @@
+[package]
+name = "comindly-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "comindly's engine: the index behind /api/v1 and /mcp, on this machine or as a team server, with the web app, indexing jobs, members and roles."
+documentation = "https://docs.rs/comindly-engine"
+readme = "README.md"
+
+[[bin]]
+name = "comindly-engine"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+comindly-api = { workspace = true, features = ["client"] }
+comindly-core.workspace = true
+comindly-ui.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+indicatif.workspace = true
+console.workspace = true
+comfy-table.workspace = true
+anyhow.workspace = true
+tokio-util.workspace = true
+tokio.workspace = true
+futures.workspace = true
+git2.workspace = true
+lancedb.workspace = true
+rmcp.workspace = true
+blake3.workspace = true
+uuid.workspace = true
+chacha20poly1305.workspace = true
+getrandom.workspace = true
+lettre.workspace = true
+chrono.workspace = true
+axum.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+opentelemetry = { workspace = true, optional = true }
+opentelemetry_sdk = { workspace = true, optional = true }
+opentelemetry-otlp = { workspace = true, optional = true }
+tracing-opentelemetry = { workspace = true, optional = true }
+reqwest.workspace = true
+openidconnect.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# `comindly app`: a native window around the web UI (macOS, like Ollama's desktop app).
+[target.'cfg(target_os = "macos")'.dependencies]
+wry.workspace = true
+tao.workspace = true
+muda.workspace = true
+rfd.workspace = true
+objc2.workspace = true
+objc2-app-kit.workspace = true
+objc2-foundation.workspace = true
+
+[features]
+default = []
+# OTLP trace export when OTEL_EXPORTER_OTLP_ENDPOINT is set; on in the container image and Linux release builds.
+otel = ["dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp", "dep:tracing-opentelemetry"]
+
+[dev-dependencies]
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+tower.workspace = true
+rsa = { version = "0.9", features = ["getrandom"] }
+
+[[bench]]
+name = "graph"
+harness = false

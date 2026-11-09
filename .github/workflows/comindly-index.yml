@@ -8,7 +8,7 @@
 #   • Variable  COMINDLY_REPOS = "owner/pkg  owner/svc" (space/newline list of repos to index)
 #   • Secret    COMINDLY_REPO_TOKEN                     (fine-grained PAT, Contents: read)
 #                                                     — omit for public repos
-#   • Secret    OPENAI_API_KEY  (optional)            — turns on --enrich
+#   • Secret    OPENAI_API_KEY  (optional)            — turns on the LLM steps
 # ──────────────────────────────────────────────────────────────────────────────────────────
 name: comindly-index
 
@@ -69,18 +69,20 @@ jobs:
 
       - name: Build comindly
         working-directory: comindly
-        run: cargo build --release
+        run: cargo build --release -p comindly -p comindly-engine
 
       - name: Build the index (local LanceDB path — no S3)
         env:
           INDEX_DIR: ${{ runner.temp }}/comindly-index/org
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }} # optional; enables --enrich when set
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }} # optional; turns on the LLM steps
         run: |
+          # The command line starts the engine beside it and indexes through it.
           BIN=comindly/target/release/comindly
-          ENRICH=""
-          [ -n "$OPENAI_API_KEY" ] && ENRICH="--enrich"
-          COMINDLY_MAX_ENRICH=200 "$BIN" link repos/*/ --index-dir "$INDEX_DIR" --embed --incremental $ENRICH
-          "$BIN" ledger --compact --index-dir "$INDEX_DIR"
+          LLM="--no-llm"
+          [ -n "$OPENAI_API_KEY" ] && LLM=""
+          "$BIN" config set "index_dir=$INDEX_DIR"
+          COMINDLY_MAX_ENRICH=200 "$BIN" link repos/*/ $LLM
+          "$BIN" engine stop
 
       - name: Upload index artifact
         uses: actions/upload-artifact@v7
@@ -91,6 +93,5 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
-# Consume it: `gh run download -R <owner>/comindly -n comindly-index` then
-#   comindly serve  --index-dir .      (MCP)
-#   comindly search "…" --index-dir .
+# Consume it: `gh run download -R <owner>/comindly -n comindly-index`, then
+#   comindly config set index_dir=$PWD   and   comindly search "…"

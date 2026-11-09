@@ -3,10 +3,8 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
-use serde::{Deserialize, Serialize};
-
 use crate::conventions::{Convention, Manual, ORG};
-use crate::graph::{CodeGraph, ContractView, Node};
+use crate::graph::{CodeGraph, Node};
 use crate::ledger::Entry;
 use crate::manifests::InternalDep;
 use crate::model::{Edge, Symbol};
@@ -23,11 +21,10 @@ pub fn find(g: &CodeGraph, query: &str, repos: &[String]) -> Vec<Node> {
     hits
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Search {
-    pub hits: Vec<SearchHit>,
-    pub markdown: String,
-}
+pub use comindly_api::answers::{
+    Contracts, Conventions, Explore, ExploreView, Flow, Ledger, Preflight, RepoStats, Search,
+    Stats, Step, Why,
+};
 
 /// How many hits to ask the ranker for; more when they are filtered by repo afterwards.
 pub fn search_limit(repos: &[String]) -> usize {
@@ -50,12 +47,6 @@ pub fn search(query: &str, mut hits: Vec<SearchHit>, repos: &[String]) -> Search
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Why {
-    pub name: String,
-    pub markdown: String,
-}
-
 /// `why`: the ledger about `focus` and what it contains.
 pub fn why(g: &CodeGraph, entries: &[Entry], focus: &str) -> Option<Why> {
     let (name, ids) = g.scope_of(focus)?;
@@ -64,15 +55,6 @@ pub fn why(g: &CodeGraph, entries: &[Entry], focus: &str) -> Option<Why> {
         markdown: crate::ledger::markdown(&format!("why `{name}`"), &about),
         name,
     })
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct Ledger {
-    pub markdown: String,
-    /// Said instead of a report, when there is nothing to report.
-    pub note: Option<String>,
-    /// With `check`: a constraint that must hold is violated.
-    pub failed: bool,
 }
 
 /// `ledger`: the records, or the inbox of those needing attention; with `check`, constraint checks.
@@ -120,22 +102,6 @@ pub fn ledger(
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Flow {
-    pub focus: String,
-    /// The stored walkthrough and the questions it answers, when one was written.
-    pub narration: Option<(String, Vec<String>)>,
-    pub steps: Vec<Step>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Step {
-    pub depth: usize,
-    pub via: String,
-    pub name: String,
-    pub location: String,
-}
-
 /// `flow`: the walkthrough written for `focus`, if any, and its live call trace.
 pub fn flow(
     g: &CodeGraph,
@@ -161,24 +127,11 @@ pub fn flow(
     })
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Contracts {
-    /// Every contract, before `kind` and `dangling` narrow the list.
-    pub total: usize,
-    pub views: Vec<ContractView>,
-}
-
 pub fn contracts(g: &CodeGraph, kind: Option<&str>, dangling: bool) -> Contracts {
     Contracts {
         total: g.contracts(None, false).len(),
         views: g.contracts(kind, dangling),
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Conventions {
-    pub conventions: Vec<Convention>,
-    pub hidden: Vec<Manual>,
 }
 
 /// `conventions`: the conventions in force (measured, edited and the team's) and the hidden ones,
@@ -195,33 +148,7 @@ pub fn conventions(all: Vec<Convention>, manual: &[Manual], repo: Option<&str>) 
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Explore {
-    pub symbols: usize,
-    pub edges: usize,
-    pub dangling: usize,
-    /// `None` when no symbol matches the focus.
-    pub view: Option<ExploreView>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExploreView {
-    pub focus: Option<Node>,
-    pub container: Option<Node>,
-    pub callees: Vec<Node>,
-    pub callers: Vec<Node>,
-    pub importers: Vec<Node>,
-    pub members: Vec<Node>,
-    /// Dependents within the blast radius, and how many per repo.
-    pub dependents: usize,
-    pub by_repo: BTreeMap<String, usize>,
-    pub budget: usize,
-    /// The context pack: symbols to read with their estimated tokens.
-    pub pack: Vec<(Node, usize)>,
-}
-
-/// Hops the blast radius follows, and the context pack's token budget.
-pub const RIPPLE_DEPTH: usize = 4;
+pub use comindly_api::answers::{Hook, RIPPLE_DEPTH};
 pub const PACK_BUDGET: usize = 1500;
 
 /// `explore`: zoom, blast radius and context pack for `focus`.
@@ -252,25 +179,6 @@ pub fn explore(g: &CodeGraph, focus: &str) -> Explore {
         dangling: g.dangling_edges,
         view,
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Stats {
-    pub symbols: usize,
-    /// Repos in the index; `repos` holds those reported.
-    pub indexed: usize,
-    /// Asked-for repos the index does not have.
-    pub unknown: Vec<String>,
-    pub repos: Vec<RepoStats>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RepoStats {
-    pub repo: String,
-    pub symbols: usize,
-    pub edges: usize,
-    pub enriched: usize,
-    pub kinds: BTreeMap<String, usize>,
 }
 
 /// `stats`: per repo (`want`, else all) symbols, edges, kinds and how many have LLM summaries.
@@ -321,13 +229,6 @@ pub fn packages(deps: Vec<InternalDep>, skew: bool) -> Vec<InternalDep> {
     deps.into_iter().filter(|d| !skew || d.skewed()).collect()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Preflight {
-    pub markdown: String,
-    /// A `must` constraint check fails in a changed file.
-    pub blocking: bool,
-}
-
 /// `preflight`: what is known about the code `changes` touch; the changes come from git.
 pub fn preflight(
     g: &CodeGraph,
@@ -357,4 +258,73 @@ pub fn preflight(
 
 fn in_repos(repo: &str, repos: &[String]) -> bool {
     repos.iter().any(|r| repo.eq_ignore_ascii_case(r))
+}
+
+/// The hook's context: at session start, the guide and records about the repository `cwd` is in;
+/// before an edit, records about the symbols in `path`. Records in `seen` were shown already.
+pub fn hook(
+    symbols: &[Symbol],
+    entries: &[Entry],
+    event: &str,
+    cwd: &str,
+    path: Option<&str>,
+    seen: &HashSet<String>,
+) -> Hook {
+    use crate::ledger::{Status, Trust};
+    let (ids, indexed, limit): (Vec<String>, bool, usize) = match (event, path) {
+        ("session-start", _) => {
+            let repos: BTreeSet<&str> = symbols.iter().map(|s| s.repo.0.as_str()).collect();
+            let repo = std::path::Path::new(cwd)
+                .ancestors()
+                .filter_map(|a| a.file_name().and_then(|n| n.to_str()))
+                .find(|n| repos.contains(n));
+            let ids = symbols
+                .iter()
+                .filter(|s| Some(s.repo.0.as_str()) == repo)
+                .map(|s| s.id.render())
+                .collect();
+            (ids, repo.is_some(), 8)
+        }
+        ("pre-edit", Some(path)) => {
+            let ids = symbols
+                .iter()
+                .filter(|s| !s.file_path.is_empty() && path.ends_with(&format!("/{}", s.file_path)))
+                .map(|s| s.id.render())
+                .collect();
+            (ids, false, 4)
+        }
+        _ => return Hook::default(),
+    };
+    let fresh: Vec<&Entry> = crate::ledger::about(entries, &ids)
+        .into_iter()
+        .filter(|e| e.trust >= Trust::T2)
+        .filter(|e| matches!(e.status, Status::Active | Status::Moved | Status::Stale))
+        .filter(|e| !seen.contains(&e.record.id))
+        .take(limit)
+        .collect();
+    let mut text = if fresh.is_empty() {
+        String::new()
+    } else {
+        crate::ledger::markdown(
+            "comindly ledger: reasoning recorded about this code",
+            &fresh,
+        )
+    };
+    if text.len() > 9_000 {
+        let cut = (0..=9_000)
+            .rev()
+            .find(|&i| text.is_char_boundary(i))
+            .unwrap_or(0);
+        text.truncate(cut);
+    }
+    if indexed {
+        text = format!(
+            "# Using comindly\n\n{}\n{text}",
+            comindly_api::agents::GUIDE
+        );
+    }
+    Hook {
+        text,
+        ids: fresh.iter().map(|e| e.record.id.clone()).collect(),
+    }
 }

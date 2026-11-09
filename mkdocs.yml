@@ -112,7 +112,7 @@ nav:
       - Service contracts: guides/contracts.md
       - The ledger: guides/ledger.md
       - Preflight and checks: guides/preflight.md
-      - Desktop, web and terminal UI: guides/ui.md
+      - The app: guides/ui.md
       - CI and merge requests: guides/ci.md
       - Configuration: guides/configuration.md
   - Reference:

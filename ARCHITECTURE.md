@@ -1,7 +1,7 @@
 # comindly — Rust Architecture
 
-> Polyglot, cross-repo code-intelligence engine: an async server, an MCP endpoint for agents, and a CLI,
-> in one static binary.
+> Polyglot, cross-repo code-intelligence engine: an async engine with an MCP endpoint for agents
+> (`comindly-engine`), and a thin CLI that talks to it (`comindly`).
 > Read-heavy / write-rare: the index is a **versioned artifact in your storage**, not a live shared DB.
 
 ## Decisions (locked)
@@ -27,7 +27,7 @@ read/write database. Instead:
                     │              → s3://comindly/_graph/<ts>/  → atomically bump "latest" pointer  │
                     └───────────────────────────────────────────────────────────────────────────┘
                                                      │
-   each dev's MCP server / CLI ──▶ watch "latest" ──▶ pull delta ──▶ build in-mem petgraph ──▶ serve locally
+   each dev's engine ─────────▶ watch "latest" ──▶ pull delta ──▶ build in-mem petgraph ──▶ serve locally
 ```
 
 Lance gives atomic versioning + cheap deltas for free. Consumers are stateless
@@ -78,7 +78,7 @@ e.g.  scip-python  pip  acme  1.4.0  `acme/foo`/bar().
 
 **Resolver strategy — tree-sitter-first, SCIP-optional:**
 - **Default:** tree-sitter `tags.scm` extraction → fast, universal, *syntactic* symbol/ref
-  graph for every language. Single binary, no per-language toolchain. Good enough for
+  graph for every language. No per-language toolchain. Good enough for
   ranking + most navigation.
 - **Precision upgrade:** ingest **SCIP indexes** where a team already emits them
   (`scip-typescript`, `scip-python`, `rust-analyzer`, `scip-java`) for *semantic* accuracy.
@@ -87,25 +87,34 @@ e.g.  scip-python  pip  acme  1.4.0  `acme/foo`/bar().
 
 ## Layers
 
-comindly is four crates in one cargo workspace. Each depends only on those below it, and the compiler
+comindly is five crates in one cargo workspace. Each depends only on those below it, and the compiler
 enforces the boundaries.
 
 ```
-  comindly            the command: local mode, the web app's local server, and a client of a running
-                      server (`comindly login`, `--server`). The terminal UI and the macOS window.
+  comindly            the command line: profiles (`comindly use`), the local engine started on
+                      demand, and every command as a call to an engine's `/api/v1`; MCP over stdio
+                      and the agent hooks forwarded to the engine. Never opens an index itself.
         │
-  comindly-server     axum: `/api/v1`, MCP over HTTP and stdio, the web app, sign-in and roles, jobs,
-                      the backends; and this machine's preferences, credentials and checks, since the
-                      local app runs on it too.
-        │         ╲
-  comindly-core     comindly-ui
-  the engine as an  the web app (React, in `ui/`), built and embedded
-  async library
+        │           comindly-engine     axum: `/api/v1`, MCP over HTTP, the web app, sign-in and
+        │                               roles, jobs, the backends; this machine's preferences,
+        │                               credentials and checks; the `comindly-engine` binary and the
+        │                               macOS window.
+        │                 │         ╲
+        │           comindly-core     comindly-ui
+        │           the engine as an  the web app (React, in `ui/`), built and embedded
+        │           async library
+        │                 │
+  comindly-api        the requests and answers of `/api/v1`, and a typed client (feature `client`)
 ```
 
+One `comindly-engine` binary serves both ways: without `COMINDLY_PUBLIC_URL` it is the local engine on
+127.0.0.1 (port 7879, or a free port), with a local token and no sign-in; with it, the team server on
+0.0.0.0:7878 with sign-in and roles. A local engine writes its address, pid and version to
+`engine.json` in the config folder, where the command line finds it.
+
 `comindly-core` reads no environment, no files of its own and no process-wide state, and prints
-nothing: everything a call needs is passed in. The `comindly` library re-exports the server, which
-re-exports core, so `comindly::graph` is `comindly_core::graph`.
+nothing: everything a call needs is passed in. `comindly-engine` re-exports core, so
+`comindly_engine::graph` is `comindly_core::graph`.
 
 ### comindly-core
 
@@ -123,19 +132,21 @@ re-exports core, so `comindly::graph` is `comindly_core::graph`.
 | Settings | `team` (an index's shared settings), `docstore` (a versioned settings document in LanceDB) |
 | Plumbing | `context` (what a call needs), `events` (what it reports), `rt` (the process's one runtime) |
 
-### comindly-server
+### comindly-engine
 
 | Area | Modules |
 |---|---|
-| HTTP | `api` (every route's request and answer types), `web` and `web/*` (`/api/v1`, the embedded app, `/health`, `/ready`, graceful shutdown), `mcp` (the tools, over streamable HTTP and stdio) |
+| HTTP | `api` (every route's request and answer types, from `comindly-api`), `web` and `web/*` (`/api/v1`, the embedded app, `/health`, `/ready`, graceful shutdown), `mcp` (the tools, over streamable HTTP) |
 | Access | `server` (`ServerConfig`, roles, the default account store), `backends` (the traits and SMTP) |
 | Work | `jobs` (runner, cancellation, records, live events) |
-| This machine | `config` (preferences, identity and signing), `credentials` (API keys and the server sign-in), `doctor`, `cache` (the hooks' local mirror), `ui` (events as terminal lines or JSON logs) |
+| This machine | `config` (preferences, identity and signing), `credentials` (API keys), `doctor`, `cache`, `ui` (events as terminal lines or JSON logs), `app` (the macOS window) |
 
 ### comindly
 
-`main` (commands), `remote` (commands answered by a server), `client` (the typed `/api/v1` client and
-sign-in by browser approval), `tui`, `app` (macOS).
+`main` (commands), `commands` (each command as API calls), `profile` (profiles and sign-ins),
+`engine` (finding, starting, stopping and installing the local engine), `mcp` (stdio forwarded to an
+engine's `/mcp`), `hooks`, `doctor`, `render` (answers as terminal text), `git` (what `preflight` and
+`changed` read on this machine).
 
 ## Contexts, not globals
 
@@ -153,8 +164,7 @@ pub struct IndexContext {
 }
 ```
 
-The server builds one per job from its settings and stores; the command line builds one from its
-flags, the environment and the preferences. Ledger writes take the signer and the writer's identity as
+The engine builds one per job from its settings and stores. Ledger writes take the signer and the writer's identity as
 arguments, and reads take the verifier. The web app holds the loaded index (`view::Data`) behind an
 `Arc` and swaps it when a new version is indexed.
 
@@ -173,7 +183,7 @@ arguments, and reads take the verifier. The web app holds the loaded index (`vie
 
 ## Jobs
 
-Indexing runs inside the server as a job, not as a child process.
+Indexing runs as an engine job, each run in a child `comindly-engine index-job` process so its memory goes back when it ends.
 
 - **One at a time, in order.** A job has an id, a kind, who started it, a status (queued, running,
   succeeded, failed, cancelled, interrupted) and its events. Starting one while another runs queues it;
@@ -195,8 +205,8 @@ Indexing runs inside the server as a job, not as a child process.
   rebuilding it from a stale request could index what nobody asked for any more. On SIGTERM the
   waiting jobs are marked the same way.
 
-The command line runs the same pipeline in the foreground and renders its events in the terminal; with
-a server, `comindly link` starts or queues the server's job and follows its events instead.
+`comindly link` and `comindly index` start or queue the engine's job, local or a server's, and follow
+its events in the terminal.
 
 ## Backends
 
@@ -227,15 +237,15 @@ person whose token the agent uses.
 ## API
 
 - `/api/v1`: JSON. The web app and the command line use it. The answers the read commands print
-  (`/api/v1/answer/*`) are the types in `comindly_core::answers`, computed by the same functions locally
-  and on a server, so `--server` prints what a local run does. `/api/v1/view` sends the terminal UI
-  `comindly_core::view::View` (symbols, edges, ledger entries, conventions, dependencies), gzip-compressed;
-  the client rebuilds the graph and contracts from it.
-- Types: every route's request and answer is a type in `comindly_server::api` (grouped by area,
+  (`/api/v1/answer/*`) are the types in `comindly_core::answers`, computed by the same functions on the
+  local engine and on a server, so a command prints the same against either. `answer/hook` gives the
+  agent hooks their context and `answer/guide` the style guides.
+- Types: every route's request and answer is a type in `comindly-api` (grouped by area,
   reusing domain types such as `answers::*`, `graph::Node` and `jobs::JobRecord`); handlers return them and
   the CLI's client reads them, so the server and the command line cannot disagree on a shape.
 - Errors: one shape, `{ "error": { "code", "message" } }`, with HTTP status codes that mean what they say.
-- `/mcp`: MCP over streamable HTTP for agents, with a personal access token.
+- `/mcp`: MCP over streamable HTTP for agents, with a personal access token on a server or the local
+  token on the local engine. `comindly serve` forwards stdio to it.
 - `/health` (alive) and `/ready` (an index is loaded and the accounts can be read).
 
 ## Configuration
@@ -245,9 +255,10 @@ person whose token the agent uses.
 | The deployment's | `COMINDLY_*` variables, each also as `*_FILE` | once at start into `ServerConfig`, checked |
 | A server's own | the `SettingsStore` | when used |
 | An index's shared settings | `<index>/_team`, a versioned document | when an index is loaded, and after each save |
-| One person's preferences | a versioned document in the config folder; TOML files are imported and exported | the app re-reads them every few seconds |
+| One person's preferences | a versioned document in the config folder | the engine re-reads them every few seconds |
 
-API keys and the server sign-in stay in a credentials file readable only by its owner.
+API keys stay in a credentials file, and the command line's profiles and sign-ins in `profiles.toml`,
+each readable only by its owner.
 
 ## Observability
 
@@ -290,14 +301,14 @@ personalized-PageRank repomap sets the bar for token-efficient context; the winn
 is **task-success-per-token** ("agents burn 10x the tokens they need").
 
 **Our five differentiators:**
-1. **Deterministic cross-repo graph** (SCIP identity) — precise like Glean, but self-hosted single binary.
+1. **Deterministic cross-repo graph** (SCIP identity) — precise like Glean, but self-hosted.
 2. **Zero-staleness team index** — push-to-master → versioned S3 → everyone shares one fresh index. Solves the problem that killed embeddings, at *team* scale.
 3. **Cross-repo `ripple`** — org-wide blast radius; grep and per-repo tools can't answer it.
 4. **Ranked, token-budgeted context packs over MCP** — Aider's insight, org-wide, delivered as *the minimal correct context to change safely*, not a search dump.
 5. **Tree-sitter-first, SCIP-optional** — universal + fast by default, precise where it counts.
 
 One-liner: *Deterministic, always-fresh, cross-repo code intelligence that hands your agent
-the minimal correct context — self-hosted, single binary.*
+the minimal correct context — self-hosted.*
 
 Sources: [Sourcegraph — Agentic Coding in 2026](https://sourcegraph.com/blog/agentic-coding) ·
 [AI agents don't need vector search anymore](https://buzzgrewal.medium.com/ai-agents-dont-need-vector-search-anymore-inside-the-agentic-search-stack-replacing-rag-in-2026-58efcabe4f6f) ·

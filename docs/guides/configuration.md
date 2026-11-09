@@ -4,25 +4,28 @@ Settings live with whoever they belong to:
 
 | Whose | What | Where | Change it with |
 |---|---|---|---|
-| Yours, on this machine | which index to open, the repositories this machine indexes, your name on ledger records, signing | a versioned table in comindly's config folder | `comindly config` |
+| Which engine you use | the local engine or a team server, and each one's sign-in | `~/.config/comindly/profiles.toml`, readable only by you | `comindly use`, `comindly login` |
+| The local engine's | which index to open, the repositories this machine indexes, your name on ledger records, signing | a versioned table in comindly's config folder | `comindly config`, `comindly repos` |
 | The index's | models, LLM steps and limits, prices, output format, SCIP, automatic re-indexing, the team's repository list | with the index, shared by everyone using it | `comindly team set`, or Settings → General in the app |
 | A server's | address, admins, sign-in, mail, secrets key | the environment of the deployment ([Self-hosting](self-hosting.md)) | the deployment |
 
-Command-line flags win over everything.
+## Profiles
 
-## Your preferences
+`comindly use` lists the engines the command line knows; `*` marks the one in use. `local` is the
+engine on this machine and always exists. `comindly use https://comindly.example.com acme` adds a team
+server as `acme` and signs in; `comindly use local` and `comindly use acme` switch. `--use <name>` on a
+command, or `COMINDLY_PROFILE`, picks a profile for that command or shell only.
+
+## The engine's settings
 
 ```bash
-comindly config                          # show them, as TOML
+comindly config                          # show them, and where they are kept
 comindly config set author_name="Ada Lovelace" record_names=false
-comindly config export prefs.toml        # write them to a file
-comindly config import prefs.toml        # fill what is not set yet from a file
-comindly config import prefs.toml --override   # make the file's settings yours, as they are
-comindly config history                  # every saved version, with when and by whom
-comindly config path                     # where they are kept
+comindly config set index_dir=s3://bucket/comindly   # point the local engine at a bucket index
 ```
 
-Each change is saved as a new version. A file to import has the same shape `export` writes:
+Keys: `index_dir`, `author_name`, `record_names` and `cache_ttl_secs`. Each change is saved as a new
+version. What is kept has this shape:
 
 ```toml
 index_dir = "~/.local/share/comindly"   # folder, s3://, gs:// or az://
@@ -30,7 +33,7 @@ author_name = "Ada Lovelace"            # name on your ledger records (default: 
 record_names = true                     # false: only a pseudonymous id on new records
 # signing_key = "~/.ssh/id_ed25519.pub"           # sign ledger records (default: git user.signingkey)
 # allowed_signers = "~/.config/git/allowed_signers"
-# cache_ttl_secs = 300                  # how often the app, MCP server and hooks look for a new index
+# cache_ttl_secs = 300                  # how often the engine looks for a new index version
 
 # The repositories `comindly link` indexes when given no folders.
 [[repos]]
@@ -41,13 +44,13 @@ path = "~/.local/share/comindly/repos/github.com/acme/payments"
 remote = "https://github.com/acme/payments.git"   # comindly clones it into `path` when missing
 ```
 
-An import refuses keys it does not know, so a typo does not go unnoticed. Without `--override` it fills
-only what is unset and names what it left as it was.
+The repository list is changed with `comindly repos add|remove|scan` or in the app (Settings →
+Repositories). `signing_key` and `allowed_signers` default to git's SSH signing settings; set them with
+`COMINDLY_SIGNING_KEY` and `COMINDLY_ALLOWED_SIGNERS` in the engine's environment.
 
-Earlier versions kept these in `~/.config/comindly/config.toml`. The first command after upgrading
-imports that file once and renames it `config.toml.imported`; models and LLM settings in it move to the
-index's shared settings. A `config.toml` that appears later is not read: comindly says so and points to
-`comindly config import`.
+Earlier versions kept these in `~/.config/comindly/config.toml`. The engine imports that file once and
+renames it `config.toml.imported`; models and LLM settings in it move to the index's shared settings. A
+`config.toml` that appears later is not read.
 
 ## The index's shared settings
 
@@ -104,20 +107,21 @@ comindly prompts activate summary 2       # or: deactivate summary, delete summa
 
 ## Environment
 
-- `COMINDLY_INDEX_DIR`: the index location, over your preferences.
+- `COMINDLY_INDEX_DIR`: the index location, over the engine's settings.
+- `COMINDLY_PROFILE`: the profile commands use, over the one `comindly use` chose.
 - `COMINDLY_LLM_MODEL`, `COMINDLY_LLM_BASE_URL`, `COMINDLY_EMBED_MODEL`: used where the index's shared
   settings leave them unset.
 - `COMINDLY_FORMAT`, `COMINDLY_SCIP`: over the index's shared settings, for this run.
 - `COMINDLY_SIGNING_KEY`, `COMINDLY_ALLOWED_SIGNERS`, `COMINDLY_AUTHOR_NAME`, `COMINDLY_AGENT`: signing,
   and how your records and your agent's are named.
-- `COMINDLY_SERVER`, `COMINDLY_TOKEN`: ask a comindly server, signed in with a personal access token
-  (for CI; on your machine `comindly login` keeps the sign-in).
+- `COMINDLY_SERVER`, `COMINDLY_TOKEN`: ask a comindly server, signed in with a personal access token,
+  in place of a profile (for CI; on your machine `comindly use` keeps the sign-in).
 - `COMINDLY_LOG_FORMAT=json`: one JSON event per line, for platform logs.
 
 ## Secrets
 
 Secrets are kept apart from settings. Your LLM API key comes from `OPENAI_API_KEY` or
-`comindly team key`, which stores it in `~/.config/comindly/credentials`, readable only by you; that file
-also holds the server sign-in from `comindly login`. On a server, admins set the LLM key and git tokens
+`comindly team key`, which stores it in `~/.config/comindly/credentials`, readable only by you. Sign-ins
+to servers are kept in `~/.config/comindly/profiles.toml`, also readable only by you. On a server, admins set the LLM key and git tokens
 under Settings → Integrations, encrypted with the deployment's key. Bucket access uses the platform's own
 credentials ([Storage](storage.md)).

@@ -51,11 +51,13 @@ jobs:
       - run: |
           sed -i '/bullseye-security/d' /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null || true
           apt-get update && apt-get install -y protobuf-compiler cmake
-      - run: cargo build --release
+      - run: cargo build --release -p comindly -p comindly-engine
       - uses: actions/upload-artifact@v7
         with:
           name: comindly-linux
-          path: target/release/comindly
+          path: |
+            target/release/comindly
+            target/release/comindly-engine
 
   smoke-linux:
     needs: build-linux
@@ -74,7 +76,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with: { name: comindly-linux }
-      - run: chmod +x comindly
+      - run: chmod +x comindly comindly-engine
       - name: Smoke test on ${{ matrix.image }}
         continue-on-error: ${{ matrix.musl == true }}
         run: |
@@ -82,7 +84,8 @@ jobs:
             set -e
             mkdir -p /tmp/s && printf "class A:\n  def run(self):\n    pass\n" > /tmp/s/x.py
             ./comindly --help
-            ./comindly index /tmp/s            # exercises tree-sitter + binary load, no network
+            ./comindly index /tmp/s --no-llm   # starts the engine beside it: tree-sitter, binary load, no network
+            ./comindly find A
           '
 
   # ---- macOS: build + smoke on Apple Silicon; x86_64 built there too and run under Rosetta ---
@@ -102,12 +105,13 @@ jobs:
         if: matrix.target == 'x86_64-apple-darwin'
         run: softwareupdate --install-rosetta --agree-to-license || true
       - run: rustup target add ${{ matrix.target }}
-      - run: cargo build --release --target ${{ matrix.target }}
+      - run: cargo build --release --target ${{ matrix.target }} -p comindly -p comindly-engine
       - name: Smoke test
         run: |
           mkdir -p /tmp/s && printf 'class A:\n  def run(self):\n    pass\n' > /tmp/s/x.py
           ./target/${{ matrix.target }}/release/comindly --help
-          ./target/${{ matrix.target }}/release/comindly index /tmp/s
+          ./target/${{ matrix.target }}/release/comindly index /tmp/s --no-llm
+          ./target/${{ matrix.target }}/release/comindly find A
 
   # Windows is intentionally omitted for now: aws-lc-sys (BoringSSL) + vendored libgit2 on MSVC
   # need extra setup (nasm, protoc, cmake). Add a windows-latest job once those are proven.

@@ -1,5 +1,5 @@
-# comindly in a container: the web UI on port 7878, everything it keeps under /data.
-# `release` (default) compiles inside Docker; `local` packages prebuilt Linux binaries.
+# comindly's engine in a container: the app, API and MCP on port 7878, everything it keeps under
+# /data. `release` (default) compiles inside Docker; `local` packages prebuilt Linux binaries.
 FROM node:24-bookworm-slim AS ui
 WORKDIR /src/ui
 COPY ui/package.json ui/package-lock.json ./
@@ -14,7 +14,8 @@ COPY . .
 COPY --from=ui /src/ui/dist ui/dist
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
-    cargo build --release --locked --features otel && cp target/release/comindly /usr/local/bin/comindly
+    cargo build --release --locked -p comindly -p comindly-engine --features comindly-engine/otel \
+    && cp target/release/comindly target/release/comindly-engine /usr/local/bin/
 
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git openssh-client \
@@ -27,13 +28,12 @@ ENV HOME=/data
 ENV COMINDLY_LOG_FORMAT=json
 VOLUME /data
 EXPOSE 7878
-ENTRYPOINT ["comindly"]
-CMD ["server"]
+ENTRYPOINT ["comindly-engine"]
 
 # A binary built outside Docker for each platform: scripts/docker-local.sh, or the release workflow.
 FROM runtime AS local
 ARG TARGETARCH
-COPY --chmod=755 dist/linux/${TARGETARCH}/comindly /usr/local/bin/comindly
+COPY --chmod=755 dist/linux/${TARGETARCH}/comindly-engine /usr/local/bin/comindly-engine
 
 FROM runtime AS release
-COPY --from=build /usr/local/bin/comindly /usr/local/bin/comindly
+COPY --from=build /usr/local/bin/comindly /usr/local/bin/comindly-engine /usr/local/bin/
