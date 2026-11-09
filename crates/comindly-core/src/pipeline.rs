@@ -527,13 +527,24 @@ async fn enrich_all(
         ));
     }
     if s.enrich {
-        summaries(ctx, &llm, &prompts, dst, symbols, edges, stale, incremental).await?;
+        summaries(
+            ctx,
+            &llm,
+            &prompts,
+            dst,
+            symbols,
+            edges,
+            stale,
+            incremental,
+            roots,
+        )
+        .await?;
     }
     if s.guide {
         style_guides(ctx, &llm, &prompts, dst, symbols, edges, roots).await?;
     }
     if s.flows {
-        walkthroughs(ctx, &llm, &prompts, dst, symbols, edges).await?;
+        walkthroughs(ctx, &llm, &prompts, dst, symbols, edges, roots).await?;
     }
     Ok(())
 }
@@ -613,12 +624,14 @@ async fn summaries(
     edges: &Arc<Vec<Edge>>,
     stale: &HashSet<String>,
     incremental: bool,
+    roots: &[(String, PathBuf)],
 ) -> Result<()> {
     const CHECKPOINT: usize = 500;
     let r = &ctx.report;
     r.step("Enriching symbols (LLM)");
     let (syms, edgs, top) = (symbols.clone(), edges.clone(), ctx.settings.max_enrich);
-    let defs: Vec<Symbol> = blocking(move || {
+    let roots = roots.to_vec();
+    let defs: Vec<(Symbol, String)> = blocking(move || {
         let g = crate::graph::CodeGraph::build(&syms, &edgs);
         let mut defs: Vec<&Symbol> = syms
             .iter()
@@ -639,7 +652,14 @@ async fn summaries(
             let id = s.id.render();
             (std::cmp::Reverse(g.dependents_count(&id)), id)
         });
-        defs.into_iter().take(top).cloned().collect()
+        let (n, mut sources) = (
+            crate::brief::Neighbours::new(&syms, &edgs),
+            crate::brief::Sources::new(&roots),
+        );
+        defs.into_iter()
+            .take(top)
+            .map(|s| (s.clone(), crate::brief::symbol(s, &n, &mut sources)))
+            .collect()
     })
     .await?;
     let prior: HashMap<String, (String, Vec<String>)> = if incremental {
@@ -654,19 +674,22 @@ async fn summaries(
     } else {
         HashMap::new()
     };
-    // A summary is written from the name, signature and path only, so it stays valid while they do.
+    // A summary stays valid while the symbol's name, signature, place and body do.
     let key = |s: &Symbol| {
         fingerprint([
             s.name.clone(),
             s.signature.clone().unwrap_or_default(),
             s.file_path.clone(),
+            s.fingerprint
+                .map(|f| f.body.to_string())
+                .unwrap_or_default(),
         ])
     };
     let stored_keys = read_keys(dst, "enrich_keys").await;
     let mut rows: Vec<TextRow> = Vec::new();
     let mut keys: Vec<(String, String)> = Vec::new();
-    let mut todo: Vec<&Symbol> = Vec::new();
-    for s in &defs {
+    let mut todo: Vec<&(Symbol, String)> = Vec::new();
+    for d @ (s, _) in &defs {
         let (rid, k) = (s.id.render(), key(s));
         let valid = !ctx.settings.rewrite.contains(&Task::Summary)
             && match stored_keys.get(&rid) {
@@ -678,12 +701,12 @@ async fn summaries(
                 rows.push((s.id.clone(), sum.clone(), q.clone()));
                 keys.push((rid, k));
             }
-            None => todo.push(s),
+            None => todo.push(d),
         }
     }
     let reused = rows.len();
     if !todo.is_empty() {
-        r.warn("Summaries send symbol names, signatures and file paths to the LLM.");
+        r.warn("Summaries send each symbol's code, signature and neighbours to the LLM.");
         r.note(format!(
             "{} symbols to summarise ({reused} reused)",
             todo.len()
@@ -695,19 +718,10 @@ async fn summaries(
     for chunk in todo.chunks(CHECKPOINT) {
         let out = run_llm(
             ctx,
-            chunk
-                .iter()
-                .map(|s| {
-                    (
-                        s.name.clone(),
-                        s.signature.clone().unwrap_or_default(),
-                        s.file_path.clone(),
-                    )
-                })
-                .collect(),
-            |(n, sig, path)| {
+            chunk.iter().map(|(_, brief)| brief.clone()).collect(),
+            |brief| {
                 let (llm, prompts) = (llm.clone(), prompts.clone());
-                async move { llm.enrich_symbol(&prompts, &n, &sig, &path).await.ok() }
+                async move { llm.enrich_symbol(&prompts, &brief).await.ok() }
             },
             |d| {
                 done += 1;
@@ -717,7 +731,7 @@ async fn summaries(
         )
         .await;
         let cancelled = out.is_err();
-        for (s, e) in chunk.iter().zip(out.unwrap_or_else(|v| v)) {
+        for ((s, _), e) in chunk.iter().zip(out.unwrap_or_else(|v| v)) {
             if let Some(e) = e {
                 rows.push((s.id.clone(), e.summary, e.queries));
                 keys.push((s.id.render(), key(s)));
@@ -1094,19 +1108,32 @@ async fn walkthroughs(
     dst: &str,
     symbols: &Arc<Vec<Symbol>>,
     edges: &Arc<Vec<Edge>>,
+    roots: &[(String, PathBuf)],
 ) -> Result<()> {
     const CHECKPOINT: usize = 25;
     let r = &ctx.report;
     r.step("Narrating flows (LLM)");
     let (syms, edgs, top) = (symbols.clone(), edges.clone(), ctx.settings.max_flows);
+    // Each step's summary, written just before, tells the walkthrough what the step does.
+    let summaries: HashMap<String, String> = crate::index::read_enrichment(dst)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(id, s, _)| (id.render(), s))
+        .collect();
+    let roots = roots.to_vec();
     let prep: Vec<(GlobalSymbolId, String, String, String)> = blocking(move || {
         let g = crate::graph::CodeGraph::build(&syms, &edgs);
         let by_id: HashMap<String, &Symbol> = syms.iter().map(|s| (s.id.render(), s)).collect();
+        let mut sources = crate::brief::Sources::new(&roots);
         g.entry_points(top)
             .into_iter()
             .filter_map(|(idx, _)| {
                 let s = by_id.get(&g.node(idx).id)?;
-                let trace = g.flow_trace(idx);
+                let trace = crate::brief::trace(&g.flow(idx, 6), &summaries);
+                let trace = crate::brief::flow(trace, s, &mut sources);
                 Some((
                     s.id.clone(),
                     s.name.clone(),
@@ -1121,7 +1148,7 @@ async fn walkthroughs(
         r.note("flows: no multi-step flows found to narrate");
         return Ok(());
     }
-    r.warn("Walkthroughs send call traces to the LLM.");
+    r.warn("Walkthroughs send call traces, step summaries and the entry point's code to the LLM.");
     let key = |name: &str, sig: &str, trace: &str| fingerprint([format!("{name}\0{sig}\0{trace}")]);
     let stored_keys = read_keys(dst, "flow_keys").await;
     let stored: HashMap<String, (String, Vec<String>)> = crate::index::read_flows(dst)

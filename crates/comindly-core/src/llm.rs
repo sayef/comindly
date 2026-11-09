@@ -44,9 +44,9 @@ pub struct LlmClient {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[schemars(crate = "rig::schemars")]
 pub struct Enrichment {
-    /// One concise sentence describing what the code does.
+    /// One sentence, at most 30 words, on what the code does, what for, and its effects.
     pub summary: String,
-    /// Natural-language questions a developer might ask that this code answers.
+    /// Three questions someone would type to find this code, in the domain's words.
     pub queries: Vec<String>,
 }
 
@@ -123,16 +123,9 @@ impl LlmClient {
     }
 
     /// One-line summary of what a symbol does, plus a few natural-language queries it answers.
-    pub async fn enrich_symbol(
-        &self,
-        prompts: &Prompts,
-        name: &str,
-        signature: &str,
-        context: &str,
-    ) -> Result<Enrichment> {
-        let user = format!("Symbol: {name}\nSignature: {signature}\nContext: {context}");
+    pub async fn enrich_symbol(&self, prompts: &Prompts, brief: &str) -> Result<Enrichment> {
         let r: Enrichment = self
-            .complete(Task::Summary, &prompts.system(Task::Summary), &user, 160)
+            .complete(Task::Summary, &prompts.system(Task::Summary), brief, 400)
             .await?;
         Ok(Enrichment {
             summary: r.summary.trim().to_string(),
@@ -177,7 +170,7 @@ impl LlmClient {
     ) -> Result<(String, Vec<String>)> {
         let user = format!("Entry point: {entry}\nSignature: {signature}\nCall trace:\n{trace}");
         let r: Walkthrough = self
-            .complete(Task::Flow, &prompts.system(Task::Flow), &user, 320)
+            .complete(Task::Flow, &prompts.system(Task::Flow), &user, 700)
             .await?;
         Ok((r.narration.trim().to_string(), tidy(r.queries)))
     }
@@ -197,9 +190,9 @@ struct GuideSection {
 #[derive(Deserialize, JsonSchema)]
 #[schemars(crate = "rig::schemars")]
 struct Walkthrough {
-    /// A 2-5 sentence walkthrough naming the actual symbols.
+    /// The walkthrough in 3 to 6 short sentences, at most 120 words, symbols in backticks.
     narration: String,
-    /// Questions a developer might ask about this flow.
+    /// Three questions this flow answers, in the domain's words.
     queries: Vec<String>,
 }
 
@@ -267,9 +260,7 @@ mod tests {
         let e = c
             .enrich_symbol(
                 &Prompts::default(),
-                "AsyncTaskRunner",
-                "class AsyncTaskRunner(BaseTaskRunner)",
-                "acme/database/executors.py",
+                "Symbol: AsyncTaskRunner\nKind: Class in repository acme, acme/database/executors.py:12\nSignature: class AsyncTaskRunner(BaseTaskRunner)",
             )
             .await
             .expect("enrich");
@@ -289,9 +280,7 @@ mod tests {
         let e = c
             .enrich_symbol(
                 &p,
-                "open_pool",
-                "fn open_pool(cfg: &DbConfig) -> Pool",
-                "src/db/pool.rs",
+                "Symbol: open_pool\nKind: Function in repository acme, src/db/pool.rs:3\nSignature: fn open_pool(cfg: &DbConfig) -> Pool",
             )
             .await
             .expect("summary");

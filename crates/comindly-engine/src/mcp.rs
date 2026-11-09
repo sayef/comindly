@@ -1343,15 +1343,23 @@ impl rmcp::ServerHandler for ComindlyServer {
         context: rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> Result<rmcp::model::CallToolResponse, rmcp::ErrorData> {
         let tool = request.name.to_string();
-        let client = context
-            .peer
-            .peer_info()
-            .map(|p| p.client_info.name.clone())
+        let parts = context.extensions.get::<axum::http::request::Parts>();
+        // Through the gateway, its name for the OAuth client; otherwise the client's own, unless the
+        // MCP library filled in its own name for a request without a session.
+        let client = parts
+            .and_then(|p| p.extensions.get::<crate::server::GatewayClient>())
+            .map(|c| c.0.clone())
+            .or_else(|| {
+                let own = rmcp::model::Implementation::from_build_env().name;
+                context
+                    .peer
+                    .peer_info()
+                    .map(|p| p.client_info.name.clone())
+                    .filter(|n| *n != own)
+            })
             .unwrap_or_default();
-        let email = context
-            .extensions
-            .get::<axum::http::request::Parts>()
-            .and_then(|parts| parts.extensions.get::<crate::server::Who>())
+        let email = parts
+            .and_then(|p| p.extensions.get::<crate::server::Who>())
             .map(|w| w.email.clone());
         let start = std::time::Instant::now();
         let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
