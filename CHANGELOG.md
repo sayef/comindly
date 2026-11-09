@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0-beta.7](https://github.com/sayef/comindly/compare/v0.5.0-beta.6...v0.5.0-beta.7) - 2026-11-09
+
 ### Changed
 
 - comindly is now two programs. `comindly` is a small command line that never opens an index itself:
