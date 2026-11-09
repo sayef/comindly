@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0-beta.8](https://github.com/sayef/comindly/compare/v0.5.0-beta.7...v0.5.0-beta.8) - 2026-11-09
+
 ### Changed
 
 - Rewritten built-in prompts for summaries and walkthroughs. A summary says what the code does, its
