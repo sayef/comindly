@@ -9,9 +9,11 @@ An index lives in a folder or in a bucket:
 | Google Cloud Storage | `gs://bucket/comindly` |
 | Azure Blob Storage | `az://container/comindly` |
 
-comindly has no storage settings or sign-in of its own. It reads a bucket with the credentials the
-machine or container already has, the same way that platform's own tools do. Give comindly access
-where it runs; there is nothing to configure in comindly.
+comindly has no storage settings or sign-in of its own. The engine reads a bucket with the credentials
+the machine or container already has, the same way that platform's own tools do. Give comindly access
+where the engine runs; there is nothing to configure in comindly. The local engine gets the environment
+of the command that starts it, so start it from a shell with the credentials (`comindly engine
+start`), or stop it and run the next command from such a shell.
 
 ## Amazon S3
 
@@ -27,7 +29,9 @@ Point comindly at the store's endpoint:
 export AWS_ENDPOINT_URL=http://localhost:9000
 export AWS_ALLOW_HTTP=true             # plain http, for a local store only
 export AWS_ACCESS_KEY_ID=… AWS_SECRET_ACCESS_KEY=… AWS_REGION=us-east-1
-comindly link ../repo-a ../repo-b --index-dir s3://comindly/org
+comindly engine stop                    # so the next command starts it with these
+comindly config set index_dir=s3://comindly/org
+comindly link ../repo-a ../repo-b
 ```
 
 ## Google Cloud Storage

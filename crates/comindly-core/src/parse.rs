@@ -916,7 +916,7 @@ mod tests {
         let out = parse_repo(
             Path::new(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/../../tests/fixtures/org/service-a"
+                "/../comindly-engine/tests/fixtures/org/service-a"
             )),
             "service-a",
         )
@@ -969,7 +969,7 @@ mod tests {
         let kit = parse_repo(
             Path::new(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/../../tests/fixtures/org/ui-kit"
+                "/../comindly-engine/tests/fixtures/org/ui-kit"
             )),
             "ui-kit",
         )
@@ -984,7 +984,7 @@ mod tests {
         let app = parse_repo(
             Path::new(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/../../tests/fixtures/org/web-app"
+                "/../comindly-engine/tests/fixtures/org/web-app"
             )),
             "web-app",
         )

@@ -13,20 +13,7 @@ use crate::model::{Symbol, SymbolKind};
 /// Per-symbol LLM enrichment keyed by rendered symbol id: `(summary, generated_queries)`.
 pub type Enrichment = HashMap<String, (String, Vec<String>)>;
 
-/// One ranked search result.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct SearchHit {
-    pub id: String,
-    pub name: String,
-    pub kind: String,
-    pub repo: String,
-    /// `path:line`.
-    pub location: String,
-    pub signature: Option<String>,
-    pub score: f32,
-    pub deps: usize,
-    pub summary: Option<String>,
-}
+pub use comindly_api::search::SearchHit;
 
 /// Retrieve candidates for `query` through the open `tables` and rank them. `limit` caps results.
 pub async fn hybrid(

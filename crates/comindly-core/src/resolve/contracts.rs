@@ -1,14 +1,14 @@
 //! Contract graph: HTTP routes ↔ clients, queues/topics, buckets and tables, keyed so that
 //! providers and consumers meet across repos. Values resolve through constants, settings, env.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use sqlparser::ast::{ObjectName, Statement, TableFactor, TableWithJoins};
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 
 use super::{Binder, Value};
-use crate::facts::{Args, ContractFact, FileFacts, ImportItem, TemplatePart, ValueExpr};
+use crate::facts::{Args, ContractFact, FileFacts, ImportItem, RefKind, TemplatePart, ValueExpr};
 use crate::model::{
     EdgeKind, GlobalSymbolId, Language, Position, Range, RepoId, Symbol, SymbolKind,
 };
@@ -34,8 +34,7 @@ const PASS_THROUGH: &[&str] = &["Path", "PurePath", "PurePosixPath", "str", "URL
 /// Calls building record-like values whose keyword arguments are attributes.
 const RECORDS: &[&str] = &["AttrDict", "dict", "SimpleNamespace", "Namespace"];
 
-/// The repo-like owner of contract nodes.
-pub const CONTRACTS: &str = "_contracts";
+pub use comindly_api::graph::CONTRACTS;
 
 #[derive(Clone)]
 enum Client {
@@ -290,6 +289,38 @@ fn suffix_match(out: &mut Linked) {
         .retain(|s| !redirect.contains_key(&s.id.render()));
 }
 
+/// Classes in the corpus that extend a framework's router, directly or through each other.
+fn router_classes(cx: &Cx, facts: &[FileFacts]) -> HashSet<String> {
+    let mut out = HashSet::new();
+    for f in facts {
+        for r in f.refs.iter().filter(|r| r.kind == RefKind::Inherits) {
+            let scope =
+                cx.b.parent
+                    .get(&r.from)
+                    .cloned()
+                    .unwrap_or(f.file_id.clone());
+            if cx
+                .external(&r.path, &scope, f)
+                .is_some_and(|e| ROUTERS.contains(&e.as_str()))
+            {
+                out.insert(r.from.clone());
+            }
+        }
+    }
+    let bases = cx.b.bases.borrow();
+    loop {
+        let more: Vec<String> = bases
+            .iter()
+            .filter(|(c, bs)| !out.contains(*c) && bs.iter().any(|b| out.contains(b)))
+            .map(|(c, _)| c.clone())
+            .collect();
+        if more.is_empty() {
+            return out;
+        }
+        out.extend(more);
+    }
+}
+
 struct Cx<'b, 'a> {
     b: &'b Binder<'a>,
     values: HashMap<(&'a str, &'a str), &'a ValueExpr>,
@@ -427,6 +458,7 @@ impl<'b, 'a> Cx<'b, 'a> {
                     .insert((v.scope.as_str(), v.name.as_str()), &v.value);
             }
         }
+        let router_classes = router_classes(&cx, facts);
         for f in facts {
             for c in &f.contracts {
                 let ContractFact::Construct {
@@ -453,8 +485,14 @@ impl<'b, 'a> Cx<'b, 'a> {
                         .insert((scope.clone(), target.clone()), (parent, prefix));
                     continue;
                 }
-                let Some(ext) = cx.external(ctor, scope, f) else {
-                    continue;
+                let ext = match cx.external(ctor, scope, f) {
+                    Some(e) => e,
+                    None => match cx.b.resolve_path(ctor, scope, f, 0) {
+                        Some(Value::Sym(class)) if router_classes.contains(&class) => {
+                            ROUTERS[0].to_string()
+                        }
+                        _ => continue,
+                    },
                 };
                 if ROUTERS.contains(&ext.as_str()) {
                     if let Some(var) = cx.var_of(std::slice::from_ref(target), scope, f) {

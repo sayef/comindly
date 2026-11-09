@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Notice } from "@/components/notice";
 import { TeamSection, Unsaved, useUnsavedWarning } from "@/components/team-settings";
 import { TeamsCard } from "@/components/teams-card";
-import { api, type SettingsChange } from "@/lib/api";
+import { api, type Logging, type SettingsChange } from "@/lib/api";
 
 const field = "flex flex-col gap-1.5 text-sm font-semibold";
 
@@ -154,6 +154,8 @@ export function SettingsPage() {
         </Section>
       )}
 
+      {(!server || me.data?.role === "admin") && <LoggingSection />}
+
       {!server && (
         <Section title="Freshness" description="How often the app, the MCP server and hooks check for a newer index version.">
           <form
@@ -189,6 +191,35 @@ export function SettingsPage() {
         </Section>
       )}
     </div>
+  );
+}
+
+/** Kinds of log lines, switched on and off at once, for platform logs that cost by volume. */
+function LoggingSection() {
+  const qc = useQueryClient();
+  const logging = useQuery({ queryKey: ["logging"], queryFn: api.logging });
+  const save = useMutation({
+    mutationFn: (l: Logging) => api.setLogging(l),
+    meta: { inline: true },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["logging"] }),
+  });
+  const l = logging.data;
+  if (!l) return null;
+  const toggle = (key: keyof Logging, label: string) => (
+    <label className="flex min-h-9 items-center gap-2 text-sm">
+      <input type="checkbox" checked={l[key]} disabled={save.isPending} onChange={(e) => save.mutate({ ...l, [key]: e.target.checked })} />
+      {label}
+    </label>
+  );
+  return (
+    <Section
+      title="Logging"
+      description="Which lines comindly writes to its log. Changes apply at once, without a restart; indexing, warnings and errors are always logged."
+    >
+      {toggle("access", "A line per request (method, path, status, time, who)")}
+      {toggle("tool", "A line per agent tool call (tool, the agent or review bot's own name, who, time)")}
+      {save.error && <Notice ok={false} message={save.error.message} />}
+    </Section>
   );
 }
 

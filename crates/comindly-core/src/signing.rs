@@ -6,19 +6,12 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use anyhow::{bail, Context, Result};
-use serde::{Deserialize, Serialize};
 
 use crate::ledger::Record;
 
 pub const NAMESPACE: &str = "comindly-ledger";
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Signature {
-    /// Public key, `ssh-ed25519 AAAA…`.
-    pub key: String,
-    /// Armored SSHSIG over the record without its signature.
-    pub sig: String,
-}
+pub use comindly_api::ledger::Signature;
 
 /// The bytes a signature covers: the record without its signature.
 pub fn canonical(rec: &Record) -> Vec<u8> {

@@ -1,8 +1,10 @@
 # MCP tools
 
-`comindly serve --index-dir <dir>` speaks MCP over stdio; a team server also serves the tools over HTTP
-at `/mcp` ([Self-hosting](../guides/self-hosting.md#agents)). Results are markdown by default, with
-structured JSON attached (`--format json` for JSON only). How to register the server with an agent:
+`comindly serve` speaks MCP over stdio and forwards to the `/mcp` of the profile in use: the local
+engine, or a team server. A team server also serves the tools over HTTP at `/mcp` for agents that
+connect to it directly ([Self-hosting](../guides/self-hosting.md#agents)); the local engine serves
+`/mcp` too, with its local token as the bearer. Results are markdown by default, with structured JSON
+attached (the team setting `format=json` for JSON only). How to register the server with an agent:
 [Getting started](../getting-started.md#4-connect-your-agent); what to ask:
 [Using comindly with agents](../guides/agents.md).
 

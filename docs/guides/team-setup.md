@@ -5,11 +5,12 @@
 The index lives in **your** object store (or a local path). Nothing is sent anywhere else.
 
 ```bash
-comindly link ../shared-lib ../service-a ../service-b --index-dir s3://your-bucket/comindly --no-llm
+comindly config set index_dir=s3://your-bucket/comindly
+comindly link ../shared-lib ../service-a ../service-b --no-llm
 ```
 
-- Run it from CI on every merge to the default branch (see [CI](ci.md)); `--incremental`
-  re-parses only changed files. Each run is a new, atomically readable version.
+- Run it from CI on every merge to the default branch (see [CI](ci.md)); a re-run re-parses only
+  changed files. Each run is a new, atomically readable version.
 - What gets indexed: symbols and calls/imports across repos (Python, TypeScript/JavaScript, Go,
   Java, Kotlin, Rust; SCIP indexes when present), service contracts (HTTP routes and clients,
   SQS/SNS/S3, SQL tables), Terraform queues/topics/buckets and subscriptions, YAML config values,
@@ -17,12 +18,13 @@ comindly link ../shared-lib ../service-a ../service-b --index-dir s3://your-buck
 - `--no-llm` keeps indexing free and local; drop it to add LLM summaries, flow walkthroughs and
   a style guide (sends code to your configured LLM).
 
-Each developer can run `comindly doctor` to check their setup (index, hooks, keys, signing).
+Each developer can run `comindly doctor` to check their setup (engine, sign-in, index, agent, hooks).
 
 ## Give agents the index
 
 ```bash
-comindly serve --index-dir s3://your-bucket/comindly        # MCP server (add to the agent's config)
+comindly config set index_dir=s3://your-bucket/comindly   # point the local engine at the index
+comindly serve                                            # MCP server (add to the agent's config)
 comindly init-hooks claude                                # Claude Code hooks to paste into settings
 ```
 
@@ -30,16 +32,16 @@ comindly init-hooks claude                                # Claude Code hooks to
   `context_pack`, `preflight`, `contracts`), conventions (`guide`) and the ledger (`why`,
   `remember`, `review`).
 - **Hooks** inject a short digest at session start and the records about a file just before an
-  agent edits it (about 60 ms; a remote index is read from a local mirror refreshed in the
-  background). Other agents: `comindly hook generic pre-edit` prints plain markdown.
+  agent edits it, asked from the engine of the profile in use. Other agents: `comindly hook generic
+  pre-edit` prints plain markdown.
 
 ## Team settings
 
 Settings everyone on an index must share live with the index (`<index>/_team`, a versioned LanceDB
 table), so every member, CI job and agent runs the same: the LLM endpoint and model, the embedding model
 (an index's vectors only work with the model that made them) and which LLM steps run while indexing. They
-are the only place these are set. Your own preferences (`comindly config`) keep what is personal: the
-index location, the repositories your machine indexes, your name and signing.
+are the only place these are set. The engine's own settings (`comindly config`) keep what is personal:
+the index location, the repositories your machine indexes, your name and signing.
 
 The team settings hold no secrets. Anyone who can read the index can see them; access to the index is
 the trust boundary.
@@ -87,7 +89,7 @@ The file is created readable only by you. Set it from the app (Settings → Gene
 
 ```sh
 comindly team key              # prompts for the key; stored under the team's name
-comindly team key --default    # your default key, for any team
+comindly team key --stdin      # reads it from stdin instead
 ```
 
 ```toml
@@ -114,7 +116,7 @@ one instead.
 A colleague needs only the index location and their own access to it ([Storage](storage.md)):
 
 ```sh
-comindly join s3://bucket/comindly
+comindly config set index_dir=s3://bucket/comindly
 ```
 
 or, in the app, **Join an org** on the first screen; this works as soon as
@@ -123,6 +125,13 @@ their own API key as above.
 
 ### With a team server
 
-When the team runs a [comindly server](self-hosting.md), developers sign their command line in once
-with `comindly login https://<server>`; from then on `find`, `why`, `remember` and the other reading and
-recording commands ask the server, with each person's role ([Command line](../reference/cli.md#against-a-server)).
+When the team runs a [comindly server](self-hosting.md), developers add it as a profile once:
+
+```sh
+comindly use https://comindly.example.com acme   # adds it as `acme`, switches to it, signs in
+```
+
+From then on every command, `comindly serve` for agents and the hooks ask the server, with each
+person's role ([Command line](../reference/cli.md#against-a-server)). `comindly use local` switches back
+to the engine on this machine, `comindly use acme` to the server again, and `--use local` runs a single
+command against the other one.

@@ -32,14 +32,14 @@ comindly review <id> archive --reason "…"     # was true, no longer applies (k
 comindly review <id> invalidate --reason "…"  # was wrong (kept, marked invalid)
 comindly review <id> supersede                # or: dispute
 comindly erase <id> --yes                     # remove permanently, with its reviews
-comindly ui --web                             # the same, with a timeline, in the browser
+comindly app                                  # the same, with a timeline, in the app
 ```
 
-Agents use the same actions through the MCP `review` tool; deleting is for people only (CLI and web UI).
+Agents use the same actions through the MCP `review` tool; deleting is for people only (CLI and app).
 Every record and review shows who made it and when: the person's name (config `author_name`, else git
 `user.name`), and for agents also the agent ("claude-code for Ada Lovelace", taken from the MCP client
-or `COMINDLY_AGENT`). Set `record_names = false` to store only the pseudonymous actor id; `comindly erase
---actor` removes everything one person wrote.
+or `COMINDLY_AGENT`). Set `record_names = false` (`comindly config set record_names=false`) to store
+only the pseudonymous actor id.
 
 Nothing is mined from git history or merge requests. Only a person can retire a human-backed record
 (written or confirmed by a person). When an agent archives, invalidates or supersedes one, the record
@@ -55,8 +55,8 @@ are never read.
   `gpg.format=ssh`), every record is signed; with `allowed_signers` configured, a record that was
   edited or signed by an unknown key drops to T0 and is never shown to agents.
 - **People**: records describe code, never people; actors are pseudonymous ids.
-- **Erasure**: `comindly erase <id> | --actor me --yes` deletes records for good, including old
-  snapshot versions.
+- **Erasure**: `comindly erase <id…> --yes` deletes records for good, including old snapshot
+  versions.
 - **Secrets**: records that look like they contain a secret are refused; LLM input is redacted.
 - **Poisoning**: records not written by a person are refused when they read like instructions to
   an agent or carry a shell or script payload; a record planted straight into the store with such

@@ -14,7 +14,7 @@ Secret Manager mounts), so rotating one is a change in your secret store and a r
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `COMINDLY_PUBLIC_URL` | yes | The address members open, e.g. `https://comindly.example.com`. Setting it turns server mode on. |
+| `COMINDLY_PUBLIC_URL` | yes | The address members open, e.g. `https://comindly.example.com`. Setting it makes `comindly-engine` a team server; without it, the engine serves only this machine. |
 | `COMINDLY_ADMIN_EMAILS` | yes | Comma-separated admins. Always admins; they cannot be removed or demoted in the app. |
 | `COMINDLY_ADMIN_TOKEN` | recommended | Your own key, at least 32 random characters: API access as the first admin, and sign-in when email is unavailable. |
 | `COMINDLY_SECRET_KEY` | yes | Encrypts tokens and keys saved in the app and signs every account record, so records added to the bucket by anyone else are ignored. Keep it in your secret store. |
@@ -32,6 +32,7 @@ Secret Manager mounts), so rotating one is a change in your secret store and a r
 | `OPENAI_API_KEY` | optional | LLM key, likewise; `COMINDLY_LLM_BASE_URL` for any OpenAI-compatible endpoint. |
 | `COMINDLY_LOG_FORMAT` | the image sets it | `json`: one JSON event per line (timestamp, level, kind, step, message, `job_id`, `request_id`, counts, tokens, cost) for Datadog, CloudWatch or Loki. Unset: readable lines. |
 | `COMINDLY_LOG_LEVEL` | optional | `error`, `warn`, `info` (default) or `debug`. `debug` adds access lines for `/health` and `/ready`. |
+| `COMINDLY_LOG_SKIP` | optional | Kinds of lines not to log, comma-separated: `access` (one per request) and `tool` (one per MCP tool call, with the client's name). Indexing, warnings and errors stay. Admins switch both in Settings → General → Logging, which takes effect at once and is kept. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | optional | Send traces over OTLP/HTTP (protobuf) to this collector, e.g. `http://otel-collector:4318`: a span per request (request id, method, route, status) and per indexing job (job id, the request that started it). Unset: no export. `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` and `OTEL_EXPORTER_OTLP_HEADERS` work as usual. Built into the container image and the Linux release binaries; a build from source needs `--features otel`. An unreachable collector delays shutdown by at most 2 s. |
 | `OTEL_SERVICE_NAME` | optional | The service name on exported traces; `comindly` by default. |
 | `COMINDLY_TRUST_PROXY` | behind a proxy | `true` when a proxy you run sets `X-Forwarded-For`, so sign-in limits apply per client. |
@@ -154,22 +155,24 @@ Claude desktop app and claude.ai need `https://claude.ai/api/mcp/auth_callback` 
 
 ## The command line
 
-Developers point their `comindly` command at the server:
+Developers add the server to their `comindly` command as a profile:
 
 ```sh
-comindly login https://comindly.example.com
+comindly use https://comindly.example.com acme
 ```
 
 It prints an address and a short code and opens the browser; once signed in there, the member checks
 the code and approves. The command line then has its own personal access token, named after the
-machine, and `find`, `search`, `explore`, `why`, `ledger`, `flow`, `stats`, `contracts`,
-`packages`, `conventions`, `preflight`, `remember`, `review` and `link` ask the server
-([Command line](../reference/cli.md#against-a-server)). Admins can start indexing with `comindly link`
-and follow it in the terminal. `comindly doctor` shows who the command line is signed in as and
-whether its token still works. `comindly logout` revokes that token on the server and forgets the
-sign-in on that machine; when the server cannot be reached, it says so, and the token can be revoked
-under Settings → Your access. The command line's token expires after 90 days; the command line then
-says so and asks to run `comindly login` again.
+machine, and every command asks the server ([Command line](../reference/cli.md#against-a-server)),
+including `comindly serve` for agents and the agent hooks. Admins can start indexing with
+`comindly link` and follow it in the terminal. `comindly use local` switches back to the engine on
+the developer's machine, and `--use acme` runs one command against the server. `comindly doctor`
+shows who the command line is signed in as and whether its token still works. `comindly logout`
+revokes that token on the server and forgets the sign-in on that machine; when the server cannot be
+reached, it says so, and the token can be revoked under Settings → Your access. The command line's
+token expires after 90 days; the command line then says so and asks to run `comindly login` again.
+Someone signed in with an earlier version, through `comindly login <url>`, finds that sign-in as a
+profile called `default`.
 
 ![Approving a command line's sign-in](../assets/screenshots/device.webp#only-light)
 ![Approving a command line's sign-in](../assets/screenshots/device-dark.webp#only-dark)
@@ -192,9 +195,18 @@ filters. Its rows are signed like the rest of the accounts.
 
 ## Deploying
 
-The image runs `comindly server`, which listens on port 7878 on all interfaces
-(`--port` and `--host` change that) and refuses to start without `COMINDLY_PUBLIC_URL`. Give it its
-settings and secrets, access to the index location, and HTTPS in front. Without signing in, `GET /health` answers `200` while the process serves requests,
+The image runs `comindly-engine`, which with `COMINDLY_PUBLIC_URL` set is the team server and listens
+on port 7878 on all interfaces (`--port` and `--host` change that). Outside the image, start it the
+same way:
+
+```sh
+COMINDLY_PUBLIC_URL=https://comindly.example.com COMINDLY_ADMIN_EMAILS=you@example.com \
+  COMINDLY_INDEX_DIR=s3://bucket/comindly COMINDLY_SECRET_KEY_FILE=/run/secrets/secret_key \
+  comindly-engine
+```
+
+Without `COMINDLY_PUBLIC_URL` it serves only 127.0.0.1, without sign-in, as the local engine does.
+Give it its settings and secrets, access to the index location, and HTTPS in front. Without signing in, `GET /health` answers `200` while the process serves requests,
 and `GET /ready` answers `200` once an index is loaded and the accounts can be read (`503` with the
 reason until then).
 
@@ -305,7 +317,7 @@ cookies.
 ## Trying it locally
 
 ```sh
-scripts/docker-local.sh      # builds the Linux binary here, packages comindly:local, makes .secrets/
+scripts/docker-local.sh      # builds the Linux engine here, packages comindly:local, makes .secrets/
 docker compose up
 ```
 

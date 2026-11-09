@@ -461,6 +461,14 @@ export interface Me {
 
 export type SignIn = "email" | "code" | "oidc";
 
+/** Which kinds of lines the engine logs; switched live, kept across restarts on a server. */
+export interface Logging {
+  /** One line per request. */
+  access: boolean;
+  /** One line per MCP tool call, with the client's name. */
+  tool: boolean;
+}
+
 export interface Member {
   email: string;
   role: Role;
@@ -623,6 +631,8 @@ export const api = {
   saveMyTeams: (teams: string[]) => post("/api/v1/me/teams", { teams }),
   saveSettings: (c: SettingsChange) => post("/api/v1/settings", c),
   testIndex: (index_dir: string) => post("/api/v1/settings/test", { index_dir }),
+  logging: () => get<Logging>("/api/v1/logging"),
+  setLogging: (l: Logging) => post("/api/v1/logging", l),
   context: async (focus: string) => {
     const path = `/api/v1/context?focus=${encodeURIComponent(focus)}`;
     const r = await fetch(path);

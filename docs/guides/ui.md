@@ -1,30 +1,26 @@
-# Desktop app, web and terminal UI
+# The app
+
+`comindly app` opens the web app of the profile in use: the local engine's, or a team server's.
 
 ## Desktop app (macOS)
 
-`comindly app [--index-dir …]` opens the UI in its own window, like the Ollama app: the operating
-system's WebKit, no browser and no bundled Chromium. The window shows a loading screen while the
-index loads, then the UI from a private server on a random local port that only this window can
-call. Links to other sites open in your browser.
+On macOS, `comindly app` opens the app in its own window, like the Ollama app: the operating
+system's WebKit, no browser and no bundled Chromium. Links to other sites open in your browser. On
+Linux and Windows, `comindly app` opens the same app in your browser instead.
 
-Started from a terminal, it sees your shell's environment (storage credentials for an index in a bucket). On
-Linux and Windows, `comindly app` opens the same app in your browser instead: the local web UI, or the
-server's address when you use one.
+With the local engine, the window is signed in with the engine's local token. With a team server's
+profile, the window opens that server's app, and the title shows which server. You sign in in the
+window as in a browser, and it remembers the session. A sign-in link from an email opens in your
+browser; to sign the window in with it, copy the link and choose **View → Open Link from Clipboard**
+(<kbd>⌘L</kbd>).
 
-Against a server (after `comindly login <url>`, or with `--server <url>`), the window opens that
-server's app instead, and the title shows which server. You sign in in the window as in a browser,
-and it remembers the session. A sign-in link from an email opens in your browser; to sign the window
-in with it, copy the link and choose **View → Open Link from Clipboard** (<kbd>⌘L</kbd>). `--local`,
-or an explicit `--index-dir`, opens this machine's index as before.
+## In the browser
 
-## Web UI
-
-`comindly ui --web [--port 7878] [--open]` serves the same UI on 127.0.0.1 only. A team server runs
-with `comindly server` instead ([Self-hosting](self-hosting.md)). It prints a link
-with an access token; open it once (or pass `--open`) and the browser keeps the token in a cookie,
-so the plain address works as a bookmark afterwards. Other programs and web pages cannot call the
-UI's API without it. The token is kept in `~/.config/comindly/ui-token`; delete the file to issue a
-new one.
+The local engine serves the app on 127.0.0.1 only, and only with its access token, so other programs
+and web pages cannot call its API. `comindly app` opens it with the token; the browser keeps the token
+in a cookie, so the plain address works as a bookmark afterwards (`comindly engine status` shows it).
+The token is kept in `~/.config/comindly/ui-token`; delete the file to issue a new one. A team server
+serves the same app to its members ([Self-hosting](self-hosting.md)).
 
 The sidebar collapses to icons with the button beside the logo or `⌘ \`, and stays that way in this
 browser; on a phone it opens from the menu button. Filters are part of the address, so a filtered view
@@ -93,10 +89,10 @@ can be bookmarked or shared.
   errors, a live progress bar for the step in progress, and the LLM tokens and cost. **Plain log** shows
   the text to copy into an issue; the request id finds the run in the server's logs. Admins can cancel a
   run or remove it from the queue. The server keeps the last 50 runs.
-- **Approving a command line**: `comindly login` opens `/device?code=…`; the page shows which machine
+- **Approving a command line**: `comindly use <url> <name>` and `comindly login` open `/device?code=…`; the page shows which machine
   asks to act as you and the code its terminal shows, with **Approve** and **Deny**.
 - **Get started**: checks of this setup (as `comindly doctor`), how to register the MCP server with
-  Claude Code, Cursor, Codex or VS Code with this index's path filled in, hooks, and every MCP tool
+  Claude Code, Cursor, Codex or VS Code, hooks, and every MCP tool
   with a question that uses it.
 - **Symbol view**, opened from search, a link or a graph node: the dependency graph (dependents
   on the left, dependencies on the right), blast radius, the LLM summary and flow walkthrough when
@@ -193,18 +189,3 @@ Press <kbd>⌘K</kbd> (<kbd>Ctrl K</kbd>) anywhere to search: by name, and by de
 looking for ("where do we retry HTTP calls"), which uses the same hybrid search as the MCP `search`
 tool. Graphs scroll with the page; pinch or <kbd>⌘</kbd>/<kbd>Ctrl</kbd> and scroll to zoom, drag to
 pan. Dark by default; the header toggles a light theme. Against a read-only index, editing is hidden.
-
-## Terminal UI
-
-`comindly ui` is the compact terminal view: overview, contracts, ledger (with a timeline), explorer and
-conventions. On the ledger tab, <kbd>c</kbd> confirms and <kbd>x</kbd> retracts the selected record;
-<kbd>r</kbd> reads the index again.
-
-Against a server (after `comindly login <url>`, or with `--server <url>`), it shows the server's index
-and names the server in its title. Reviews go to the server under your name; signed in as a viewer,
-the help line says read-only and <kbd>c</kbd>/<kbd>x</kbd> explain why instead of sending a review. The
-server's index changes as it re-indexes and colleagues add records: press <kbd>r</kbd> to fetch it
-again. The whole view is fetched at once, compressed (about 10 KB for the example company; a large
-index is tens of MB), and kept in your cache folder (readable only by you, removed by `comindly
-logout`): starting again or pressing <kbd>r</kbd> downloads it only when it changed. `--local`, or an
-explicit `--index-dir`, uses the index on this machine.

@@ -4,7 +4,7 @@ A contract is a route, queue, topic, bucket or SQL table. comindly finds who pro
 across repositories, so blast radius crosses service boundaries.
 
 ```sh
-comindly contracts --index-dir ./comindly-index      # everything
+comindly contracts                                 # everything
 comindly contracts --type http --dangling          # routes nobody calls, calls nobody serves
 ```
 
@@ -19,6 +19,10 @@ comindly contracts --type http --dangling          # routes nobody calls, calls 
 
 Routes join clients through a base-URL suffix when the client's base path is unknown. Test code is left out:
 contracts describe production topology.
+
+A FastAPI router can be a subclass of `APIRouter` (`class ScopedRouter(APIRouter)`, used as
+`router = ScopedRouter(prefix="/orders")`); its routes are served like those of `APIRouter`, also when
+the subclass lives in another indexed repository. The subclass's name must end in `Router`.
 
 ## Where values come from
 

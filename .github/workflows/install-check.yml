@@ -45,6 +45,9 @@ jobs:
         run: |
           curl -LsSf https://raw.githubusercontent.com/sayef/comindly/main/scripts/install.sh | sh
           "$COMINDLY_BIN_DIR/comindly" --version | grep -F "${COMINDLY_VERSION#v}"
+          # The command line fetches the engine of its own version.
+          "$COMINDLY_BIN_DIR/comindly" engine install
+          "$COMINDLY_BIN_DIR/comindly-engine" --version | grep -F "${COMINDLY_VERSION#v}"
 
   # Skipped when the release's Mac binaries are uploaded by hand after publishing.
   install-macos:
@@ -59,6 +62,9 @@ jobs:
         run: |
           curl -LsSf https://raw.githubusercontent.com/sayef/comindly/main/scripts/install.sh | sh
           "$COMINDLY_BIN_DIR/comindly" --version | grep -F "${COMINDLY_VERSION#v}"
+          # The command line fetches the engine of its own version.
+          "$COMINDLY_BIN_DIR/comindly" engine install
+          "$COMINDLY_BIN_DIR/comindly-engine" --version | grep -F "${COMINDLY_VERSION#v}"
 
   cargo-install:
     name: cargo install (Rust 1.95)
@@ -70,5 +76,6 @@ jobs:
         env:
           TAG: ${{ inputs.tag }}
         run: |
-          cargo install comindly --locked --version "${TAG#v}"
+          cargo install comindly comindly-engine --locked --version "${TAG#v}"
           comindly --version | grep -F "${TAG#v}"
+          comindly-engine --version | grep -F "${TAG#v}"

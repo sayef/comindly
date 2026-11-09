@@ -12,6 +12,7 @@ documentation = "https://docs.rs/comindly-core"
 readme = "README.md"
 
 [dependencies]
+comindly-api.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true

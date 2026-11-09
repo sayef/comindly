@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the Linux binary on this machine (all cores, incremental) and package it as comindly:local.
+# Build the Linux engine on this machine (all cores, incremental) and package it as comindly:local.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -12,9 +12,9 @@ esac
 
 (cd ui && npm ci --silent && npm run build --silent)
 CARGO_PROFILE_RELEASE_LTO=false CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 \
-  cargo zigbuild --release --locked --target "$target.2.36" -j "${JOBS:-6}"
+  cargo zigbuild --release --locked --target "$target.2.36" -p comindly-engine -j "${JOBS:-6}"
 mkdir -p "dist/linux/$docker_arch"
-cp "target/$target/release/comindly" "dist/linux/$docker_arch/comindly"
+cp "target/$target/release/comindly-engine" "dist/linux/$docker_arch/comindly-engine"
 docker build --target local -t comindly:local .
 
 # Random secrets for the local stack, made once and never committed.

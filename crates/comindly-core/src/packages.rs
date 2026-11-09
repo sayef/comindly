@@ -475,7 +475,7 @@ mod tests {
     fn fixture_module_names() {
         let common = RepoPackages::discover(Path::new(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../tests/fixtures/org/pkg-common"
+            "/../comindly-engine/tests/fixtures/org/pkg-common"
         )));
         assert_eq!(
             common.module_names("src/acme/common/http.py", &Language::Python),
@@ -488,7 +488,7 @@ mod tests {
 
         let svc = RepoPackages::discover(Path::new(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../tests/fixtures/org/service-a"
+            "/../comindly-engine/tests/fixtures/org/service-a"
         )));
         assert_eq!(
             svc.module_names("service_a/users.py", &Language::Python),
@@ -497,7 +497,7 @@ mod tests {
 
         let kit = RepoPackages::discover(Path::new(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../tests/fixtures/org/ui-kit"
+            "/../comindly-engine/tests/fixtures/org/ui-kit"
         )));
         assert_eq!(
             kit.module_names("src/index.ts", &Language::TypeScript),

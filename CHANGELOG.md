@@ -6,6 +6,72 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- comindly is now two programs. `comindly` is a small command line that never opens an index itself:
+  every command asks an engine's `/api/v1`. `comindly-engine` holds the index, the ledger, search,
+  the web app, `/api/v1`, `/mcp` and indexing jobs.
+- Which engine a command asks is a profile: `local`, the engine on this machine, or a team server.
+  The local engine is started in the background when a command needs it, and installed beside
+  `comindly` on first use when missing.
+- `comindly login` and `comindly logout` act on the current profile; `login` takes no address. A
+  sign-in from an earlier version becomes a profile called `default`. Profiles are kept in
+  `~/.config/comindly/profiles.toml`, readable only by you.
+- `comindly-engine` without `COMINDLY_PUBLIC_URL` serves this machine on 127.0.0.1 (port 7879, or a
+  free one) with a local token; with it, it is the team server on 0.0.0.0:7878, as `comindly server`
+  was. The container image's entrypoint is `comindly-engine`.
+- `comindly serve` is MCP over stdio forwarded to the current profile's `/mcp`, so an agent set up
+  with it works against the local engine and against a server.
+- `comindly config` holds the engine's settings: `index_dir`, `author_name`, `record_names` and
+  `cache_ttl_secs`. `comindly config set index_dir=s3://bucket/comindly` points the local engine at a
+  bucket index.
+- `comindly index` and `comindly link` with folders work on the local engine only and index the folders
+  as they are; which steps run is up to the team settings, and `--no-llm` skips the LLM steps.
+- `comindly app` opens the current profile's web app: its own window on macOS, the browser elsewhere.
+- `install.sh` installs the command line; `COMINDLY_ENGINE=1` installs the engine as well, for offline
+  machines and CI. Releases ship `comindly-<target>.tar.gz` and `comindly-engine-<target>.tar.gz`.
+- Crates: `comindly-api` holds the wire types of `/api/v1` and a typed client (feature `client`);
+  `comindly-server` is renamed `comindly-engine` and has the engine binary; `comindly` is the command
+  line only and no longer a library. Library users depend on `comindly-engine`.
+
+### Added
+
+- `comindly use`: list the profiles, switch with `comindly use local` or `comindly use <name>`, and add a
+  team server with `comindly use <url> <name>`, which also signs in. `--use <name>` on any command, or
+  `COMINDLY_PROFILE`, picks a profile for one command or shell.
+- `comindly engine start|stop|status|install` manages the local engine; `install` downloads
+  `comindly-engine` of the same version from the GitHub release.
+- The local engine serves `/mcp`, with its local token as the bearer.
+- Agent hooks ask the current profile's engine, so they work signed in to a team server too. They never
+  start the local engine and add nothing when no answer comes within 3 seconds.
+- Every MCP tool call is logged (`kind: tool`) with the tool, the client's own name (as an agent or a
+  review bot introduces itself), the signed-in email, the outcome and the time it took.
+- Settings → General → Logging switches request lines and tool-call lines on and off at once, without
+  a restart; a server keeps the choice. `COMINDLY_LOG_SKIP` (e.g. `access,tool`) sets where it starts.
+- `GET /api/v1/answer/hook` and `GET /api/v1/answer/guide`; `POST /api/v1/index` takes `paths` on the
+  local engine.
+
+### Removed
+
+- The terminal UI and `comindly ui`; `comindly app` opens the web app.
+- `comindly server` (run `comindly-engine` with `COMINDLY_PUBLIC_URL`), `comindly join` (use
+  `comindly use`, or `comindly config set index_dir=` for a shared index) and `comindly cache`.
+- `--index-dir`, `--local` and `--server` on commands: use `comindly config set index_dir=` or `--use`.
+- The per-step flags on `index` and `link` (`--embed`, `--no-embed`, `--enrich`, `--flows`, `--guide`,
+  `--scip`, `--incremental`, `--since`): the team settings decide.
+- `ledger --compact` (the engine folds new records in after each index run), `erase --actor`,
+  `team key --default`, `config import|export|history|path` and `prompts save --sections`.
+- `comindly eval graph` moved to `comindly-engine eval`.
+
+### Fixed
+
+- `comindly doctor` reports the profile, the local engine (installed, running, the same version), the
+  sign-in, the index, whether an agent has comindly's tools and whether Claude Code hooks are set,
+  instead of warning about an empty index on this machine when you use a server.
+- A FastAPI router built from a subclass of `APIRouter` (`router = ScopedRouter(prefix=...)`) serves
+  its routes, also when the subclass lives in another indexed repository. The subclass's name must end
+  in `Router`.
+
 ## [0.5.0-beta.6](https://github.com/sayef/comindly/compare/v0.5.0-beta.5...v0.5.0-beta.6) - 2026-11-07
 
 ### Fixed

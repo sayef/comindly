@@ -1,14 +1,12 @@
 //! What the apps show of an index — graph, contracts, ledger, conventions, dependencies — read once.
 
-use std::borrow::Cow;
-
-use serde::{Deserialize, Serialize};
-
 use crate::conventions::Convention;
 use crate::graph::{CodeGraph, ContractView};
 use crate::ledger::Entry;
 use crate::manifests::InternalDep;
 use crate::model::{Edge, Symbol};
+
+pub use comindly_api::view::View;
 
 /// Everything the UI shows, loaded from an index.
 pub struct Data {
@@ -96,17 +94,4 @@ impl Data {
     pub fn load_or_empty(root: &str, verifier: &crate::signing::Verifier) -> Data {
         Data::load(root, verifier).unwrap_or_else(|e| Data::empty(root, format!("{e:#}")))
     }
-}
-
-/// The parts of [`Data`] a server sends a client; the client rebuilds the rest.
-#[derive(Serialize, Deserialize)]
-pub struct View<'a> {
-    pub symbols: Cow<'a, [Symbol]>,
-    pub edges: Cow<'a, [Edge]>,
-    /// Ledger entries with the status and trust the server derived.
-    pub entries: Cow<'a, [Entry]>,
-    pub conventions: Cow<'a, [Convention]>,
-    pub manual: Cow<'a, [crate::conventions::Manual]>,
-    pub deps: Cow<'a, [InternalDep]>,
-    pub problem: Option<String>,
 }

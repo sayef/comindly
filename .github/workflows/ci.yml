@@ -93,4 +93,5 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --all-features ${{ matrix.jobs && format('-j {0}', matrix.jobs) || '' }}
       # Resolver and contract quality on the fixture org (also asserted by tests/eval_graph.rs).
-      - run: cargo run -q -- eval graph
+      - run: cargo run -q -p comindly-engine -- eval
+        working-directory: crates/comindly-engine
