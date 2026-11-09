@@ -121,12 +121,12 @@ pub(super) async fn try_draft(
                         .ok_or_else(|| anyhow::anyhow!("nothing indexed to try it on"))?,
                 };
                 let node = g.node(i);
-                let path = node
-                    .location
-                    .rsplit_once(':')
-                    .map_or(&*node.location, |(p, _)| p);
-                let sig = node.signature.clone().unwrap_or_default();
-                let e = llm.enrich_symbol(&draft, &node.name, &sig, path).await?;
+                let sym = symbol(&s, &node.id)?;
+                let mut sources = sources_for(&s, sym).await;
+                let n = crate::brief::Neighbours::new(&s.data.symbols, &s.data.edges);
+                let e = llm
+                    .enrich_symbol(&draft, &crate::brief::symbol(sym, &n, &mut sources))
+                    .await?;
                 Ok(api::PromptTried {
                     sample: format!("{} ({})", node.name, node.repo),
                     output: answer(&e.summary, &e.queries),
@@ -144,8 +144,21 @@ pub(super) async fn try_draft(
                 };
                 let node = g.node(i);
                 let sig = node.signature.clone().unwrap_or_default();
+                let summaries = extras
+                    .enrichment
+                    .iter()
+                    .map(|(id, (text, _))| (id.clone(), text.clone()))
+                    .collect();
+                let sym = symbol(&s, &node.id)?;
+                let mut sources = sources_for(&s, sym).await;
+                let trace = crate::brief::trace(&g.flow(i, 6), &summaries);
                 let (text, q) = llm
-                    .narrate_flow(&draft, &node.name, &sig, &g.flow_trace(i))
+                    .narrate_flow(
+                        &draft,
+                        &node.name,
+                        &sig,
+                        &crate::brief::flow(trace, sym, &mut sources),
+                    )
                     .await?;
                 Ok(api::PromptTried {
                     sample: format!("{} ({})", node.name, node.repo),
@@ -169,6 +182,27 @@ pub(super) async fn try_draft(
         }
     };
     run.await.map(Json).map_err(fail)
+}
+
+fn symbol<'s>(s: &'s super::Session, id: &str) -> anyhow::Result<&'s crate::model::Symbol> {
+    s.data
+        .symbols
+        .iter()
+        .find(|x| x.id.render() == id)
+        .ok_or_else(|| anyhow::anyhow!("no such symbol in the index"))
+}
+
+/// The symbol's file as the index stores it, so a try sees the code indexing sees.
+async fn sources_for(s: &super::Session, sym: &crate::model::Symbol) -> crate::brief::Sources {
+    let mut sources = crate::brief::Sources::new(&[]);
+    if let Some(uri) = super::graph_uri(s) {
+        let text = crate::index::read_source(&uri, &sym.repo.0, &sym.file_path)
+            .await
+            .ok()
+            .flatten();
+        sources.insert(&sym.repo.0, &sym.file_path, text);
+    }
+    sources
 }
 
 fn answer(text: &str, queries: &[String]) -> String {

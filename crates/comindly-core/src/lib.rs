@@ -6,6 +6,7 @@
 //! `embed` and `search` → `llm` (summaries, walkthroughs) → `ledger` (why code is as it is).
 
 pub mod answers;
+pub mod brief;
 pub mod checks;
 pub mod configvals;
 pub mod context;

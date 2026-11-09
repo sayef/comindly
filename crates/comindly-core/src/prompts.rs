@@ -214,13 +214,13 @@ pub async fn save_as(
 fn example(task: Task) -> &'static str {
     match task {
         Task::Summary => {
-            r#"{"summary": "Opens a pooled database connection from the service settings.", "queries": ["How do I connect to the database?", "Where is the connection pool created?", "Which settings does the pool read?"]}"#
+            r#"{"summary": "Serves POST /orders: validates the cart, writes the order to the orders table and publishes order-created, returning the new order id.", "queries": ["where do we create an order from a cart?", "what happens when a customer checks out?", "which service publishes order-created?"]}"#
         }
         Task::Guide => {
             r#"{"observed": true, "rules": ["**MUST** name functions in `snake_case`, as in `src/db/pool.rs` `open_pool`."]}"#
         }
         Task::Flow => {
-            r#"{"narration": "`handle_order` validates the order with `validate`, then stores it with `save`.", "queries": ["What happens when an order arrives?", "Where is an order validated?", "Where is an order saved?"]}"#
+            r#"{"narration": "A checkout calls POST /orders in orders, served by `create_order`. It checks the cart with `validate_cart` and stores the order with `OrderRepo.save`. `publish_order_created` then sends order-created, which `charge_order` in payments consumes to charge the card. The caller gets the new order id; an invalid cart returns 422 before anything is stored.", "queries": ["what happens when a customer checks out?", "where does order-created end up?", "which service charges the card for an order?"]}"#
         }
     }
 }

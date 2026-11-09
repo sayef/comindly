@@ -6,6 +6,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Rewritten built-in prompts for summaries and walkthroughs. A summary says what the code does, its
+  effects (what it reads, writes, calls and publishes) and the contract it serves, in one sentence;
+  its questions are phrased the way people search. A walkthrough follows one request or message from
+  its trigger, across services, to its outcome. Saved prompt versions are flagged as based on an
+  older built-in.
+- Summaries see each symbol's code (up to 60 lines), docstring, class, callers, callees and
+  contracts, not only its name, signature and path; walkthroughs see each step's summary and the
+  entry point's code. Both send this to the LLM.
+- A summary is written again when its code changes, not only when its name, signature or path does.
+- The style guide prompt keeps at most 8 rules per section and leaves out what a formatter or linter
+  already enforces.
+
 ### Fixed
 
 - Tool-call log lines name the app behind a gateway call (`x-forwarded-client`, e.g. "Claude Code"),
