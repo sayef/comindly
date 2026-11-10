@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0-beta.9](https://github.com/sayef/comindly/compare/v0.5.0-beta.8...v0.5.0-beta.9) - 2026-11-10
+
 ### Changed
 
 - The index button has one box per LLM step (summaries, walkthroughs, style guides), each starting
