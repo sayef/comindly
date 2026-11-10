@@ -534,6 +534,48 @@ fn anchor_status(
     }
 }
 
+/// How alike two records must read (mean cosine of whole text and title) to count as a likely repeat.
+pub const LOOKALIKE: f32 = 0.75;
+
+/// Standing records that `new` may repeat: they share a symbol or file with it and read alike.
+pub fn lookalikes<'e>(
+    entries: &'e [Entry],
+    new: &Record,
+    embedder: &crate::embed::Embedder,
+) -> Vec<(&'e Entry, f32)> {
+    let near: Vec<&Entry> = entries
+        .iter()
+        .filter(|e| !matches!(e.status, Status::Superseded | Status::Retracted))
+        .filter(|e| {
+            e.record.anchors.iter().any(|a| {
+                new.anchors
+                    .iter()
+                    .any(|b| a.symbol == b.symbol || (a.repo == b.repo && a.path == b.path))
+            })
+        })
+        .collect();
+    if near.is_empty() {
+        return Vec::new();
+    }
+    let records = std::iter::once(new).chain(near.iter().map(|e| &e.record));
+    let whole = embedder.embed(
+        &records
+            .clone()
+            .map(|r| format!("{}\n{}", r.title, r.body))
+            .collect::<Vec<_>>(),
+    );
+    let title = embedder.embed(&records.map(|r| r.title.clone()).collect::<Vec<_>>());
+    let cos = |v: &[Vec<f32>], i: usize| v[0].iter().zip(&v[i]).map(|(a, b)| a * b).sum::<f32>();
+    let mut hits: Vec<(&Entry, f32)> = near
+        .into_iter()
+        .enumerate()
+        .map(|(i, e)| (e, (cos(&whole, i + 1) + cos(&title, i + 1)) / 2.0))
+        .filter(|(_, sim)| *sim >= LOOKALIKE)
+        .collect();
+    hits.sort_by(|a, b| b.1.total_cmp(&a.1));
+    hits
+}
+
 /// Entries whose anchors map to any of `symbols` (current ids), most relevant first.
 pub fn about<'e>(entries: &'e [Entry], symbols: &[String]) -> Vec<&'e Entry> {
     let mut v: Vec<&Entry> = entries
@@ -846,6 +888,42 @@ mod tests {
         };
         assert_eq!(trust(""), Trust::T1);
         assert_eq!(trust("Ada agreed: seen in prod"), Trust::T3);
+    }
+
+    #[test]
+    fn a_repeat_on_the_same_code_is_held_back() {
+        let Ok(embedder) = crate::embed::Embedder::load(crate::embed::DEFAULT_MODEL) else {
+            return;
+        };
+        let s = sym("charge", 1, 1);
+        let note = |kind, title: &str, body: &str| {
+            let mut r = Record::new(kind, title, vec![Anchor::of(&s)], prov(AuthorKind::Agent));
+            r.body = body.into();
+            r
+        };
+        let standing = vec![
+            note(Kind::Decision, "Refunds are stored as negative charges in the charges table, not in a refunds table", "A refund is a charge row with a negative amount and refund_of pointing at the original charge, so the balance is one sum over charges. A separate refunds table was dropped because every report had to union both tables."),
+            note(Kind::Constraint, "A charge and its ledger entry must be written in the same transaction", "Nothing in the schema ties a charge to its ledger entry; charge() writes both in one transaction and other writers must do the same."),
+        ];
+        let entries = derive(
+            &standing,
+            std::slice::from_ref(&s),
+            &crate::signing::Verifier::default(),
+        );
+        let titles = |r: &Record| -> Vec<String> {
+            lookalikes(&entries, r, &embedder)
+                .iter()
+                .map(|(e, _)| e.record.title.clone())
+                .collect()
+        };
+        let repeat = note(Kind::Decision, "Refunds are kept as negative charge rows rather than a separate refunds table", "Each refund is a charge with a negative amount referencing the original charge via refund_of; a refunds table was rejected because reports had to union two tables.");
+        assert_eq!(titles(&repeat), vec![standing[0].title.clone()]);
+        let other = note(
+            Kind::Gotcha,
+            "Charges in a currency the provider does not support fail only at settlement",
+            "The provider accepts the charge and rejects it in the nightly settlement file.",
+        );
+        assert!(titles(&other).is_empty());
     }
 
     #[test]

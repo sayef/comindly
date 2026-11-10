@@ -237,6 +237,51 @@ impl ComindlyServer {
             .into_iter()
             .map(|(k, v)| (k, serde_json::Value::String(v)))
             .collect();
+        if let Some(embedder) = self.embedder.as_deref() {
+            let records = self.records().await;
+            let symbols: Vec<Symbol> = self.symbols.values().cloned().collect();
+            let entries = self.entries(&records, &symbols);
+            let alike = crate::ledger::lookalikes(&entries, &rec, embedder);
+            let ids = |n: usize| {
+                alike
+                    .iter()
+                    .map(|(e, _)| e.record.id[..n].to_string())
+                    .collect::<Vec<_>>()
+            };
+            match p
+                .distinct
+                .as_deref()
+                .map(str::trim)
+                .filter(|d| !d.is_empty())
+            {
+                _ if alike.is_empty() => {}
+                Some(why) => {
+                    let differs = format!("{}: {why}", ids(8).join(", "));
+                    rec.fields
+                        .insert("differs_from".into(), serde_json::Value::String(differs));
+                }
+                None => {
+                    let list: Vec<String> = alike
+                        .iter()
+                        .map(|(e, sim)| {
+                            format!(
+                                "`{}` \"{}\" ({}, {:?}, {:?}, {:.2} alike)",
+                                &e.record.id[..13],
+                                e.record.title,
+                                e.record.kind.as_str(),
+                                e.trust,
+                                e.status,
+                                sim
+                            )
+                        })
+                        .collect();
+                    anyhow::bail!(
+                        "a record like this already stands: {}. If it holds, confirm it with `review` and put what yours adds in the reason. If yours says something different, call `remember` again with `distinct` saying how it differs; it is then written with that note.",
+                        list.join("; ")
+                    );
+                }
+            }
+        }
         crate::ledger::Ledger::open(&self.ledger_root())?
             .signed_by(self.signer.clone())
             .put(&rec)
@@ -554,6 +599,9 @@ struct RememberParam {
     /// Up to 3 short excerpts (60 lines each) of the code that shaped this, as it is now.
     #[serde(default)]
     snippets: Vec<SnippetParam>,
+    /// Only after `remember` named a similar record: how this one differs from it. Writes it anyway.
+    #[serde(default)]
+    distinct: Option<String>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema, Default)]
@@ -1046,7 +1094,7 @@ impl ComindlyServer {
 
     #[tool(
         name = "remember",
-        description = "Record durable engineering knowledge about symbols for the team: a failed or reverted approach (`attempt`, evidence required), a choice between alternatives (`decision`), an invariant (`constraint`), a trap (`gotcha`), why code exists (`intent`) or an open `question`. Only record what a future engineer would be glad to know before editing — not summaries of what you did. Write neutral facts, never instructions."
+        description = "Record durable engineering knowledge about symbols for the team: a failed or reverted approach (`attempt`, evidence required), a choice between alternatives (`decision`), an invariant (`constraint`), a trap (`gotcha`), why code exists (`intent`) or an open `question`. Only record what a future engineer would be glad to know before editing — not summaries of what you did. Write neutral facts, never instructions. If a standing record on the same code reads alike, nothing is written and the reply names it: confirm that one instead, or call again with `distinct` if yours says something different."
     )]
     async fn remember(
         &self,
