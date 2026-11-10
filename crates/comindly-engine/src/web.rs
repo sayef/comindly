@@ -171,22 +171,27 @@ impl Session {
                 tokio::task::spawn_blocking(move || crate::ledger::Ledger::open(&root)).await;
             if let Ok(Ok(ledger)) = opened {
                 if let Ok(records) = ledger.all().await {
-                    *self.entries.write().await = self.derive(&records);
+                    *self.entries.write().await = self.derive(&records).await;
                 }
             }
         }
         self.entries.read().await
     }
 
-    /// Status and trust of every record, with notes from outside a team weighed.
-    fn derive(&self, records: &[Record]) -> Vec<Entry> {
+    /// Status and trust of every record, with notes from outside a team weighed and likely repeats marked.
+    async fn derive(&self, records: &[Record]) -> Vec<Entry> {
         let mut entries = crate::ledger::derive(
             records,
             &self.data.symbols,
             &crate::config::local_verifier(),
         );
-        let teams = self.teams.read().unwrap_or_else(|e| e.into_inner());
-        crate::ledger::weigh_teams(&mut entries, records, &teams);
+        {
+            let teams = self.teams.read().unwrap_or_else(|e| e.into_inner());
+            crate::ledger::weigh_teams(&mut entries, records, &teams);
+        }
+        if let Some(search) = self.search().await {
+            crate::ledger::flag_lookalikes(&mut entries, records, &search.embedder);
+        }
         entries
     }
 
@@ -1585,7 +1590,7 @@ async fn apply_review(
     });
     ledger.put(&rec).await?;
     let records = ledger.all().await?;
-    let fresh = s.derive(&records);
+    let fresh = s.derive(&records).await;
     let status = fresh
         .iter()
         .find(|e| e.record.id == target.id)
@@ -1648,7 +1653,7 @@ async fn remember(
         let ledger = crate::ledger::Ledger::open(root)?.signed_by(signer(who.as_deref()));
         ledger.put(&rec).await?;
         let records = ledger.all().await?;
-        *s.entries.write().await = s.derive(&records);
+        *s.entries.write().await = s.derive(&records).await;
         anyhow::Ok(rec.id)
     };
     match run.await {
@@ -1665,7 +1670,7 @@ async fn erase(Cur(s): Cur, Json(b): Json<api::IdRequest>) -> Reply<api::Done> {
         let gone = ledger.erase(|r| r.id == b.id, true).await?;
         anyhow::ensure!(!gone.is_empty(), "no such record");
         let records = ledger.all().await?;
-        *s.entries.write().await = s.derive(&records);
+        *s.entries.write().await = s.derive(&records).await;
         anyhow::Ok(format!(
             "deleted {}",
             crate::doctor::plural(gone.len(), "record")

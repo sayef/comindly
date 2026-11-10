@@ -103,6 +103,9 @@ impl ComindlyServer {
     ) -> Vec<crate::ledger::Entry> {
         let mut e = crate::ledger::derive(records, symbols, &crate::config::local_verifier());
         crate::ledger::weigh_teams(&mut e, records, &self.team_settings());
+        if let Some(embedder) = self.embedder.as_deref() {
+            crate::ledger::flag_lookalikes(&mut e, records, embedder);
+        }
         e
     }
 

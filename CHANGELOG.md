@@ -9,6 +9,11 @@ All notable changes to this project are documented here. The format follows
 ### Added
 
 - An agent's `remember` is held back when a standing record on the same code reads alike: the reply names it, so the agent confirms that one, or writes its own with `distinct` saying how it differs (kept as "Differs from").
+- A record that reads like an earlier one on the same code waits in Needs review as a possible repeat, with **Same as earlier** (archive it) and **Keep both** (confirm it); `why` shows it too.
+
+### Fixed
+
+- A record a person confirmed after its code changed shows where the code is now, not where it was written.
 
 ## [0.5.0-beta.10](https://github.com/sayef/comindly/compare/v0.5.0-beta.9...v0.5.0-beta.10) - 2026-11-10
 

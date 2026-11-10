@@ -18,8 +18,8 @@ pub use comindly_api::ledger::{
 };
 
 pub use comindly_api::ledger::{
-    Anchor, AuthorKind, Entry, Identity, Kind, Provenance, Record, Relation, RelationKind, Snippet,
-    Status, Trust,
+    Alike, Anchor, AuthorKind, Entry, Identity, Kind, Provenance, Record, Relation, RelationKind,
+    Snippet, Status, Trust,
 };
 
 /// An object store rooted at `<index_root>/<sub>` (local directory or remote prefix).
@@ -445,6 +445,8 @@ pub fn derive(
                 history,
                 retired,
                 outside: Vec::new(),
+                vouched: vouched.map(|x| x.anchors.clone()).unwrap_or_default(),
+                alike: None,
             }
         })
         .collect()
@@ -537,6 +539,34 @@ fn anchor_status(
 /// How alike two records must read (mean cosine of whole text and title) to count as a likely repeat.
 pub const LOOKALIKE: f32 = 0.75;
 
+fn standing(e: &Entry) -> bool {
+    !matches!(e.status, Status::Superseded | Status::Retracted)
+}
+
+fn same_code(a: &Record, b: &Record) -> bool {
+    a.anchors.iter().any(|x| {
+        b.anchors
+            .iter()
+            .any(|y| x.symbol == y.symbol || (x.repo == y.repo && x.path == y.path))
+    })
+}
+
+/// Pairwise likeness of records: mean cosine of whole text and of title.
+fn likeness(
+    records: &[&Record],
+    embedder: &crate::embed::Embedder,
+) -> impl Fn(usize, usize) -> f32 {
+    let whole = embedder.embed(
+        &records
+            .iter()
+            .map(|r| format!("{}\n{}", r.title, r.body))
+            .collect::<Vec<_>>(),
+    );
+    let title = embedder.embed(&records.iter().map(|r| r.title.clone()).collect::<Vec<_>>());
+    let cos = |v: &[f32], w: &[f32]| v.iter().zip(w).map(|(a, b)| a * b).sum::<f32>();
+    move |i, j| (cos(&whole[i], &whole[j]) + cos(&title[i], &title[j])) / 2.0
+}
+
 /// Standing records that `new` may repeat: they share a symbol or file with it and read alike.
 pub fn lookalikes<'e>(
     entries: &'e [Entry],
@@ -545,35 +575,75 @@ pub fn lookalikes<'e>(
 ) -> Vec<(&'e Entry, f32)> {
     let near: Vec<&Entry> = entries
         .iter()
-        .filter(|e| !matches!(e.status, Status::Superseded | Status::Retracted))
-        .filter(|e| {
-            e.record.anchors.iter().any(|a| {
-                new.anchors
-                    .iter()
-                    .any(|b| a.symbol == b.symbol || (a.repo == b.repo && a.path == b.path))
-            })
-        })
+        .filter(|e| standing(e) && same_code(&e.record, new))
         .collect();
     if near.is_empty() {
         return Vec::new();
     }
-    let records = std::iter::once(new).chain(near.iter().map(|e| &e.record));
-    let whole = embedder.embed(
-        &records
-            .clone()
-            .map(|r| format!("{}\n{}", r.title, r.body))
-            .collect::<Vec<_>>(),
-    );
-    let title = embedder.embed(&records.map(|r| r.title.clone()).collect::<Vec<_>>());
-    let cos = |v: &[Vec<f32>], i: usize| v[0].iter().zip(&v[i]).map(|(a, b)| a * b).sum::<f32>();
+    let records: Vec<&Record> = std::iter::once(new)
+        .chain(near.iter().map(|e| &e.record))
+        .collect();
+    let sim = likeness(&records, embedder);
     let mut hits: Vec<(&Entry, f32)> = near
         .into_iter()
         .enumerate()
-        .map(|(i, e)| (e, (cos(&whole, i + 1) + cos(&title, i + 1)) / 2.0))
-        .filter(|(_, sim)| *sim >= LOOKALIKE)
+        .map(|(i, e)| (e, sim(0, i + 1)))
+        .filter(|(_, s)| *s >= LOOKALIKE)
         .collect();
     hits.sort_by(|a, b| b.1.total_cmp(&a.1));
     hits
+}
+
+/// Mark each standing record that reads like an older one on the same code, unless its writer
+/// said how it differs or a person confirmed it.
+pub fn flag_lookalikes(
+    entries: &mut [Entry],
+    records: &[Record],
+    embedder: &crate::embed::Embedder,
+) {
+    let by_id: HashMap<&str, &Record> = records.iter().map(|r| (r.id.as_str(), r)).collect();
+    let kept = |e: &Entry| {
+        e.record.fields.contains_key("differs_from")
+            || e.related.iter().any(|(k, id)| {
+                *k == RelationKind::Confirms
+                    && by_id
+                        .get(id.as_str())
+                        .is_some_and(|x| persons_confirmation(x))
+            })
+    };
+    let open: Vec<usize> = (0..entries.len())
+        .filter(|&i| standing(&entries[i]))
+        .collect();
+    let pairs: Vec<(usize, usize)> = open
+        .iter()
+        .flat_map(|&i| open.iter().map(move |&j| (i, j)))
+        .filter(|&(i, j)| {
+            let (a, b) = (&entries[i].record, &entries[j].record);
+            (b.created.as_str(), b.id.as_str()) < (a.created.as_str(), a.id.as_str())
+                && !kept(&entries[i])
+                && same_code(a, b)
+        })
+        .collect();
+    if pairs.is_empty() {
+        return;
+    }
+    let records: Vec<&Record> = entries.iter().map(|e| &e.record).collect();
+    let sim = likeness(&records, embedder);
+    let mut best: HashMap<usize, (usize, f32)> = HashMap::new();
+    for (i, j) in pairs {
+        let s = sim(i, j);
+        if s >= LOOKALIKE && best.get(&i).is_none_or(|b| s > b.1) {
+            best.insert(i, (j, s));
+        }
+    }
+    for (i, (j, score)) in best {
+        let older = &entries[j].record;
+        entries[i].alike = Some(Alike {
+            id: older.id.clone(),
+            title: older.title.clone(),
+            score,
+        });
+    }
 }
 
 /// Entries whose anchors map to any of `symbols` (current ids), most relevant first.
@@ -676,8 +746,8 @@ pub fn markdown(title: &str, entries: &[&Entry]) -> String {
         if !r.evidence.is_empty() {
             o.push_str(&format!("- evidence: {}\n", r.evidence.join(", ")));
         }
-        let at: Vec<String> = r
-            .anchors
+        let at: Vec<String> = e
+            .anchors()
             .iter()
             .map(|a| {
                 format!(
@@ -718,6 +788,14 @@ pub fn markdown(title: &str, entries: &[&Entry]) -> String {
                 h.at.get(..10).unwrap_or(&h.at)
             ));
         }
+        if let Some(a) = &e.alike {
+            o.push_str(&format!(
+                "- possible repeat of `{}` \"{}\" ({:.2} alike) — a person should keep both or archive this one\n",
+                a.id.get(..13).unwrap_or(&a.id),
+                a.title,
+                a.score
+            ));
+        }
         if challenged(e) {
             let by: Vec<String> = e
                 .related
@@ -750,8 +828,8 @@ fn at_commit(c: &Option<String>) -> String {
 /// One compact line for embedding in other tool results.
 pub fn line(e: &Entry) -> String {
     let r = &e.record;
-    let at = r
-        .anchors
+    let at = e
+        .anchors()
         .first()
         .map(|a| format!(" — about `{}` ({}:{})", a.name, a.path, a.line))
         .unwrap_or_default();
@@ -924,6 +1002,31 @@ mod tests {
             "The provider accepts the charge and rejects it in the nightly settlement file.",
         );
         assert!(titles(&other).is_empty());
+
+        let mut repeat = repeat;
+        repeat.created = "2999-01-01T00:00:00Z".into();
+        let flagged = |records: &[Record]| -> Vec<Option<String>> {
+            let mut e = derive(
+                records,
+                std::slice::from_ref(&s),
+                &crate::signing::Verifier::default(),
+            );
+            flag_lookalikes(&mut e, records, &embedder);
+            e.into_iter().map(|e| e.alike.map(|a| a.id)).collect()
+        };
+        let mut records = standing.clone();
+        records.push(repeat.clone());
+        assert_eq!(
+            flagged(&records),
+            vec![None, None, Some(standing[0].id.clone())]
+        );
+        records.push(Record::relation(
+            RelationKind::Confirms,
+            &repeat,
+            "",
+            prov(AuthorKind::Human),
+        ));
+        assert_eq!(flagged(&records), vec![None, None, None]);
     }
 
     #[test]
