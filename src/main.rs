@@ -117,7 +117,8 @@ pub enum Cmd {
         on: Vec<String>,
         #[arg(long)]
         title: String,
-        #[arg(long, default_value = "")]
+        /// Why it holds, or what it is in favour of
+        #[arg(long)]
         body: String,
         /// When a future reader needs this
         #[arg(long)]
@@ -137,7 +138,8 @@ pub enum Cmd {
     Review {
         id: String,
         action: String,
-        #[arg(long, default_value = "")]
+        /// Why: what you checked, or why it changed
+        #[arg(long)]
         reason: String,
     },
     /// The ledger with derived status; `--inbox` shows only what needs review

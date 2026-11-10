@@ -352,14 +352,28 @@ pub fn derive(
                 })
                 .collect();
             let confirmed_by_human = revs.iter().any(|x| persons_confirmation(x));
-            // Only a person can retire a human-backed record; a machine's attempt is a challenge.
-            let human_backed = r.provenance.author == AuthorKind::Human || confirmed_by_human;
-            // The latest confirmation that counts vouches for the code it saw.
-            let vouched = revs.iter().rev().find(|x| {
+            let is_confirm = |x: &Record| {
                 x.relation.as_ref().map(|rel| rel.kind) == Some(RelationKind::Confirms)
-                    && !x.anchors.is_empty()
-                    && (persons_confirmation(x) || !human_backed)
-            });
+            };
+            // The latest confirmation vouches for the code it saw.
+            let vouched = revs
+                .iter()
+                .rev()
+                .find(|x| is_confirm(x) && !x.anchors.is_empty());
+            let mut confirmers: Vec<String> = Vec::new();
+            let mut seen = vec![person_key(&r.provenance)];
+            for x in revs.iter().filter(|x| is_confirm(x)) {
+                let key = person_key(&x.provenance);
+                if !seen.contains(&key) {
+                    seen.push(key);
+                    confirmers.push(
+                        x.provenance
+                            .name
+                            .clone()
+                            .unwrap_or_else(|| "someone".into()),
+                    );
+                }
+            }
             let mut status = Status::Active;
             let mut current = Vec::new();
             for a in vouched.map_or(&r.anchors, |x| &x.anchors) {
@@ -367,22 +381,14 @@ pub fn derive(
                 current.extend(now);
                 status = status.max(st);
             }
-            let counts = |kind: RelationKind| {
-                rels.iter()
-                    .any(|(k, _, a)| *k == kind && (*a == AuthorKind::Human || !human_backed))
-            };
+            let counts = |kind: RelationKind| rels.iter().any(|(k, _, _)| *k == kind);
             if counts(RelationKind::Supersedes) {
                 status = Status::Superseded;
             }
             if counts(RelationKind::Retracts) {
                 status = Status::Retracted;
             }
-            let counted = |x: &Record| {
-                let k = x.relation.as_ref().map(|rel| rel.kind);
-                matches!(k, Some(RelationKind::Confirms | RelationKind::Disputes))
-                    || x.provenance.author == AuthorKind::Human
-                    || !human_backed
-            };
+            let counted = |_: &Record| true;
             let retire = |x: &Record| {
                 x.fields
                     .get("retire")
@@ -445,6 +451,7 @@ pub fn derive(
                 history,
                 retired,
                 outside: Vec::new(),
+                confirmers,
                 vouched: vouched.map(|x| x.anchors.clone()).unwrap_or_default(),
                 alike: None,
             }
@@ -497,20 +504,21 @@ fn from_label(e: &Entry) -> String {
     }
 }
 
-/// A person's confirmation, made in person or by their agent passing on what they said.
+/// A person's confirmation: made in person, or by their agent passing on what they said.
 fn persons_confirmation(x: &Record) -> bool {
-    let Some(rel) = x
-        .relation
-        .as_ref()
-        .filter(|r| r.kind == RelationKind::Confirms)
-    else {
+    if x.relation.as_ref().map(|r| r.kind) != Some(RelationKind::Confirms) {
         return false;
-    };
+    }
     match x.provenance.author {
         AuthorKind::Human => true,
-        AuthorKind::Agent => !x.title.starts_with(&format!("{:?}: ", rel.kind)),
+        AuthorKind::Agent => x.fields.get("from_person").and_then(|v| v.as_bool()) == Some(true),
         _ => false,
     }
+}
+
+/// Who stands behind a record or review: the person, or the actor when names are not kept.
+fn person_key(p: &Provenance) -> String {
+    p.name.clone().unwrap_or_else(|| p.actor.clone())
 }
 
 fn anchor_status(
@@ -656,11 +664,13 @@ pub fn about<'e>(entries: &'e [Entry], symbols: &[String]) -> Vec<&'e Entry> {
         (
             a.status,
             std::cmp::Reverse(a.trust),
+            std::cmp::Reverse(a.confirmers.len()),
             kind_rank(a.record.kind),
         )
             .cmp(&(
                 b.status,
                 std::cmp::Reverse(b.trust),
+                std::cmp::Reverse(b.confirmers.len()),
                 kind_rank(b.record.kind),
             ))
             .then(b.record.id.cmp(&a.record.id))
@@ -687,7 +697,7 @@ pub fn inbox(entries: &[Entry], only_attention: bool) -> Vec<&Entry> {
             !only_attention
                 || challenged(e)
                 || matches!(e.status, Status::Stale | Status::Orphaned)
-                || (e.trust < Trust::T3 && matches!(e.status, Status::Active | Status::Moved))
+                || e.alike.is_some()
         })
         .collect();
     v.sort_by_key(|e| (attention(e.status), e.trust));
@@ -786,6 +796,13 @@ pub fn markdown(title: &str, entries: &[&Entry]) -> String {
                 h.action,
                 h.who,
                 h.at.get(..10).unwrap_or(&h.at)
+            ));
+        }
+        if !e.confirmers.is_empty() {
+            o.push_str(&format!(
+                "- also confirmed by {} ({})\n",
+                e.confirmers.join(", "),
+                e.confirmers.len()
             ));
         }
         if let Some(a) = &e.alike {
@@ -916,7 +933,7 @@ mod tests {
     }
 
     #[test]
-    fn a_persons_confirmation_vouches_for_the_changed_code() {
+    fn a_confirmation_vouches_for_the_changed_code() {
         let (old, new) = (sym("check", 10, 7), sym("check", 11, 7));
         let note = Record::new(
             Kind::Decision,
@@ -937,35 +954,51 @@ mod tests {
             )[0]
             .status
         };
-        assert_eq!(status(review(AuthorKind::Agent, "")), Status::Stale);
+        assert!(Record::review(&note, "confirm", " ", prov(AuthorKind::Agent)).is_err());
         assert_eq!(
-            status(review(AuthorKind::Agent, "Ada: still how we do it")),
+            status(review(
+                AuthorKind::Agent,
+                "checked: the new check still runs first"
+            )),
             Status::Active
         );
-        assert_eq!(status(review(AuthorKind::Human, "")), Status::Active);
+        assert_eq!(
+            status(review(AuthorKind::Human, "still how we do it")),
+            Status::Active
+        );
     }
 
     #[test]
-    fn an_agent_confirms_for_its_person_only_with_their_words() {
+    fn agents_add_weight_and_a_persons_word_makes_it_the_rule() {
         let s = sym("charge", 1, 1);
+        let agent_of = |name: &str| Provenance {
+            name: Some(name.into()),
+            ..prov(AuthorKind::Agent)
+        };
         let note = Record::new(
             Kind::Gotcha,
             "retries double charge",
             vec![Anchor::of(&s)],
-            prov(AuthorKind::Agent),
+            agent_of("Ada"),
         );
-        let trust = |reason| {
-            let confirm =
-                Record::review(&note, "confirm", reason, prov(AuthorKind::Agent)).unwrap();
-            derive(
-                &[note.clone(), confirm],
+        let confirm = |who: &str| {
+            Record::review(&note, "confirm", "checked: still matches", agent_of(who)).unwrap()
+        };
+        let weigh = |extra: Vec<Record>| {
+            let records: Vec<Record> = std::iter::once(note.clone()).chain(extra).collect();
+            let e = derive(
+                &records,
                 std::slice::from_ref(&s),
                 &crate::signing::Verifier::default(),
-            )[0]
-            .trust
+            );
+            (e[0].trust, e[0].confirmers.clone())
         };
-        assert_eq!(trust(""), Trust::T1);
-        assert_eq!(trust("Ada agreed: seen in prod"), Trust::T3);
+        assert_eq!(weigh(vec![confirm("Ada")]), (Trust::T1, vec![]));
+        assert_eq!(
+            weigh(vec![confirm("Bea"), confirm("Bea"), confirm("Cy")]),
+            (Trust::T1, vec!["Bea".to_string(), "Cy".to_string()])
+        );
+        assert_eq!(weigh(vec![confirm("Bea").from_person()]).0, Trust::T3);
     }
 
     #[test]
@@ -1370,7 +1403,7 @@ mod tests {
     }
 
     #[test]
-    fn machines_cannot_retire_human_records() {
+    fn agents_retire_records_and_disputes_wait_for_a_look() {
         let s = sym("f", 1, 1);
         let human = Record::new(
             Kind::Constraint,
@@ -1385,29 +1418,49 @@ mod tests {
             prov(AuthorKind::Agent),
         );
         agent.evidence.push("commit:abc".into());
-        let hit_human = Record::relation(
-            RelationKind::Supersedes,
+        let dispute = Record::relation(
+            RelationKind::Disputes,
             &human,
-            "",
-            prov(AuthorKind::Distilled),
+            "owner scoping moved to the gateway",
+            prov(AuthorKind::Agent),
         );
-        let hit_agent =
-            Record::relation(RelationKind::Retracts, &agent, "", prov(AuthorKind::Agent));
+        let hit_agent = Record::relation(
+            RelationKind::Retracts,
+            &agent,
+            "ids became per tenant",
+            prov(AuthorKind::Agent),
+        );
         let e = derive(
-            &[human, agent, hit_human, hit_agent],
+            &[human.clone(), agent, dispute, hit_agent],
             std::slice::from_ref(&s),
             &crate::signing::Verifier::default(),
         );
-        assert_eq!(e[0].status, Status::Active, "human record stands");
-        assert!(challenged(&e[0]));
         assert_eq!(
-            e[1].status,
-            Status::Retracted,
-            "machine records can be retired by machines"
+            e[0].status,
+            Status::Active,
+            "a dispute alone retires nothing"
         );
+        assert!(challenged(&e[0]));
+        assert_eq!(e[1].status, Status::Retracted);
         assert_eq!(
             inbox(&e, true).first().map(|x| x.record.title.as_str()),
             Some("scope by owner")
+        );
+        let superseded = Record::relation(
+            RelationKind::Supersedes,
+            &human,
+            "replaced by per-tenant scoping, agreed with Ada",
+            prov(AuthorKind::Agent),
+        );
+        let e = derive(
+            &[human, superseded],
+            std::slice::from_ref(&s),
+            &crate::signing::Verifier::default(),
+        );
+        assert_eq!(
+            e[0].status,
+            Status::Superseded,
+            "an agent acts for its person"
         );
     }
 
@@ -1450,11 +1503,8 @@ mod tests {
         );
 
         assert_eq!(e[0].by, "Ada");
-        assert_eq!(
-            e[0].status,
-            Status::Active,
-            "an agent cannot invalidate a person's record"
-        );
+        assert_eq!(e[0].status, Status::Retracted);
+        assert_eq!(e[0].retired.as_deref(), Some("wrong"));
         let h = &e[0].history[0];
         assert_eq!(
             (
@@ -1467,7 +1517,7 @@ mod tests {
                 "invalidate",
                 "claude-code for Ada",
                 "row lock removed",
-                false
+                true
             )
         );
 

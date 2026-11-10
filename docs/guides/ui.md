@@ -38,8 +38,8 @@ can be bookmarked or shared.
   repositories that depend on each other in a circle.
 - **Contracts**: every route, queue, topic, bucket and table with its providers and consumers, filtered
   by type, by whether both sides are indexed, and by name.
-- **Ledger**: records that need review (challenged, stale or orphaned, and unconfirmed machine
-  records) and the full timeline. **Add record** writes a new one under your name; each record shows
+- **Ledger**: records that need a look (disputed, stale or orphaned, and likely repeats) and the
+  full timeline. **Add record** writes a new one under your name; each record shows
   who wrote it and its review history; confirm, archive, invalidate or delete it. The symbol view
   has **Add to the ledger** with that symbol filled in.
 - **Flows**: where work starts and where it travels. Each flow follows calls and then crosses

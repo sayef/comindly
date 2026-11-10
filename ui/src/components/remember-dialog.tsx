@@ -118,7 +118,7 @@ export function RememberDialog({ open, onOpenChange, about = [] }: { open: boole
     },
   });
   const needsEvidence = kind === "attempt";
-  const ready = title.trim() && on.length > 0 && (!needsEvidence || evidence.trim());
+  const ready = title.trim() && body.trim() && on.length > 0 && (!needsEvidence || evidence.trim());
   const written = [title, body, trigger, evidence, extra].some((v) => v.trim());
   const [leaving, setLeaving] = useState(false);
   useEffect(() => {
@@ -176,8 +176,8 @@ export function RememberDialog({ open, onOpenChange, about = [] }: { open: boole
             <Input value={title} maxLength={160} onChange={(e) => setTitle(e.target.value)} placeholder="One neutral, factual line…" />
           </label>
           <label className={label}>
-            Details <span className="font-normal text-muted-foreground">optional</span>
-            <textarea className={area} value={body} onChange={(e) => setBody(e.target.value)} />
+            Why
+            <textarea className={area} value={body} onChange={(e) => setBody(e.target.value)} placeholder="The reasoning other agents need: why it holds, or what it is in favour of" />
           </label>
           {kind === "decision" && (
             <label className={label}>

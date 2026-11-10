@@ -27,11 +27,14 @@ const TRUST: Record<string, [string, string]> = {
   T4: ["enforced", "A constraint whose check passes on the current code"],
   T3: ["confirmed", "Written or confirmed by a person"],
   T2: ["with evidence", "Written by an agent, citing evidence (a commit, test or MR)"],
-  T1: ["unverified", "Written by an agent without evidence; a person should confirm it"],
+  T1: ["agent-written", "Written by an agent without evidence; confirmations add weight"],
   T0: ["untrusted", "Failed signature or unsafe content: agents never see it"],
 };
 
-const PROMPT: Record<"archive" | "invalidate", [string, string]> = {
+type Asked = "confirm" | "archive" | "invalidate";
+
+const PROMPT: Record<Asked, [string, string]> = {
+  confirm: ["Confirm", "What did you check?"],
   archive: ["Archive", "What changed? It was true, but no longer applies."],
   invalidate: ["Invalidate", "Why is it wrong?"],
 };
@@ -71,7 +74,7 @@ export function EntryCard({
   const r = entry.record;
   const qc = useQueryClient();
   const { admin } = useAccess();
-  const [asking, setAsking] = useState<"archive" | "invalidate" | null>(null);
+  const [asking, setAsking] = useState<Asked | null>(null);
   const [reason, setReason] = useState("");
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["ledger"] });
@@ -92,7 +95,7 @@ export function EntryCard({
   const due = attention(entry) < 3;
   const fields = Object.entries(r.fields).filter(([k]) => k !== "at");
   const status = statusLabel(entry);
-  const ghostFirst = !asking && !(due && !retired);
+  const ghostFirst = !asking && !((due || entry.trust !== "T3") && !retired);
   const anchors = entry.vouched?.length ? entry.vouched : r.anchors;
   const alike = !retired ? entry.alike : undefined;
   const about = anchors.length > 0 && (
@@ -135,6 +138,11 @@ export function EntryCard({
             Possible repeat
           </Badge>
         )}
+        {entry.confirmers?.length ? (
+          <Badge variant="outline" title={`Also confirmed by ${entry.confirmers.join(", ")}`}>
+            Confirmed by {entry.confirmers.length} {entry.confirmers.length === 1 ? "other" : "others"}
+          </Badge>
+        ) : null}
         {challenged && (
           <Badge variant="warning" title="An agent proposed retiring this; a person decides">
             Challenged
@@ -228,8 +236,8 @@ export function EntryCard({
             <>
               {!retired && (
                 <>
-                  {due && (
-                    <Button size="sm" variant="outline" onClick={() => review.mutate({ action: "confirm" })} loading={review.isPending} title={alike ? "Still true, and says something the earlier record does not" : "Still true"}>
+                  {(due || entry.trust !== "T3") && (
+                    <Button size="sm" variant="outline" onClick={() => setAsking("confirm")} title={alike ? "Still true, and says something the earlier record does not" : "Still true"}>
                       <Check /> {alike ? "Keep both" : "Confirm"}
                     </Button>
                   )}

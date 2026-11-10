@@ -128,7 +128,7 @@ fn a_server_sends_the_terminal_ui_what_the_index_holds() {
         reqwest::Client::new()
             .post(format!("{base}/api/v1/review"))
             .header("cookie", &cookie)
-            .json(&serde_json::json!({"id": id, "action": "confirm"}))
+            .json(&serde_json::json!({"id": id, "action": "confirm", "reason": "still holds"}))
             .send()
             .await?
             .json()

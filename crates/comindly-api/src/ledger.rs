@@ -257,12 +257,23 @@ impl Record {
         let (kind, retire) = review_action(action).with_context(|| {
             format!("unknown action `{action}`: confirm, archive, invalidate, supersede, dispute or retract")
         })?;
+        anyhow::ensure!(
+            !reason.trim().is_empty(),
+            "say why: every change to the ledger carries a reason other agents can read"
+        );
         let mut r = Record::relation(kind, target, reason, provenance);
         if let Some(why) = retire {
             r.fields
                 .insert("retire".into(), serde_json::Value::String(why.into()));
         }
         Ok(r)
+    }
+
+    /// Mark a review an agent makes on its person's explicit say.
+    pub fn from_person(mut self) -> Record {
+        self.fields
+            .insert("from_person".into(), serde_json::Value::Bool(true));
+        self
     }
 
     /// A confirmation vouches for the code as indexed now: it takes the target's anchors from `now`.
@@ -408,6 +419,9 @@ pub struct Entry {
     /// The writer's teams, when the note is about another team's code and none of its members confirmed it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub outside: Vec<String>,
+    /// People other than the writer who confirmed it, themselves or through their agents.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub confirmers: Vec<String>,
     /// Where the code is now, when a person's confirmation re-anchored the record.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub vouched: Vec<Anchor>,

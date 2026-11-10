@@ -22,23 +22,26 @@ Where records come from:
 | An agent | MCP `remember` (an attempt needs evidence) | T1–T2 |
 
 Hooks and the ledger sections of `zoom`/`context_pack` only use records at **T2 or higher**
-(`why` shows everything, with its trust badge). Proposals (T1) wait in the inbox until a person
-confirms them:
+(`why` shows everything, with its trust badge). Every record and every change to one carries a
+reason (a record's body, a review's `--reason`), so the next agent or person can see why and fix it:
 
 ```bash
-comindly ledger --inbox                       # stale, orphaned and unconfirmed records
-comindly review <id> confirm                  # still true
+comindly ledger --inbox                       # stale, orphaned, disputed and likely repeats
+comindly review <id> confirm --reason "…"     # still true: what you checked
 comindly review <id> archive --reason "…"     # was true, no longer applies (kept as history)
 comindly review <id> invalidate --reason "…"  # was wrong (kept, marked invalid)
-comindly review <id> supersede                # or: dispute
+comindly review <id> supersede --reason "…"   # or: dispute
 comindly erase <id> --yes                     # remove permanently, with its reviews
 comindly app                                  # the same, with a timeline, in the app
 ```
 
-Agents use the same actions through the MCP `review` tool; deleting is for people only (CLI and app).
-An agent's `confirm` with a reason counts as its person's: the agent confirms when you say a record
-holds and passes on what you said. A confirmation also vouches for the code as indexed then, so a stale
-record turns active again until that code changes.
+Agents use the same actions through the MCP `review` tool, with their person's OK for recording,
+archiving, invalidating and superseding; deleting is for people only (CLI and app). Agents are asked
+to confirm a record whenever they relied on it and checked it still matches the code: each person whose
+agent (or who themselves) confirmed it counts once, and cards show how many. A record a person wrote
+or confirmed, in the app or through their agent with `from_person`, is the team's rule (T3). A
+confirmation also vouches for the code as indexed then, so a stale record turns active again until
+that code changes. Reviewing in the app is optional.
 
 Before an agent's record is written, it is compared with the standing records on the same symbols or
 files. If one reads alike, nothing is written and the agent is pointed at it: it confirms that record
@@ -52,10 +55,8 @@ Every record and review shows who made it and when: the person's name (config `a
 or `COMINDLY_AGENT`). Set `record_names = false` (`comindly config set record_names=false`) to store
 only the pseudonymous actor id.
 
-Nothing is mined from git history or merge requests. Only a person can retire a human-backed record
-(written or confirmed by a person). When an agent archives, invalidates or supersedes one, the record
-stays active, is marked **challenged**, and goes to the top of the inbox. Machine-written records can
-be retired by machines.
+Nothing is mined from git history or merge requests. A `dispute` leaves the record active and marks
+it **challenged** at the top of the inbox until someone archives, invalidates or confirms it.
 
 Ten minutes a week of review is what keeps the ledger worth reading. Agent session transcripts
 are never read.
