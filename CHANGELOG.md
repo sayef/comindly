@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0-beta.12](https://github.com/sayef/comindly/compare/v0.5.0-beta.11...v0.5.0-beta.12) - 2026-11-10
+
 ### Changed
 
 - Agents act on any record with their person's OK, including retiring one a person wrote; a `dispute` still waits for a look.
