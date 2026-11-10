@@ -36,6 +36,8 @@ const PROMPT: Record<"archive" | "invalidate", [string, string]> = {
   invalidate: ["Invalidate", "Why is it wrong?"],
 };
 
+export const trustLabel = (t: string) => sentence(TRUST[t]?.[0] ?? t);
+
 export function TrustBadge({ trust }: { trust: string }) {
   const [label, hint] = TRUST[trust] ?? [trust, ""];
   const high = trust === "T3" || trust === "T4";
@@ -49,7 +51,7 @@ export function TrustBadge({ trust }: { trust: string }) {
 // Statuses that are the normal case and need no badge.
 const ROUTINE = new Set(["active", "moved"]);
 
-function statusLabel(e: Entry) {
+export function statusLabel(e: Entry) {
   if (e.retired === "outdated") return "archived";
   if (e.retired === "wrong") return "invalid";
   return e.status;
