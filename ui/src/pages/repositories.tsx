@@ -32,7 +32,7 @@ import { ConfirmButton } from "@/components/confirm";
 import { ago, bytes, compact, date } from "@/lib/utils";
 import { useAbort } from "@/lib/abort";
 import { useAccess } from "@/lib/me";
-import { ApiError, api, type NeedsToken, pickFolder, type ScanHit, type TeamSettings } from "@/lib/api";
+import { ApiError, api, type NeedsToken, pickFolder, type PromptTaskName, type ScanHit, type TeamSettings } from "@/lib/api";
 import { useTeams } from "@/lib/teams";
 
 const field = "flex flex-col gap-1.5 text-sm font-semibold";
@@ -212,9 +212,17 @@ function ScanDialog({ open, onOpenChange, indexed }: { open: boolean; onOpenChan
   );
 }
 
+/** The LLM steps an index can run, with what each sends to the LLM. */
+const STEPS: { task: PromptTaskName; label: string; setting: "enrich" | "flows" | "guide" }[] = [
+  { task: "summary", label: "Summaries (sends each symbol's code)", setting: "enrich" },
+  { task: "flow", label: "Walkthroughs (sends call traces and code)", setting: "flows" },
+  { task: "guide", label: "Style guides (sends code samples and config)", setting: "guide" },
+];
+
 function IndexPanel({ unlisted }: { unlisted: string[] }) {
   const qc = useQueryClient();
-  const [llm, setLlm] = useState(false);
+  // Each step starts as the team settings have it, once they are known; null until changed here.
+  const [picked, setPicked] = useState<PromptTaskName[] | null>(null);
   const [drop, setDrop] = useState(false);
   const job = useQuery({
     queryKey: ["index-job"],
@@ -222,7 +230,7 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
     refetchInterval: (q) => (q.state.data?.running || q.state.data?.queued?.length ? 1000 : false),
   });
   const start = useMutation({
-    mutationFn: () => api.startIndex(llm, drop),
+    mutationFn: () => api.startIndex(steps.length > 0, drop, [], steps),
     meta: { inline: true },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["index-job"] }),
   });
@@ -247,6 +255,8 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
   }, [j, seen, qc]);
   const watch = useQuery({ queryKey: ["index-watch"], queryFn: api.indexWatch, refetchInterval: 30_000 });
   const team = useQuery({ queryKey: ["team"], queryFn: api.team });
+  const steps = picked ?? (team.data ? STEPS.filter((s) => team.data.settings[s.setting] ?? true).map((s) => s.task) : []);
+  const llm = steps.length > 0;
   const [minutes, setMinutes] = useState<string | null>(null);
   const auto = useMutation({
     mutationFn: (s: Pick<TeamSettings, "auto_index" | "auto_index_llm" | "auto_index_minutes">) =>
@@ -263,7 +273,7 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
           <h2 className="text-sm font-semibold">Index</h2>
           <CardDescription className="mt-1 text-sm">
             Fetches each repository's default branch into comindly's own checkout, then rebuilds the index. Unchanged code reuses its
-            embeddings{llm ? " and summaries" : ""}.
+            embeddings{llm ? " and what the LLM wrote" : ""}.
           </CardDescription>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-2">
@@ -283,10 +293,19 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
               {!start.isPending && <Play />} {j?.running ? "Queue next" : "Index now"}
             </Button>
           </div>
-          <label className="flex min-h-8 items-center gap-1.5 text-xs text-muted-foreground">
-            <input type="checkbox" checked={llm} onChange={(e) => setLlm(e.target.checked)} />
-            LLM summaries (sends code to the LLM)
-          </label>
+          <fieldset className="flex flex-col items-start gap-0.5">
+            <legend className="sr-only">LLM steps for this index</legend>
+            {STEPS.map((s) => (
+              <label key={s.task} className="flex min-h-8 items-center gap-1.5 text-xs text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={steps.includes(s.task)}
+                  onChange={(e) => setPicked(e.target.checked ? [...steps, s.task] : steps.filter((t) => t !== s.task))}
+                />
+                {s.label}
+              </label>
+            ))}
+          </fieldset>
           {unlisted.length > 0 && (
             <label className="flex items-center gap-1.5 text-xs text-warning">
               <input type="checkbox" checked={drop} onChange={(e) => setDrop(e.target.checked)} />

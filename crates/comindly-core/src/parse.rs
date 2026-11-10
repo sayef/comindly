@@ -401,7 +401,7 @@ fn define(
         repo: ctx.repo.clone(),
         file_path: ctx.rel_str.to_string(),
         range: node_range(&node),
-        signature: Some(first_line(node, ctx.source)),
+        signature: Some(signature(node, ctx.source)),
         docstring: None,
         fingerprint: Some(fingerprint(node, ctx.source, ctx.lang)),
     });
@@ -503,7 +503,7 @@ fn variable(node: Node, name: &str, scope: &Scope, ctx: &Ctx, out: &mut ParseOut
         repo: ctx.repo.clone(),
         file_path: ctx.rel_str.to_string(),
         range: node_range(&node),
-        signature: Some(first_line(node, ctx.source)),
+        signature: Some(signature(node, ctx.source)),
         docstring: None,
         fingerprint: Some(fingerprint(node, ctx.source, ctx.lang)),
     });
@@ -798,14 +798,41 @@ fn children(node: Node) -> Vec<Node> {
     node.children(&mut cursor).collect()
 }
 
-fn first_line(node: Node, src: &[u8]) -> String {
-    node.utf8_text(src)
-        .unwrap_or("")
-        .lines()
-        .next()
-        .unwrap_or("")
-        .trim_end()
-        .to_string()
+/// Everything before a definition's body, on one line, so parameters spread over lines are kept.
+fn signature(node: Node, src: &[u8]) -> String {
+    const MAX: usize = 400;
+    let end = node
+        .child_by_field_name("body")
+        .map_or(node.end_byte(), |b| b.start_byte());
+    let head = std::str::from_utf8(&src[node.start_byte()..end]).unwrap_or("");
+    let head = if node.child_by_field_name("body").is_some() {
+        head
+    } else {
+        head.lines().next().unwrap_or("")
+    };
+    let mut sig = head.split_whitespace().collect::<Vec<_>>().join(" ");
+    for (from, to) in [
+        ("( ", "("),
+        ("[ ", "["),
+        (" )", ")"),
+        (" ]", "]"),
+        (",)", ")"),
+        (",]", "]"),
+    ] {
+        sig = sig.replace(from, to);
+    }
+    sig = sig
+        .trim_end_matches(|c: char| c == '{' || c == ':' || c.is_whitespace())
+        .to_string();
+    if sig.len() > MAX {
+        let cut = (0..=MAX)
+            .rev()
+            .find(|&i| sig.is_char_boundary(i))
+            .unwrap_or(0);
+        sig.truncate(cut);
+        sig.push('…');
+    }
+    sig
 }
 
 fn node_range(node: &Node) -> Range {
@@ -826,6 +853,20 @@ fn node_range(node: &Node) -> Range {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_signature_keeps_parameters_spread_over_lines() {
+        let src = "async def get_products(\n    provider: str | None = None,\n    page: int = 1,\n) -> Page:\n    return []\n";
+        let mut p = tree_sitter::Parser::new();
+        p.set_language(&tree_sitter_python::LANGUAGE.into())
+            .unwrap();
+        let tree = p.parse(src, None).unwrap();
+        let f = tree.root_node().child(0).unwrap();
+        assert_eq!(
+            signature(f, src.as_bytes()),
+            "async def get_products(provider: str | None = None, page: int = 1) -> Page"
+        );
+    }
     use crate::facts::RefKind;
     use std::io::Write;
 

@@ -259,6 +259,7 @@ pub(super) async fn start(
         q.drop_unlisted,
         q.rewrite,
         q.paths,
+        q.steps,
         None,
         by,
         rid,
@@ -293,6 +294,7 @@ pub(super) async fn begin(
     drop_unlisted: bool,
     rewrite: Vec<crate::prompts::Task>,
     paths: Vec<String>,
+    steps: Vec<crate::prompts::Task>,
     why: Option<String>,
     by: Option<String>,
     request_id: Option<String>,
@@ -324,13 +326,15 @@ pub(super) async fn begin(
             missing.join(", ")
         );
     }
-    let key =
-        format!("llm={llm} drop_unlisted={drop_unlisted} rewrite={rewrite:?} paths={paths:?}");
+    let key = format!(
+        "llm={llm} drop_unlisted={drop_unlisted} rewrite={rewrite:?} paths={paths:?} steps={steps:?}"
+    );
     let request = serde_json::to_value(IndexRequest {
         llm,
         drop_unlisted,
         rewrite: rewrite.clone(),
         paths: paths.clone(),
+        steps: steps.clone(),
     })?;
     app.jobs.submit_resumable(
         "index",
@@ -338,7 +342,7 @@ pub(super) async fn begin(
         by,
         request_id,
         Some(request),
-        index_work(app.clone(), llm, rewrite, paths, why),
+        index_work(app.clone(), llm, rewrite, paths, steps, why),
     )
 }
 
@@ -351,6 +355,8 @@ struct IndexRequest {
     rewrite: Vec<crate::prompts::Task>,
     #[serde(default)]
     paths: Vec<String>,
+    #[serde(default)]
+    steps: Vec<crate::prompts::Task>,
 }
 
 /// Continue the jobs a restart paused, and those of a server that stopped without pausing them.
@@ -370,13 +376,13 @@ pub(super) async fn carry_on(app: Shared) {
                 continue;
             };
             let key = format!(
-                "llm={} drop_unlisted={} rewrite={:?} paths={:?}",
-                r.llm, r.drop_unlisted, r.rewrite, r.paths
+                "llm={} drop_unlisted={} rewrite={:?} paths={:?} steps={:?}",
+                r.llm, r.drop_unlisted, r.rewrite, r.paths, r.steps
             );
             if let Err(e) = app.jobs.resume(
                 &key,
                 job,
-                index_work(app.clone(), r.llm, r.rewrite, r.paths, None),
+                index_work(app.clone(), r.llm, r.rewrite, r.paths, r.steps, None),
             ) {
                 crate::ui::warn(&format!("continuing a paused job: {e:#}"));
             }
@@ -390,6 +396,7 @@ fn index_work(
     llm: bool,
     rewrite: Vec<crate::prompts::Task>,
     paths: Vec<String>,
+    steps: Vec<crate::prompts::Task>,
     why: Option<String>,
 ) -> impl FnOnce(Arc<crate::jobs::Running>) -> futures::future::BoxFuture<'static, anyhow::Result<()>>
        + Send
@@ -436,6 +443,7 @@ fn index_work(
                 git,
                 rewrite,
                 paths,
+                steps,
             };
             crate::indexer::run(&spec, job.clone()).await?;
             // Records written since the last run go into the ledger's snapshot.
@@ -479,6 +487,7 @@ pub(super) async fn watch(app: Shared) {
                     &app,
                     settings.auto_index_llm,
                     false,
+                    Vec::new(),
                     Vec::new(),
                     Vec::new(),
                     Some(why.clone()),

@@ -50,16 +50,22 @@ pub enum Cmd {
     Index {
         folder: String,
         /// Skip the LLM steps (summaries, walkthroughs, style guides)
-        #[arg(long = "no-llm")]
+        #[arg(long = "no-llm", conflicts_with = "steps")]
         no_llm: bool,
+        /// Run only these LLM steps, whatever the team settings say: summary, guide, flow
+        #[arg(long, value_delimiter = ',', value_name = "TASK")]
+        steps: Vec<String>,
     },
     /// Index into one cross-repo index: the given folders as they are (local engine), or the
     /// engine's repository list
     Link {
         folders: Vec<String>,
         /// Skip the LLM steps (summaries, walkthroughs, style guides)
-        #[arg(long = "no-llm")]
+        #[arg(long = "no-llm", conflicts_with = "steps")]
         no_llm: bool,
+        /// Run only these LLM steps, whatever the team settings say: summary, guide, flow
+        #[arg(long, value_delimiter = ',', value_name = "TASK")]
+        steps: Vec<String>,
         /// Write these LLM results again from scratch: summary, guide, flow
         #[arg(long, value_delimiter = ',', value_name = "TASK")]
         rewrite: Vec<String>,

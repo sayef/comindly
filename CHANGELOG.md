@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The index button has one box per LLM step (summaries, walkthroughs, style guides), each starting
+  from the team settings, instead of one box that turned them all on. `comindly index` and
+  `comindly link` take `--steps summary,guide,flow`.
+
 ### Fixed
 
 - On phones, choosing a run in Activity brings its details into view instead of leaving them below
@@ -18,7 +24,10 @@ All notable changes to this project are documented here. The format follows
   the card's edge.
 - The remove buttons on team and symbol chips are easier to tap.
 - Ledger records written by an agent through a gateway name the agent ("Claude Code") instead of
-  the MCP library ("rmcp").
+  the MCP library ("rmcp"); records already written that way read "an agent".
+- Multi-line signatures are kept whole (a Python `def` whose parameters span lines), for search,
+  the explorer, MCP answers and summaries. Summaries are written again on the next index.
+- A summary with no stored key from an earlier index is written again instead of kept as it was.
 
 ## [0.5.0-beta.8](https://github.com/sayef/comindly/compare/v0.5.0-beta.7...v0.5.0-beta.8) - 2026-11-09
 

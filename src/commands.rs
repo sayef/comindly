@@ -251,27 +251,25 @@ fn with_engine(flag: Option<&str>, c: &Client, cmd: Cmd) -> ExitCode {
         Cmd::Link {
             folders,
             no_llm,
+            steps,
             rewrite,
         } => {
-            let mut tasks = Vec::new();
-            for t in &rewrite {
-                match Task::parse(t.trim()) {
-                    Some(t) => tasks.push(t),
-                    None => {
-                        return fail(anyhow::anyhow!(
-                            "`{t}` is not a task: summary, guide or flow"
-                        ))
-                    }
-                }
-            }
+            let (rewrite, steps) = match (tasks(&rewrite), tasks(&steps)) {
+                (Ok(r), Ok(s)) => (r, s),
+                (Err(e), _) | (_, Err(e)) => return fail(e),
+            };
             match folders_here(flag, &folders) {
-                Ok(paths) => index(c, !no_llm, tasks, paths),
+                Ok(paths) => index(c, !no_llm, rewrite, paths, steps),
                 Err(e) => fail(e),
             }
         }
-        Cmd::Index { folder, no_llm } => match folders_here(flag, &[folder]) {
-            Ok(paths) => index(c, !no_llm, Vec::new(), paths),
-            Err(e) => fail(e),
+        Cmd::Index {
+            folder,
+            no_llm,
+            steps,
+        } => match (folders_here(flag, &[folder]), tasks(&steps)) {
+            (Ok(paths), Ok(steps)) => index(c, !no_llm, Vec::new(), paths, steps),
+            (Err(e), _) | (_, Err(e)) => fail(e),
         },
         Cmd::Repos { what } => to_code(repos(c, what)),
         Cmd::Team { what } => to_code(team(c, what)),
@@ -301,7 +299,24 @@ fn folders_here(flag: Option<&str>, folders: &[String]) -> Result<Vec<String>> {
 }
 
 /// Start or queue indexing and follow it here; Ctrl-C cancels the job, not just this view.
-fn index(c: &Client, llm: bool, rewrite: Vec<Task>, paths: Vec<String>) -> ExitCode {
+/// LLM tasks named on the command line: summary, guide, flow.
+fn tasks(names: &[String]) -> Result<Vec<Task>> {
+    names
+        .iter()
+        .map(|t| {
+            Task::parse(t.trim())
+                .with_context(|| format!("`{t}` is not a task: summary, guide or flow"))
+        })
+        .collect()
+}
+
+fn index(
+    c: &Client,
+    llm: bool,
+    rewrite: Vec<Task>,
+    paths: Vec<String>,
+    steps: Vec<Task>,
+) -> ExitCode {
     let run = async {
         let started: api::IndexStarted = c
             .post(
@@ -311,6 +326,7 @@ fn index(c: &Client, llm: bool, rewrite: Vec<Task>, paths: Vec<String>) -> ExitC
                     drop_unlisted: false,
                     rewrite,
                     paths,
+                    steps,
                 },
             )
             .await?;

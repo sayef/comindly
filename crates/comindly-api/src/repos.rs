@@ -129,6 +129,9 @@ pub struct IndexRequest {
     /// Folders to index as they are instead of the list; only an engine on this machine takes them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub paths: Vec<String>,
+    /// The LLM steps to run, whatever the team settings say; none: the team settings decide.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub steps: Vec<crate::prompts::Task>,
 }
 
 /// The job that runs it; `position` when it waits, 1 for the next to run.

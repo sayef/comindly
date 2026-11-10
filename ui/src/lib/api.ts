@@ -612,7 +612,8 @@ export const api = {
   flow: (id: string) => get<FlowDetail>(`/api/v1/flow?id=${encodeURIComponent(id)}`),
   source: (repo: string, at: string) => get<SourceLines>(`/api/v1/source?repo=${encodeURIComponent(repo)}&at=${encodeURIComponent(at)}`),
   indexJob: () => get<IndexJob>("/api/v1/index"),
-  startIndex: (llm: boolean, drop_unlisted = false, rewrite: PromptTaskName[] = []) => post("/api/v1/index", { llm, drop_unlisted, rewrite }),
+  startIndex: (llm: boolean, drop_unlisted = false, rewrite: PromptTaskName[] = [], steps: PromptTaskName[] = []) =>
+    post("/api/v1/index", { llm, drop_unlisted, rewrite, steps }),
   cancelIndex: () => post("/api/v1/index/cancel", {}),
   cancelJob: (id: string) => post(`/api/v1/jobs/${id}/cancel`, {}),
   jobs: () => get<{ jobs: JobRow[] }>("/api/v1/jobs").then((r) => r.jobs),
