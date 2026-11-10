@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0-beta.10](https://github.com/sayef/comindly/compare/v0.5.0-beta.9...v0.5.0-beta.10) - 2026-11-10
+
 ### Added
 
 - The Ledger page filters by status, kind and trust, kept in the link.
