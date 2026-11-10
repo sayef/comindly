@@ -467,7 +467,7 @@ export function OverviewPage() {
                 <Badge variant={isChallenged(e) ? "warning" : ["stale", "orphaned"].includes(e.status) ? "danger" : "default"}>
                   {isChallenged(e) ? "Disputed" : ["stale", "orphaned"].includes(e.status) ? sentenceCase(e.status) : "Unconfirmed"}
                 </Badge>
-                <span className="min-w-0 flex-1">{e.record.title}</span>
+                <span className="order-last min-w-0 basis-full sm:order-none sm:basis-0 sm:flex-1">{e.record.title}</span>
                 <span className="text-xs text-muted-foreground">
                   {sentenceCase(e.record.kind)}
                   {e.record.anchors[0] ? ` in ${e.record.anchors[0].repo}` : ""}

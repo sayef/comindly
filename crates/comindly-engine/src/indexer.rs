@@ -29,6 +29,9 @@ pub struct Spec {
     /// Folders to index as they are, instead of `repos` at their default branches.
     #[serde(default)]
     pub paths: Vec<String>,
+    /// The LLM steps to run; none: the team settings decide.
+    #[serde(default)]
+    pub steps: Vec<crate::prompts::Task>,
 }
 
 /// Run `spec` in a child process, its events going to `job`; cancelling `job` stops it.
@@ -160,6 +163,11 @@ pub fn child() -> Result<()> {
             settings.enrich = false;
             settings.flows = false;
             settings.guide = false;
+        } else if !spec.steps.is_empty() {
+            use crate::prompts::Task;
+            settings.enrich = spec.steps.contains(&Task::Summary);
+            settings.flows = spec.steps.contains(&Task::Flow);
+            settings.guide = spec.steps.contains(&Task::Guide);
         }
         let client = if settings.enrich || settings.flows || settings.guide {
             crate::llm::LlmClient::new(

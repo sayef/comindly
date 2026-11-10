@@ -138,7 +138,9 @@ impl Provenance {
 
     /// Who, for people to read: "Ada Lovelace", "claude-code for Ada Lovelace", "an agent".
     pub fn who(&self) -> String {
-        match (self.author, self.name.as_deref(), self.agent.as_deref()) {
+        // Records written through a gateway before beta.9 carry the MCP library's name, not the agent's.
+        let agent = self.agent.as_deref().filter(|a| *a != "rmcp");
+        match (self.author, self.name.as_deref(), agent) {
             (AuthorKind::Agent, Some(n), Some(a)) => format!("{a} for {n}"),
             (AuthorKind::Agent, Some(n), None) => format!("an agent for {n}"),
             (AuthorKind::Agent, None, Some(a)) => a.to_string(),

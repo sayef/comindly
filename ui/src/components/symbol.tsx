@@ -20,7 +20,7 @@ export function SymbolLink({ node, showRepo = true }: { node: Node; showRepo?: b
       className="group inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-sm text-sm hover:text-brand"
     >
       <RepoDot repo={node.repo} />
-      <span className={cn("min-w-0 truncate", contract && "font-mono text-xs")}>
+      <span className={cn("min-w-0 truncate", contract && "font-mono text-xs max-sm:whitespace-normal max-sm:[overflow-wrap:anywhere]")}>
         {showRepo && !contract && <span className="text-muted-foreground group-hover:text-brand/80">{node.repo} </span>}
         {node.name}
       </span>

@@ -527,18 +527,7 @@ async fn enrich_all(
         ));
     }
     if s.enrich {
-        summaries(
-            ctx,
-            &llm,
-            &prompts,
-            dst,
-            symbols,
-            edges,
-            stale,
-            incremental,
-            roots,
-        )
-        .await?;
+        summaries(ctx, &llm, &prompts, dst, symbols, edges, incremental, roots).await?;
     }
     if s.guide {
         style_guides(ctx, &llm, &prompts, dst, symbols, edges, roots).await?;
@@ -622,7 +611,6 @@ async fn summaries(
     dst: &str,
     symbols: &Arc<Vec<Symbol>>,
     edges: &Arc<Vec<Edge>>,
-    stale: &HashSet<String>,
     incremental: bool,
     roots: &[(String, PathBuf)],
 ) -> Result<()> {
@@ -692,10 +680,7 @@ async fn summaries(
     for d @ (s, _) in &defs {
         let (rid, k) = (s.id.render(), key(s));
         let valid = !ctx.settings.rewrite.contains(&Task::Summary)
-            && match stored_keys.get(&rid) {
-                Some(old) => *old == k,
-                None => !stale.contains(&rid),
-            };
+            && stored_keys.get(&rid).is_some_and(|old| *old == k);
         match prior.get(&rid).filter(|_| valid) {
             Some((sum, q)) => {
                 rows.push((s.id.clone(), sum.clone(), q.clone()));

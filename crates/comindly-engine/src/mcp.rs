@@ -145,10 +145,7 @@ impl ComindlyServer {
         &self,
         ctx: &rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> crate::ledger::Provenance {
-        let name = self
-            .agent_name
-            .clone()
-            .or_else(|| Some(ctx.peer.peer_info()?.client_info.name.clone()));
+        let name = self.agent_name.clone().or_else(|| client_name(ctx));
         let who = ctx
             .extensions
             .get::<axum::http::request::Parts>()
@@ -1344,20 +1341,7 @@ impl rmcp::ServerHandler for ComindlyServer {
     ) -> Result<rmcp::model::CallToolResponse, rmcp::ErrorData> {
         let tool = request.name.to_string();
         let parts = context.extensions.get::<axum::http::request::Parts>();
-        // Through the gateway, its name for the OAuth client; otherwise the client's own, unless the
-        // MCP library filled in its own name for a request without a session.
-        let client = parts
-            .and_then(|p| p.extensions.get::<crate::server::GatewayClient>())
-            .map(|c| c.0.clone())
-            .or_else(|| {
-                let own = rmcp::model::Implementation::from_build_env().name;
-                context
-                    .peer
-                    .peer_info()
-                    .map(|p| p.client_info.name.clone())
-                    .filter(|n| *n != own)
-            })
-            .unwrap_or_default();
+        let client = client_name(&context).unwrap_or_default();
         let email = parts
             .and_then(|p| p.extensions.get::<crate::server::Who>())
             .map(|w| w.email.clone());
@@ -1381,6 +1365,22 @@ impl rmcp::ServerHandler for ComindlyServer {
         );
         out
     }
+}
+
+/// The app making a call: the gateway's name for its OAuth client, else the client's own, unless the
+/// MCP library filled in its own name for a request without a session.
+fn client_name(ctx: &rmcp::service::RequestContext<rmcp::RoleServer>) -> Option<String> {
+    ctx.extensions
+        .get::<axum::http::request::Parts>()
+        .and_then(|p| p.extensions.get::<crate::server::GatewayClient>())
+        .map(|c| c.0.clone())
+        .or_else(|| {
+            let own = rmcp::model::Implementation::from_build_env().name;
+            ctx.peer
+                .peer_info()
+                .map(|p| p.client_info.name.clone())
+                .filter(|n| *n != own)
+        })
 }
 
 fn hop_dto(h: crate::graph::Hop) -> HopDto {
