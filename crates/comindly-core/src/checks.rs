@@ -439,6 +439,7 @@ mod tests {
             history: Vec::new(),
             retired: None,
             outside: Vec::new(),
+            confirmers: Vec::new(),
             vouched: Vec::new(),
             alike: None,
         }];

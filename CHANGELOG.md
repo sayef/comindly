@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Agents act on any record with their person's OK, including retiring one a person wrote; a `dispute` still waits for a look.
+- Every record and review carries a reason: `remember` needs a body and `review` a reason, in the CLI, the app and MCP.
+- Agents are asked to confirm records they relied on and checked; each person confirming counts once, and cards show "Confirmed by N others". A person's confirmation, in the app or through their agent with `from_person`, makes a record T3.
+- Needs review holds only disputed, stale, orphaned and likely-repeat records; unconfirmed agent records no longer wait there.
+
 ## [0.5.0-beta.11](https://github.com/sayef/comindly/compare/v0.5.0-beta.10...v0.5.0-beta.11) - 2026-11-10
 
 ### Added

@@ -29,7 +29,7 @@ anchored to symbols with a fingerprint of the code they describe:
 | moved | the symbol moved or was renamed, its body is unchanged |
 | stale | the code changed since the record was written: re-verify |
 | orphaned | the code is gone |
-| superseded / retracted | retired by a person (or, for machine records, by a machine); archive and invalidate retract a record |
+| superseded / retracted | retired by a person or an agent acting for one; archive and invalidate retract a record |
 
 | Trust | Source |
 |---|---|

@@ -47,8 +47,9 @@ index reflects each repository's default branch as of the last indexing.
 
 ### The team's records
 
-- `why` on a symbol returns what the team recorded about it, with status and trust. Treat active
-  records as requirements unless the user says otherwise.
+- `why` on a symbol returns what the team recorded about it, with status and trust. Follow records
+  a person wrote or confirmed (T3) unless the user says otherwise; weigh the others by evidence and
+  by how many people's agents confirmed them.
 - Trust: T3 means a person wrote or confirmed it, T2 an agent with evidence, T1 an agent without.
   Records marked "from <team>, unconfirmed" come from another team and wait for the owners to confirm.
 - Stale or moved records point at code that changed since they were written: check them against the
@@ -57,7 +58,8 @@ index reflects each repository's default branch as of the last indexing.
   approach that failed and why, a trap), offer to record it with `remember`: one factual title, the
   symbols it is about (`on`), and evidence such as `commit:<sha>` or `mr:!123` (required for a failed
   attempt). `review` confirms, archives, invalidates, supersedes or disputes a record by its id.
-  Ask the user before writing either.
+  Ask the user before recording, archiving, invalidating or superseding. When you relied on a record
+  and checked it still matches the code, confirm it. Every change needs a reason other agents can read.
 
 ### Habits
 

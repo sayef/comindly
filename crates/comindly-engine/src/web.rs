@@ -1608,6 +1608,10 @@ async fn remember(
     let run = async {
         let root = s.data.root.as_deref().context("read-only UI")?;
         let kind = crate::ledger::Kind::parse(&b.kind).context("unknown kind")?;
+        anyhow::ensure!(
+            !b.body.trim().is_empty(),
+            "say why: every record carries the reasoning other agents need"
+        );
         let g = &s.data.graph;
         let commits = match graph_uri(&s) {
             Some(u) => crate::index::read_repo_commits(&u)

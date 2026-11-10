@@ -233,6 +233,10 @@ impl ComindlyServer {
             })
             .collect();
         rec.body = p.body.unwrap_or_default();
+        anyhow::ensure!(
+            !rec.body.trim().is_empty(),
+            "say why in `body`: every record carries the reasoning other agents need"
+        );
         rec.trigger = p.trigger;
         rec.evidence = p.evidence;
         rec.fields = p
@@ -331,10 +335,13 @@ impl ComindlyServer {
         let commits = crate::index::read_repo_commits(&self.uri)
             .await
             .unwrap_or_default();
-        let rec = crate::ledger::Record::review(target, &p.action, reason, by)?
+        let mut rec = crate::ledger::Record::review(target, &p.action, reason, by)?
             .vouching(target, |id| {
                 Some(crate::ledger::Anchor::of(self.symbols.get(id)?).at(&commits))
             });
+        if p.from_person {
+            rec = rec.from_person();
+        }
         ledger.put(&rec).await?;
         self.wrote(&rec).await;
         Ok(format!("{}: `{}`", p.action, target.title))
@@ -588,6 +595,7 @@ struct RememberParam {
     on: Vec<String>,
     /// One neutral, factual line.
     title: String,
+    /// Why it holds or what it is in favour of: the reasoning other agents need. Required.
     #[serde(default)]
     body: Option<String>,
     /// When a future engineer would need this.
@@ -633,8 +641,12 @@ struct ReviewParam {
     id: String,
     /// `confirm` | `archive` (no longer applies) | `invalidate` (was wrong) | `supersede` | `dispute`.
     action: String,
+    /// Why: what you checked, or why it changed. Required.
     #[serde(default)]
     reason: Option<String>,
+    /// True when your person said the record holds; counts as their own confirmation.
+    #[serde(default)]
+    from_person: bool,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
@@ -1118,7 +1130,7 @@ impl ComindlyServer {
 
     #[tool(
         name = "review",
-        description = "Act on a ledger record after checking it against the code: `confirm` (still true), `archive` (was true, no longer applies), `invalidate` (was wrong), `supersede` (replaced by a newer record) or `dispute` (contradicted). Give a reason. A `confirm` with a reason counts as your person's confirmation, so confirm only when they say the record holds, and put what they said in the reason. Retiring a record a person wrote or confirmed only flags it for a person to decide. Use when `why` shows a STALE record you have verified."
+        description = "Act on a ledger record: `confirm` (still true), `archive` (was true, no longer applies), `invalidate` (was wrong), `supersede` (replaced by a newer record) or `dispute` (contradicted). Every action needs a `reason` other agents can read: what you checked, or why it changed. When you relied on a record and checked it still matches the code, confirm it; confirmations from several people's agents give a record weight. Archive, invalidate or supersede only with your person's OK. Set `from_person` when your person told you the record holds; that counts as their own confirmation."
     )]
     async fn review(
         &self,
