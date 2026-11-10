@@ -408,6 +408,31 @@ pub struct Entry {
     /// The writer's teams, when the note is about another team's code and none of its members confirmed it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub outside: Vec<String>,
+    /// Where the code is now, when a person's confirmation re-anchored the record.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub vouched: Vec<Anchor>,
+    /// An older standing record this one reads like, until a person keeps or retires it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alike: Option<Alike>,
+}
+
+impl Entry {
+    /// The anchors to show: where a confirmation last saw the code, else where it was written.
+    pub fn anchors(&self) -> &[Anchor] {
+        if self.vouched.is_empty() {
+            &self.record.anchors
+        } else {
+            &self.vouched
+        }
+    }
+}
+
+/// The older record a record may repeat, and how alike they read (0 to 1).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Alike {
+    pub id: String,
+    pub title: String,
+    pub score: f32,
 }
 
 pub const SCHEMA: u32 = 1;

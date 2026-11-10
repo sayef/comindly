@@ -39,6 +39,14 @@ Agents use the same actions through the MCP `review` tool; deleting is for peopl
 An agent's `confirm` with a reason counts as its person's: the agent confirms when you say a record
 holds and passes on what you said. A confirmation also vouches for the code as indexed then, so a stale
 record turns active again until that code changes.
+
+Before an agent's record is written, it is compared with the standing records on the same symbols or
+files. If one reads alike, nothing is written and the agent is pointed at it: it confirms that record
+(adding what it knows in the reason), or writes its own anyway with `distinct`, saying how it differs.
+That note is kept on the record as **Differs from**.
+Records that already repeat an earlier one on the same code (written in the app, or before this check)
+wait in **Needs review** as a **Possible repeat**: **Same as earlier** archives the later one, and
+**Keep both** confirms it.
 Every record and review shows who made it and when: the person's name (config `author_name`, else git
 `user.name`), and for agents also the agent ("claude-code for Ada Lovelace", taken from the MCP client
 or `COMINDLY_AGENT`). Set `record_names = false` (`comindly config set record_names=false`) to store

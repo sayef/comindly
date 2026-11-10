@@ -107,6 +107,10 @@ export interface Entry {
   retired: "outdated" | "wrong" | null;
   /** The writer's teams, when the note is about another team's code and none of its members confirmed it. */
   outside?: string[];
+  /** Where the code is now, when a person's confirmation re-anchored the record. */
+  vouched?: LedgerRecord["anchors"];
+  /** An older standing record this one reads like, until a person keeps or retires it. */
+  alike?: { id: string; title: string; score: number };
 }
 
 export interface LedgerEvent {
@@ -668,7 +672,7 @@ const TRUST: Record<string, number> = { T0: 0, T1: 1, T2: 2, T3: 3, T4: 4 };
 
 /** 0 challenged, 1 stale or orphaned, 2 unconfirmed machine record, 3 nothing to do. */
 export const attention = (e: Entry) =>
-  isChallenged(e) ? 0 : ["stale", "orphaned"].includes(e.status) ? 1 : TRUST[e.trust] < 3 && ["active", "moved"].includes(e.status) ? 2 : 3;
+  isChallenged(e) ? 0 : ["stale", "orphaned"].includes(e.status) || e.alike ? 1 : TRUST[e.trust] < 3 && ["active", "moved"].includes(e.status) ? 2 : 3;
 
 export const isChallenged = (e: Entry) =>
   !["superseded", "retracted"].includes(e.status) && e.related.some(([k]) => ["supersedes", "retracts", "disputes"].includes(k));

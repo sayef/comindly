@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AgentView } from "@/components/agent-view";
-import { Archive, Ban, Check, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
+import { Archive, Ban, Check, Copy, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { ConfirmButton } from "@/components/confirm";
 import { RepoDot } from "@/components/symbol";
@@ -93,11 +93,13 @@ export function EntryCard({
   const fields = Object.entries(r.fields).filter(([k]) => k !== "at");
   const status = statusLabel(entry);
   const ghostFirst = !asking && !(due && !retired);
-  const about = r.anchors.length > 0 && (
+  const anchors = entry.vouched?.length ? entry.vouched : r.anchors;
+  const alike = !retired ? entry.alike : undefined;
+  const about = anchors.length > 0 && (
     <div className="flex items-baseline gap-2 max-sm:flex-col max-sm:gap-1">
       <dt className="w-24 shrink-0 text-muted-foreground">About</dt>
       <dd className="flex min-w-0 flex-1 flex-wrap gap-1.5">
-        {r.anchors.map((a) => (
+        {anchors.map((a) => (
           <span
             key={a.symbol}
             className="flex max-w-full min-w-0 items-center gap-1.5 rounded-sm bg-muted px-1.5 py-0.5 max-sm:flex-wrap"
@@ -112,7 +114,7 @@ export function EntryCard({
             </span>
           </span>
         ))}
-        <AgentView icon asks={r.anchors.map((a) => ({ label: a.name, tool: "why", args: { focus: a.symbol } }))} />
+        <AgentView icon asks={anchors.map((a) => ({ label: a.name, tool: "why", args: { focus: a.symbol } }))} />
       </dd>
     </div>
   );
@@ -128,6 +130,11 @@ export function EntryCard({
             From {entry.outside.join(", ")}
           </Badge>
         ) : null}
+        {alike && (
+          <Badge variant="warning" title="Reads like an earlier record on the same code; a person keeps both or archives this one">
+            Possible repeat
+          </Badge>
+        )}
         {challenged && (
           <Badge variant="warning" title="An agent proposed retiring this; a person decides">
             Challenged
@@ -141,8 +148,16 @@ export function EntryCard({
       </div>
       <H className="mt-2.5 leading-snug font-semibold">{r.title}</H>
       {!compact && r.body && r.body !== r.title && <p className="mt-1.5 text-sm text-muted-foreground">{r.body}</p>}
-      {!compact && (r.trigger || fields.length > 0 || r.evidence.length > 0 || r.anchors.length > 0) && (
+      {!compact && (r.trigger || fields.length > 0 || r.evidence.length > 0 || anchors.length > 0 || alike) && (
         <dl className="mt-3 grid grid-cols-[minmax(0,1fr)] gap-1 text-xs">
+          {alike && (
+            <div className="flex gap-2">
+              <dt className="w-24 shrink-0 text-muted-foreground">Reads like</dt>
+              <dd className="min-w-0 [overflow-wrap:anywhere]">
+                {alike.title} <span className="font-mono text-muted-foreground">{alike.id.slice(0, 8)}</span>
+              </dd>
+            </div>
+          )}
           {r.trigger && (
             <div className="flex gap-2">
               <dt className="w-24 shrink-0 text-muted-foreground">Relevant when</dt>
@@ -214,8 +229,19 @@ export function EntryCard({
               {!retired && (
                 <>
                   {due && (
-                    <Button size="sm" variant="outline" onClick={() => review.mutate({ action: "confirm" })} loading={review.isPending} title="Still true">
-                      <Check /> Confirm
+                    <Button size="sm" variant="outline" onClick={() => review.mutate({ action: "confirm" })} loading={review.isPending} title={alike ? "Still true, and says something the earlier record does not" : "Still true"}>
+                      <Check /> {alike ? "Keep both" : "Confirm"}
+                    </Button>
+                  )}
+                  {alike && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => review.mutate({ action: "archive", why: `Same as ${alike.id.slice(0, 8)}: ${alike.title}` })}
+                      loading={review.isPending}
+                      title="Archive this one; the earlier record stands"
+                    >
+                      <Copy /> Same as earlier
                     </Button>
                   )}
                   <Button size="sm" variant="ghost" onClick={() => setAsking("archive")} title="Was true, no longer applies; kept as history">
