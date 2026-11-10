@@ -351,18 +351,24 @@ pub fn derive(
                     Some((x.relation.as_ref()?.kind, x.id.clone(), x.provenance.author))
                 })
                 .collect();
-            let mut status = Status::Active;
-            let mut current = Vec::new();
-            for a in &r.anchors {
-                let (st, now) = anchor_status(a, &by_id, &by_shape);
-                current.extend(now);
-                status = status.max(st);
-            }
             let confirmed_by_human = rels
                 .iter()
                 .any(|(k, _, a)| *k == RelationKind::Confirms && *a == AuthorKind::Human);
             // Only a person can retire a human-backed record; a machine's attempt is a challenge.
             let human_backed = r.provenance.author == AuthorKind::Human || confirmed_by_human;
+            // The latest confirmation that counts vouches for the code it saw.
+            let vouched = revs.iter().rev().find(|x| {
+                x.relation.as_ref().map(|rel| rel.kind) == Some(RelationKind::Confirms)
+                    && !x.anchors.is_empty()
+                    && (x.provenance.author == AuthorKind::Human || !human_backed)
+            });
+            let mut status = Status::Active;
+            let mut current = Vec::new();
+            for a in vouched.map_or(&r.anchors, |x| &x.anchors) {
+                let (st, now) = anchor_status(a, &by_id, &by_shape);
+                current.extend(now);
+                status = status.max(st);
+            }
             let counts = |kind: RelationKind| {
                 rels.iter()
                     .any(|(k, _, a)| *k == kind && (*a == AuthorKind::Human || !human_backed))
@@ -773,6 +779,32 @@ mod tests {
             name: None,
             teams: Vec::new(),
         }
+    }
+
+    #[test]
+    fn a_persons_confirmation_vouches_for_the_changed_code() {
+        let (old, new) = (sym("check", 10, 7), sym("check", 11, 7));
+        let note = Record::new(
+            Kind::Decision,
+            "checks stay",
+            vec![Anchor::of(&old)],
+            prov(AuthorKind::Human),
+        );
+        let review = |author| {
+            Record::review(&note, "confirm", "", prov(author))
+                .unwrap()
+                .vouching(&note, |_| Some(Anchor::of(&new)))
+        };
+        let status = |extra: Record| {
+            derive(
+                &[note.clone(), extra],
+                std::slice::from_ref(&new),
+                &crate::signing::Verifier::default(),
+            )[0]
+            .status
+        };
+        assert_eq!(status(review(AuthorKind::Agent)), Status::Stale);
+        assert_eq!(status(review(AuthorKind::Human)), Status::Active);
     }
 
     #[test]

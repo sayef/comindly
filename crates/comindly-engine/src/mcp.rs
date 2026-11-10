@@ -280,7 +280,13 @@ impl ComindlyServer {
             ),
         };
         let reason = p.reason.as_deref().unwrap_or_default();
-        let rec = crate::ledger::Record::review(target, &p.action, reason, by)?;
+        let commits = crate::index::read_repo_commits(&self.uri)
+            .await
+            .unwrap_or_default();
+        let rec = crate::ledger::Record::review(target, &p.action, reason, by)?
+            .vouching(target, |id| {
+                Some(crate::ledger::Anchor::of(self.symbols.get(id)?).at(&commits))
+            });
         ledger.put(&rec).await?;
         self.wrote(&rec).await;
         Ok(format!("{}: `{}`", p.action, target.title))

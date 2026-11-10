@@ -149,7 +149,7 @@ export function EntryCard({
           )}
           {fields.map(([k, v]) => (
             <div key={k} className="flex gap-2">
-              <dt className="w-24 shrink-0 capitalize text-muted-foreground">{k}</dt>
+              <dt className="w-24 shrink-0 first-letter:uppercase text-muted-foreground">{k.replace(/_/g, " ")}</dt>
               <dd>{typeof v === "string" ? v : JSON.stringify(v)}</dd>
             </div>
           ))}
