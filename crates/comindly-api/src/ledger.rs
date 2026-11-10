@@ -265,6 +265,18 @@ impl Record {
         Ok(r)
     }
 
+    /// A confirmation vouches for the code as indexed now: it takes the target's anchors from `now`.
+    pub fn vouching(mut self, target: &Record, now: impl Fn(&str) -> Option<Anchor>) -> Record {
+        if self.relation.as_ref().map(|rel| rel.kind) == Some(RelationKind::Confirms) {
+            self.anchors = target
+                .anchors
+                .iter()
+                .filter_map(|a| now(&a.symbol))
+                .collect();
+        }
+        self
+    }
+
     /// A relation record (`confirm`, `retract`, …) about `target`.
     pub fn relation(
         kind: RelationKind,

@@ -85,7 +85,7 @@ Everyone brings their own LLM API key. comindly looks for it, in order:
 2. the default key in that file,
 3. `OPENAI_API_KEY`.
 
-The file is created readable only by you. Set it from the app (Settings → General, under Your LLM key) or the terminal:
+The file is created readable only by you. Set it from the app (Settings → General, the Your API key card) or the terminal:
 
 ```sh
 comindly team key              # prompts for the key; stored under the team's name
@@ -107,7 +107,7 @@ CI sets `OPENAI_API_KEY` from its secret store.
 
 In the app, **Create an org** on the first screen takes a name and an empty location everyone can
 reach: a shared folder, or a bucket location (`s3://`, `gs://`, `az://`). comindly writes the team settings
-there (which also checks you can write to it), switches to it and opens **Settings → Repositories** to add
+there (which also checks you can write to it), switches to it and opens **Repositories** to add
 and index the first repositories. It refuses a location that already has a team or an index; join that
 one instead.
 

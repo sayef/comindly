@@ -36,6 +36,9 @@ comindly app                                  # the same, with a timeline, in th
 ```
 
 Agents use the same actions through the MCP `review` tool; deleting is for people only (CLI and app).
+An agent's `confirm` with a reason counts as its person's: the agent confirms when you say a record
+holds and passes on what you said. A confirmation also vouches for the code as indexed then, so a stale
+record turns active again until that code changes.
 Every record and review shows who made it and when: the person's name (config `author_name`, else git
 `user.name`), and for agents also the agent ("claude-code for Ada Lovelace", taken from the MCP client
 or `COMINDLY_AGENT`). Set `record_names = false` (`comindly config set record_names=false`) to store

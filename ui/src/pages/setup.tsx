@@ -368,7 +368,7 @@ function ServerSteps() {
         <p>Your agent talks to this server with it. Nothing to install on your machine.</p>
         <div>
           <Button asChild>
-            <Link to="/settings/access">
+            <Link to="/access">
               <KeyRound /> Open Your access
             </Link>
           </Button>

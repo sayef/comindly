@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Check, CircleSlash, Clock, Copy, FolderGit2, Loader2, PauseCircle, X } from "lucide-react";
-import { Link, useParams, useSearchParams } from "react-router";
+import { Link, NavLink, useParams, useSearchParams } from "react-router";
 import { useEffect, useRef } from "react";
 import { ConfirmButton } from "@/components/confirm";
 import { duration, IndexLog, shortStatus, useCopy } from "@/components/index-log";
@@ -113,6 +113,25 @@ function Tile({
   );
 }
 
+/** Runs, and for admins on a server the changes people made: the two kinds of activity. */
+export function ActivityTabs() {
+  const { me } = useAccess();
+  if (me?.mode !== "server" || me.role !== "admin") return null;
+  const tab = ({ isActive }: { isActive: boolean }) =>
+    `flex h-8 items-center rounded-md px-3 text-xs font-semibold pointer-coarse:h-11 transition-colors duration-100 ${isActive ? "bg-card text-foreground shadow-[0_1px_2px_var(--shadow-ink)]" : "text-muted-foreground hover:text-foreground"}`;
+  const runs = ({ isActive }: { isActive: boolean }) => tab({ isActive: isActive && !window.location.pathname.endsWith("/changes") });
+  return (
+    <nav className="flex w-fit max-w-full flex-wrap gap-0.5 rounded-lg bg-secondary p-0.5" aria-label="Activity">
+      <NavLink to="/activity" className={runs}>
+        Runs
+      </NavLink>
+      <NavLink to="/activity/changes" className={tab}>
+        Changes
+      </NavLink>
+    </nav>
+  );
+}
+
 /** Background work, waiting, running or done, each run with its log. */
 export function ActivityPage() {
   const { id } = useParams();
@@ -153,6 +172,7 @@ export function ActivityPage() {
       <PageHeader title="Activity">
         What comindly works on in the background: what waits in the queue, what runs now and how each run went, step by step.
       </PageHeader>
+      <ActivityTabs />
 
       {jobs.isLoading ? (
         <Skeleton className="h-96" />
@@ -163,7 +183,7 @@ export function ActivityPage() {
             Each indexing run shows up here with its steps, warnings and cost. Start one from the repositories in the settings.
           </p>
           <Button variant="outline" className="mt-2" asChild>
-            <Link to="/settings/repositories">
+            <Link to="/repositories">
               <FolderGit2 /> Open repositories
             </Link>
           </Button>

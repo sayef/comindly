@@ -280,7 +280,13 @@ impl ComindlyServer {
             ),
         };
         let reason = p.reason.as_deref().unwrap_or_default();
-        let rec = crate::ledger::Record::review(target, &p.action, reason, by)?;
+        let commits = crate::index::read_repo_commits(&self.uri)
+            .await
+            .unwrap_or_default();
+        let rec = crate::ledger::Record::review(target, &p.action, reason, by)?
+            .vouching(target, |id| {
+                Some(crate::ledger::Anchor::of(self.symbols.get(id)?).at(&commits))
+            });
         ledger.put(&rec).await?;
         self.wrote(&rec).await;
         Ok(format!("{}: `{}`", p.action, target.title))
@@ -1061,7 +1067,7 @@ impl ComindlyServer {
 
     #[tool(
         name = "review",
-        description = "Act on a ledger record after checking it against the code: `confirm` (still true), `archive` (was true, no longer applies), `invalidate` (was wrong), `supersede` (replaced by a newer record) or `dispute` (contradicted). Give a reason. Retiring a record a person wrote or confirmed only flags it for a person to decide. Use when `why` shows a STALE record you have verified."
+        description = "Act on a ledger record after checking it against the code: `confirm` (still true), `archive` (was true, no longer applies), `invalidate` (was wrong), `supersede` (replaced by a newer record) or `dispute` (contradicted). Give a reason. A `confirm` with a reason counts as your person's confirmation, so confirm only when they say the record holds, and put what they said in the reason. Retiring a record a person wrote or confirmed only flags it for a person to decide. Use when `why` shows a STALE record you have verified."
     )]
     async fn review(
         &self,

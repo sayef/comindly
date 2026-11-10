@@ -55,7 +55,7 @@ the background when a command needs it. To use a team server instead, see
 
 ## 2. Index your code
 
-The quickest way is the app: `comindly app` (its own window on macOS, the browser elsewhere), then **Settings → Repositories**
+The quickest way is the app: `comindly app` (its own window on macOS, the browser elsewhere), then **Repositories**
 → Scan a folder → tick your repositories → **Index now**. The same from the terminal:
 
 ```sh

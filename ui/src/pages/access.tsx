@@ -12,6 +12,7 @@ import { Table, Td, Th, Tr } from "@/components/ui/table";
 import { api, type Role, type SecretState } from "@/lib/api";
 import { date } from "@/lib/utils";
 import { PageHeader } from "@/components/page-header";
+import { ActivityTabs } from "@/pages/activity";
 import { Section, SettingsTabs } from "@/pages/settings";
 import { Code } from "@/pages/setup";
 
@@ -410,7 +411,6 @@ export function AccessPage() {
   return (
     <div className="flex max-w-5xl flex-col gap-4">
       <PageHeader title="Your access">How you sign in, and the personal access tokens your agents and command line use.</PageHeader>
-      <SettingsTabs />
       {(me.data?.sign_in_methods ?? [me.data?.sign_in]).includes("code") && (
         <Section
           title="Your sign-in code"
@@ -522,8 +522,8 @@ export function AuditPage() {
 
   return (
     <div className="flex max-w-5xl flex-col gap-4">
-      <PageHeader title="Audit log">Who changed what on this server, newest first.</PageHeader>
-      <SettingsTabs />
+      <PageHeader title="Activity">Who changed what on this server, newest first.</PageHeader>
+      <ActivityTabs />
       <Section title="Events" description="Sign-ins, invitations, role changes, tokens, secrets and repositories. Token values and codes are never recorded.">
         {entries.length === 0 ? (
           <p className="text-sm text-muted-foreground">Nothing recorded yet.</p>

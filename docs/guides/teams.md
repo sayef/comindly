@@ -11,8 +11,8 @@ shared library that two teams own. Everything in a repository carries its labels
 packages, conventions and ledger records. A flow carries the labels of every repository it crosses;
 a contract those of its provider and its consumers. A repository without a label is **Unassigned**.
 
-Admins set labels in **Settings → Repositories** (the Teams column, also when adding a repository) and
-manage the team list in **Settings → General**, the Teams card: create, rename and delete teams, see
+Admins set labels in **Repositories** (the Teams column, also when adding a repository) and
+manage the team list at the bottom of **Repositories**, the Teams card: create, rename and delete teams, see
 each team's repositories and members.
 
 ## Choosing what you see

@@ -305,7 +305,7 @@ pub(super) async fn begin(
     );
     anyhow::ensure!(
         paths.is_empty() || app.server.is_none(),
-        "a team server indexes its own repository list; add repositories in Settings → Repositories"
+        "a team server indexes its own repository list; add repositories on its Repositories page"
     );
     let session = app.current.read().await.clone();
     session.data.root.clone().context("read-only UI")?;

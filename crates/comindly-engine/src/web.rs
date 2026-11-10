@@ -1573,7 +1573,16 @@ async fn apply_review(
     if matches!(kind, RelationKind::Retracts) && target.kind == crate::ledger::Kind::Relation {
         anyhow::bail!("relations cannot be retracted");
     }
-    let rec = Record::review(&target, &b.action, &b.reason, prov)?;
+    let commits = match graph_uri(s) {
+        Some(u) => crate::index::read_repo_commits(&u)
+            .await
+            .unwrap_or_default(),
+        None => Default::default(),
+    };
+    let rec = Record::review(&target, &b.action, &b.reason, prov)?.vouching(&target, |id| {
+        let sym = s.data.symbols.iter().find(|x| x.id.render() == id)?;
+        Some(crate::ledger::Anchor::of(sym).at(&commits))
+    });
     ledger.put(&rec).await?;
     let records = ledger.all().await?;
     let fresh = s.derive(&records);

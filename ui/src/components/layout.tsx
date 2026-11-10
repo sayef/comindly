@@ -1,5 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import {
+  FolderGit2,
+  KeyRound,
   BookText,
   Boxes,
   Compass,
@@ -39,6 +41,7 @@ const NAV: { to: string; label: string; icon: LucideIcon }[] = [
   { to: "/ledger", label: "Ledger", icon: BookText },
   { to: "/conventions", label: "Conventions", icon: Ruler },
   { to: "/packages", label: "Packages", icon: Boxes },
+  { to: "/repositories", label: "Repositories", icon: FolderGit2 },
   { to: "/activity", label: "Activity", icon: History },
   { to: "/setup", label: "Get started", icon: Compass },
 ];
@@ -118,7 +121,7 @@ export function Layout() {
   const menuButton = useRef<HTMLButtonElement>(null);
   useEffect(() => setMenu(false), [pathname]);
   useEffect(() => {
-    const page = [...NAV, { to: "/settings", label: "Settings" }].filter((n) => (n.to === "/" ? pathname === "/" : pathname.startsWith(n.to))).at(-1);
+    const page = [...NAV, { to: "/settings", label: "Settings" }, { to: "/access", label: "Your access" }].filter((n) => (n.to === "/" ? pathname === "/" : pathname.startsWith(n.to))).at(-1);
     document.title = page && page.to !== "/" ? `${page.label} · comindly` : "comindly";
   }, [pathname]);
 
@@ -198,6 +201,7 @@ export function Layout() {
 
           <div className="mt-auto flex flex-col gap-0.5 border-t pt-3">
             <NavItem to="/settings" label="Settings" icon={Settings} narrow={narrow} />
+            {me.data?.mode === "server" && <NavItem to="/access" label="Your access" icon={KeyRound} narrow={narrow} />}
             {me.data?.mode === "server" && me.data.email && (
               <div className={cn("flex items-center gap-2.5 py-2", narrow ? "justify-center" : "px-2.5")}>
                 {!narrow && (

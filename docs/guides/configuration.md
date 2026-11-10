@@ -44,8 +44,8 @@ path = "~/.local/share/comindly/repos/github.com/acme/payments"
 remote = "https://github.com/acme/payments.git"   # comindly clones it into `path` when missing
 ```
 
-The repository list is changed with `comindly repos add|remove|scan` or in the app (Settings →
-Repositories). `signing_key` and `allowed_signers` default to git's SSH signing settings; set them with
+The repository list is changed with `comindly repos add|remove|scan` or in the app (the
+Repositories page). `signing_key` and `allowed_signers` default to git's SSH signing settings; set them with
 `COMINDLY_SIGNING_KEY` and `COMINDLY_ALLOWED_SIGNERS` in the engine's environment.
 
 Earlier versions kept these in `~/.config/comindly/config.toml`. The engine imports that file once and

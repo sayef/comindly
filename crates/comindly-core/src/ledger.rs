@@ -351,18 +351,22 @@ pub fn derive(
                     Some((x.relation.as_ref()?.kind, x.id.clone(), x.provenance.author))
                 })
                 .collect();
+            let confirmed_by_human = revs.iter().any(|x| persons_confirmation(x));
+            // Only a person can retire a human-backed record; a machine's attempt is a challenge.
+            let human_backed = r.provenance.author == AuthorKind::Human || confirmed_by_human;
+            // The latest confirmation that counts vouches for the code it saw.
+            let vouched = revs.iter().rev().find(|x| {
+                x.relation.as_ref().map(|rel| rel.kind) == Some(RelationKind::Confirms)
+                    && !x.anchors.is_empty()
+                    && (persons_confirmation(x) || !human_backed)
+            });
             let mut status = Status::Active;
             let mut current = Vec::new();
-            for a in &r.anchors {
+            for a in vouched.map_or(&r.anchors, |x| &x.anchors) {
                 let (st, now) = anchor_status(a, &by_id, &by_shape);
                 current.extend(now);
                 status = status.max(st);
             }
-            let confirmed_by_human = rels
-                .iter()
-                .any(|(k, _, a)| *k == RelationKind::Confirms && *a == AuthorKind::Human);
-            // Only a person can retire a human-backed record; a machine's attempt is a challenge.
-            let human_backed = r.provenance.author == AuthorKind::Human || confirmed_by_human;
             let counts = |kind: RelationKind| {
                 rels.iter()
                     .any(|(k, _, a)| *k == kind && (*a == AuthorKind::Human || !human_backed))
@@ -488,6 +492,22 @@ fn from_label(e: &Entry) -> String {
         String::new()
     } else {
         format!(" · from {}, unconfirmed", e.outside.join(", "))
+    }
+}
+
+/// A person's confirmation, made in person or by their agent passing on what they said.
+fn persons_confirmation(x: &Record) -> bool {
+    let Some(rel) = x
+        .relation
+        .as_ref()
+        .filter(|r| r.kind == RelationKind::Confirms)
+    else {
+        return false;
+    };
+    match x.provenance.author {
+        AuthorKind::Human => true,
+        AuthorKind::Agent => !x.title.starts_with(&format!("{:?}: ", rel.kind)),
+        _ => false,
     }
 }
 
@@ -773,6 +793,59 @@ mod tests {
             name: None,
             teams: Vec::new(),
         }
+    }
+
+    #[test]
+    fn a_persons_confirmation_vouches_for_the_changed_code() {
+        let (old, new) = (sym("check", 10, 7), sym("check", 11, 7));
+        let note = Record::new(
+            Kind::Decision,
+            "checks stay",
+            vec![Anchor::of(&old)],
+            prov(AuthorKind::Human),
+        );
+        let review = |author, reason| {
+            Record::review(&note, "confirm", reason, prov(author))
+                .unwrap()
+                .vouching(&note, |_| Some(Anchor::of(&new)))
+        };
+        let status = |extra: Record| {
+            derive(
+                &[note.clone(), extra],
+                std::slice::from_ref(&new),
+                &crate::signing::Verifier::default(),
+            )[0]
+            .status
+        };
+        assert_eq!(status(review(AuthorKind::Agent, "")), Status::Stale);
+        assert_eq!(
+            status(review(AuthorKind::Agent, "Ada: still how we do it")),
+            Status::Active
+        );
+        assert_eq!(status(review(AuthorKind::Human, "")), Status::Active);
+    }
+
+    #[test]
+    fn an_agent_confirms_for_its_person_only_with_their_words() {
+        let s = sym("charge", 1, 1);
+        let note = Record::new(
+            Kind::Gotcha,
+            "retries double charge",
+            vec![Anchor::of(&s)],
+            prov(AuthorKind::Agent),
+        );
+        let trust = |reason| {
+            let confirm =
+                Record::review(&note, "confirm", reason, prov(AuthorKind::Agent)).unwrap();
+            derive(
+                &[note.clone(), confirm],
+                std::slice::from_ref(&s),
+                &crate::signing::Verifier::default(),
+            )[0]
+            .trust
+        };
+        assert_eq!(trust(""), Trust::T1);
+        assert_eq!(trust("Ada agreed: seen in prod"), Trust::T3);
     }
 
     #[test]

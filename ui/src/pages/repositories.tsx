@@ -20,7 +20,7 @@ import { Link } from "react-router";
 import { IndexLog } from "@/components/index-log";
 import { AgentView } from "@/components/agent-view";
 import { PageHeader } from "@/components/page-header";
-import { SettingsTabs } from "@/pages/settings";
+import { TeamsCard } from "@/components/teams-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
@@ -651,8 +651,7 @@ export function RepositoriesPage() {
         What comindly indexes. Each repository is indexed at its default branch from comindly's own checkout
         {server ? "." : ", so your folders and branches are never touched."}
       </PageHeader>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <SettingsTabs />
+      <div className="flex flex-wrap items-center justify-end gap-3">
         {admin && (
           <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap">
             {!server && (
@@ -837,6 +836,7 @@ export function RepositoriesPage() {
       </Card>
 
       {admin && <IndexPanel unlisted={unlisted.map((r) => r.name)} />}
+      <TeamsCard />
 
       <AddDialog open={dialog === "add"} onOpenChange={close} />
       <ScanDialog open={dialog === "scan"} onOpenChange={close} indexed={unlisted.map((r) => r.name)} />

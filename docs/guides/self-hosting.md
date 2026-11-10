@@ -38,7 +38,7 @@ Secret Manager mounts), so rotating one is a change in your secret store and a r
 | `COMINDLY_TRUST_PROXY` | behind a proxy | `true` when a proxy you run sets `X-Forwarded-For`, so sign-in limits apply per client. |
 | `COMINDLY_GATEWAY_SECRET` | no | At least 32 random characters, shared with a gateway you run in front of `/mcp`; see [Agents through a gateway](#agents-through-a-gateway). Off when unset. |
 | `COMINDLY_GATEWAY_EMAIL_HEADER` | no | The header your gateway names the signed-in member in; `X-Forwarded-Email` by default. |
-| `COMINDLY_GATEWAY_URL` | no | The gateway's MCP address, e.g. `https://mcp.example.com/mcp`. Settings → Your access then shows members how to connect through it, with no token. |
+| `COMINDLY_GATEWAY_URL` | no | The gateway's MCP address, e.g. `https://mcp.example.com/mcp`. Your access then shows members how to connect through it, with no token. |
 
 Members, sessions, personal tokens, stored secrets, the repositories the server indexes and the record
 of each indexing job live next to the index, in `_server` at the index location, so a container keeps
@@ -82,7 +82,7 @@ for a click, so mail scanners cannot use it up.
 **By code**: an admin invites an address and hands over the invitation code it gets (once, for that
 address, within 7 days), or gives an existing member a code with Reset code. With it, the person signs in for the first time and receives their own
 sign-in code, shown once, which they use with their email address from then on. They can make a new
-one under Settings → Your access; an admin can reset it for someone who lost theirs. Each new code
+one under Your access; an admin can reset it for someone who lost theirs. Each new code
 signs the person out everywhere else. Codes are generated, never chosen; five wrong ones pause that
 address for 15 minutes from the same client only, so nobody can lock someone else out.
 
@@ -93,7 +93,7 @@ sessions last 30 days.
 access tokens, sign-in code, invitations and pending sign-in links at once, so every way back in closes
 together, the provider included. People named in `COMINDLY_ADMIN_EMAILS` are removed by changing that
 setting. comindly keeps no keys of their own for members; if they knew the server's git or LLM tokens,
-rotate those under Settings → Secrets.
+rotate those under Settings → Integrations.
 
 ## Roles
 
@@ -112,7 +112,7 @@ whose token it uses.
 ## Agents
 
 Agents reach the server's tools at `https://<your server>/mcp` (MCP over HTTP) with a personal
-access token from Settings → Your access, which also shows the command or config for Claude Code,
+access token from Your access, which also shows the command or config for Claude Code,
 Cursor, Codex and VS Code. For Claude Code:
 
 ```sh
@@ -120,8 +120,8 @@ claude mcp add --transport http --scope user comindly https://comindly.example.c
   --header "Authorization: Bearer <token>"
 ```
 
-![Settings → Your access: a sign-in code, agent tokens and the setup for each agent](../assets/screenshots/access.webp#only-light)
-![Settings → Your access: a sign-in code, agent tokens and the setup for each agent](../assets/screenshots/access-dark.webp#only-dark)
+![Your access: a sign-in code, agent tokens and the setup for each agent](../assets/screenshots/access.webp#only-light)
+![Your access: a sign-in code, agent tokens and the setup for each agent](../assets/screenshots/access-dark.webp#only-dark)
 
 Until the first index exists, agents get `503` with the reason; they connect once an admin has
 indexed. Nothing is installed on the developer's machine, and no storage credentials leave the server. A
@@ -129,7 +129,7 @@ personal access token is for agents and scripts: it reads and writes the index a
 cannot manage the account, its tokens, members or the server's secrets; that needs signing in. It can
 revoke itself (`POST /api/v1/auth/token/revoke`), as `comindly logout` does.
 A token lasts 30 days, 90 days (the default), a year or without expiry, chosen when it is created.
-An expired token stops working and shows as expired under Settings → Your access; it is removed 30
+An expired token stops working and shows as expired under Your access; it is removed 30
 days later. Through the API, `POST /api/v1/tokens` takes `{"name": "…", "expires_in_days": 90}`
 (`null` for no expiry). Records an agent writes say which member it works for; after each re-index, agents get the new
 index without reconnecting. Ledger records written in the app carry the member's address.
@@ -148,7 +148,7 @@ server, and it must drop these headers when a client sends them. Without a gatew
 agents use personal access tokens as above.
 
 Someone invited joins on their first call through the gateway, as they would on signing in to the
-app, so they never need to open it. Set `COMINDLY_GATEWAY_URL` and Settings → Your access shows the
+app, so they never need to open it. Set `COMINDLY_GATEWAY_URL` and Your access shows the
 command for each agent. An MCP OAuth proxy only sends people back to the addresses it allows: local
 ones (`http://localhost:*`, `http://127.0.0.1:*`) cover Claude Code, Cursor, Codex and VS Code; the
 Claude desktop app and claude.ai need `https://claude.ai/api/mcp/auth_callback` and
@@ -170,7 +170,7 @@ including `comindly serve` for agents and the agent hooks. Admins can start inde
 the developer's machine, and `--use acme` runs one command against the server. `comindly doctor`
 shows who the command line is signed in as and whether its token still works. `comindly logout`
 revokes that token on the server and forgets the sign-in on that machine; when the server cannot be
-reached, it says so, and the token can be revoked under Settings → Your access. The command line's
+reached, it says so, and the token can be revoked under Your access. The command line's
 token expires after 90 days; the command line then says so and asks to run `comindly login` again.
 Someone signed in with an earlier version, through `comindly login <url>`, finds that sign-in as a
 profile called `default`.
@@ -187,7 +187,7 @@ with `read_repository` and `read_api`, or a fine-grained GitHub token with Conte
 
 ## Audit log
 
-Admins see who changed what under Settings → Audit, newest first: sign-ins and sign-outs, joining,
+Admins see who changed what under Activity → Changes, newest first: sign-ins and sign-outs, joining,
 invitations, role changes, removals, sign-in code resets, tokens created and revoked, command-line
 sign-ins approved or denied, secrets saved or removed, and changes to the repositories. Token values and
 codes are never recorded. The log is also at `GET /api/v1/audit` (admins, signed in): `limit`
