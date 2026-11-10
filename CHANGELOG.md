@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Repositories and Your access are pages of their own in the sidebar; Settings keeps what applies to everyone (General, Models & prompts, Members, Integrations) and gains an About section. The Teams card moves to the bottom of Repositories, and the audit trail becomes Activity → Changes. Old /settings/repositories, /settings/access and /settings/audit links redirect.
+
 ## [0.5.0-beta.9](https://github.com/sayef/comindly/compare/v0.5.0-beta.8...v0.5.0-beta.9) - 2026-11-10
 
 ### Changed

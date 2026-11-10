@@ -633,6 +633,7 @@ export const api = {
   saveSettings: (c: SettingsChange) => post("/api/v1/settings", c),
   testIndex: (index_dir: string) => post("/api/v1/settings/test", { index_dir }),
   logging: () => get<Logging>("/api/v1/logging"),
+  health: () => get<{ status: string; version: string }>("/health"),
   setLogging: (l: Logging) => post("/api/v1/logging", l),
   context: async (focus: string) => {
     const path = `/api/v1/context?focus=${encodeURIComponent(focus)}`;

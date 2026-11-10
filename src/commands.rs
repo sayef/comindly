@@ -286,7 +286,7 @@ fn folders_here(flag: Option<&str>, folders: &[String]) -> Result<Vec<String>> {
         return Ok(Vec::new());
     }
     if profile::chosen(flag) != LOCAL {
-        bail!("a server indexes its own repository list; add repositories in its app (Settings → Repositories), or `comindly use local` to index folders here");
+        bail!("a server indexes its own repository list; add repositories in its app (Repositories), or `comindly use local` to index folders here");
     }
     folders
         .iter()
@@ -605,7 +605,7 @@ fn logout(flag: Option<&str>) -> Result<()> {
             term::warn(&format!(
                 "could not revoke the access token on the server: {e:#}"
             ));
-            term::note("it stays valid until you revoke it in the app (Settings → Your access)");
+            term::note("it stays valid until you revoke it in the app (Your access)");
         }
     }
     Ok(())

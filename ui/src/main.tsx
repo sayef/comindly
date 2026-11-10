@@ -76,19 +76,21 @@ createRoot(document.getElementById("root")!).render(
                   <Route path="packages" element={<PackagesPage />} />
                   <Route path="flows" element={<FlowsPage />} />
                   <Route path="activity" element={<ActivityPage />} />
+                  <Route path="activity/changes" element={<AuditPage />} />
                   <Route path="activity/:id" element={<ActivityPage />} />
+                  <Route path="repositories" element={<RepositoriesPage />} />
+                  <Route path="access" element={<AccessPage />} />
                   <Route path="setup" element={<SetupPage />} />
                   <Route path="settings" element={<SettingsShell />}>
                     <Route index element={<SettingsPage />} />
-                    <Route path="repositories" element={<RepositoriesPage />} />
+                    <Route path="repositories" element={<Navigate to="/repositories" replace />} />
                     <Route path="models" element={<PromptsPage />} />
                     <Route path="prompts" element={<Navigate to="/settings/models" replace />} />
                     <Route path="members" element={<MembersPage />} />
                     <Route path="integrations" element={<IntegrationsPage />} />
-                    <Route path="audit" element={<AuditPage />} />
-                    <Route path="access" element={<AccessPage />} />
+                    <Route path="audit" element={<Navigate to="/activity/changes" replace />} />
+                    <Route path="access" element={<Navigate to="/access" replace />} />
                   </Route>
-                  <Route path="repositories" element={<Navigate to="/settings/repositories" replace />} />
                   <Route path="*" element={<OverviewPage />} />
                 </Route>
               </Routes>

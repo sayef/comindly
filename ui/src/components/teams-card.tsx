@@ -49,7 +49,7 @@ export function TeamsCard() {
         <CardTitle>Teams</CardTitle>
         <CardDescription>
           Teams label repositories, so everyone can focus on theirs; nobody loses access to the rest. A repository can belong to several
-          teams. Label repositories here or under Repositories.
+          teams. Label repositories here, or in the list above.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">

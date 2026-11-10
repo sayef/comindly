@@ -59,7 +59,7 @@ pub fn run(flag: Option<&str>) -> ExitCode {
     checks.push(check(
         !agents.is_empty(),
         format!("comindly's tools are set up for {}", agents.join(", ")),
-        "no agent uses comindly's tools yet: the app's Settings → Your access shows how to add them",
+        "no agent uses comindly's tools yet: the app's Your access page shows how to add them",
     ));
     let hooks = ["~/.claude/settings.json", ".claude/settings.json"]
         .iter()

@@ -8,7 +8,6 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Notice } from "@/components/notice";
 import { TeamSection, Unsaved, useUnsavedWarning } from "@/components/team-settings";
-import { TeamsCard } from "@/components/teams-card";
 import { api, type Logging, type SettingsChange } from "@/lib/api";
 
 const field = "flex flex-col gap-1.5 text-sm font-semibold";
@@ -65,16 +64,7 @@ export function SettingsPage() {
   return (
     <div className="flex max-w-3xl flex-col gap-5">
       <PageHeader title="Settings">
-        {server ? (
-          <>
-            The index is <span className="font-mono text-foreground [overflow-wrap:anywhere]">{s.index_effective}</span>, set by the deployment.
-          </>
-        ) : (
-          <>
-            Saved in <span className="font-mono text-foreground [overflow-wrap:anywhere]">{s.config_path}</span>, shared with the command
-            line, the MCP server and hooks.
-          </>
-        )}
+        {server ? "How this server works for everyone on it." : "How comindly works on this machine, for the app, the command line and agents."}
       </PageHeader>
       <SettingsTabs />
 
@@ -118,7 +108,6 @@ export function SettingsPage() {
 
       <TeamSection part="org" />
 
-      <TeamsCard />
 
       {!server && (
         <Section title="You" description="Shown on the ledger records you write and review.">
@@ -190,7 +179,31 @@ export function SettingsPage() {
           {result(saveFresh)}
         </Section>
       )}
+      <AboutSection server={server} index={s.index_effective} config={s.config_path} />
     </div>
+  );
+}
+
+/** Where the index and settings live and which version runs, for when someone asks. */
+function AboutSection({ server, index, config }: { server: boolean; index: string; config: string }) {
+  const health = useQuery({ queryKey: ["health"], queryFn: api.health });
+  const me = useQuery({ queryKey: ["me"], queryFn: api.me });
+  const row = (label: string, value: React.ReactNode) => (
+    <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-sm">
+      <dt className="w-32 shrink-0 text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 font-mono text-xs leading-5 [overflow-wrap:anywhere]">{value}</dd>
+    </div>
+  );
+  const ways = (me.data?.sign_in_methods ?? []).map((m) => (m === "oidc" ? (me.data?.oidc_label ?? "single sign-on") : m === "email" ? "emailed links" : "codes admins hand out"));
+  return (
+    <Section title={server ? "About this server" : "About this machine"}>
+      <dl className="flex flex-col gap-2">
+        {row("Index", <>{index}{server && <span className="font-sans text-muted-foreground"> (set by the deployment)</span>}</>)}
+        {!server && row("Settings file", config)}
+        {health.data && row("Version", health.data.version)}
+        {server && ways.length > 0 && row("Sign-in", <span className="font-sans">{ways.join(", ")}</span>)}
+      </dl>
+    </Section>
   );
 }
 
@@ -230,14 +243,11 @@ function SettingsNav() {
   const server = me.data?.mode === "server";
   const admin = me.data?.role === "admin";
   const tab = ({ isActive }: { isActive: boolean }) =>
-    `flex h-8 items-center rounded-md px-3 text-xs font-semibold pointer-coarse:h-11 transition-colors duration-100 ${isActive ? "bg-card text-foreground shadow-[0_1px_2px_var(--shadow-ink)]" : "text-muted-foreground hover:text-foreground"}`;
+    `flex h-8 shrink-0 items-center whitespace-nowrap rounded-md px-3 text-xs font-semibold pointer-coarse:h-11 transition-colors duration-100 ${isActive ? "bg-card text-foreground shadow-[0_1px_2px_var(--shadow-ink)]" : "text-muted-foreground hover:text-foreground"}`;
   return (
-    <nav className="flex w-fit max-w-full flex-wrap gap-0.5 rounded-lg bg-secondary p-0.5" aria-label="Settings">
+    <nav className="flex w-fit max-w-full gap-0.5 overflow-x-auto rounded-lg bg-secondary p-0.5 sm:flex-wrap" aria-label="Settings">
       <NavLink to="/settings" end className={tab}>
         General
-      </NavLink>
-      <NavLink to="/settings/repositories" className={tab}>
-        Repositories
       </NavLink>
       <NavLink to="/settings/models" className={tab}>
         Models &amp; prompts
@@ -250,15 +260,7 @@ function SettingsNav() {
           <NavLink to="/settings/integrations" className={tab}>
             Integrations
           </NavLink>
-          <NavLink to="/settings/audit" className={tab}>
-            Audit
-          </NavLink>
         </>
-      )}
-      {server && (
-        <NavLink to="/settings/access" className={tab}>
-          Your access
-        </NavLink>
       )}
     </nav>
   );

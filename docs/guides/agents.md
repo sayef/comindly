@@ -1,7 +1,7 @@
 # Using comindly with agents
 
 An agent connected to comindly (see [Getting started](../getting-started.md#4-connect-your-agent), or on
-a team server Settings → Your access, which also covers signing in through your organisation's
+a team server's Your access page, which also covers signing in through your organisation's
 [gateway](self-hosting.md#agents-through-a-gateway) with no token)
 sees comindly's tools. An agent that runs `comindly serve` reaches the engine of the profile in use:
 the local one, or a team server after `comindly use`. It decides when to call them; you ask in plain words. This page shows what to

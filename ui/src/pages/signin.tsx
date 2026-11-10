@@ -192,7 +192,7 @@ function ByAddress({ email: byEmail, code: byCode, primary }: { email: boolean; 
         <Reveal
           label="Your sign-in code"
           value={signIn.data.code}
-          hint="Save it in your password manager. It is not shown again; you can make a new one under Settings → Your access."
+          hint="Save it in your password manager. It is not shown again; you can make a new one under Your access."
         />
         <Button variant="brand" onClick={home}>
           I have saved it

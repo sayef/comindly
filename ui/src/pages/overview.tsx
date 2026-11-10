@@ -185,7 +185,7 @@ function CreateTeam({ at }: { at?: string }) {
   const create = useMutation({
     mutationFn: () => api.createTeam(name, index),
     meta: { inline: true },
-    onSuccess: () => (qc.invalidateQueries(), navigate("/settings/repositories")),
+    onSuccess: () => (qc.invalidateQueries(), navigate("/repositories")),
   });
   return (
     <FormCard onSubmit={() => name.trim() && index.trim() && create.mutate()}>
@@ -284,11 +284,11 @@ export function OverviewPage() {
         <p className="text-sm text-muted-foreground">
           {admin
             ? "Nothing is indexed yet. Add the org's repositories and index them; everyone signed in here then sees the same graph."
-            : "Nothing is indexed yet. An admin adds the org's repositories under Settings → Repositories; this page fills in once they are indexed."}
+            : "Nothing is indexed yet. An admin adds the org's repositories under Repositories; this page fills in once they are indexed."}
         </p>
         {admin && (
           <Button variant="brand" asChild>
-            <Link to="/settings/repositories">Add repositories</Link>
+            <Link to="/repositories">Add repositories</Link>
           </Button>
         )}
       </Welcome>
@@ -316,7 +316,7 @@ export function OverviewPage() {
         </p>
         <div className="flex flex-wrap justify-center gap-2">
           <Button variant="brand" asChild>
-            <Link to="/settings/repositories">Add repositories</Link>
+            <Link to="/repositories">Add repositories</Link>
           </Button>
           <Button variant="outline" asChild>
             <Link to="/settings">Org settings</Link>
@@ -340,7 +340,7 @@ export function OverviewPage() {
         </div>
         <p className="text-xs text-muted-foreground">
           Just for yourself?{" "}
-          <Link to="/settings/repositories" className="underline underline-offset-2">
+          <Link to="/repositories" className="underline underline-offset-2">
             Add repositories
           </Link>{" "}
           and index them here, or change the location in{" "}
@@ -395,7 +395,7 @@ export function OverviewPage() {
           <Stat
             label="Repositories"
             value={o.repos.length.toLocaleString()}
-            to="/settings/repositories"
+            to="/repositories"
             parts={bySize.map((r, i) => ({
               key: r.repo,
               value: r.symbols,

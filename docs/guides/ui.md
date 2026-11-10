@@ -58,7 +58,7 @@ can be bookmarked or shared.
   opens one repository.
 - **Packages**: internal packages, who publishes each, and the version every consumer pins, marked
   when it is behind the publisher (or ahead of the version in its source).
-- **Settings → Repositories**: what is in the index, and where each repository lives on this machine.
+- **Repositories**: what is in the index, and where each repository lives on this machine.
   **From GitHub or GitLab** lists the repositories of an organisation or group (github.com, GitHub
   Enterprise, gitlab.com or a self-hosted GitLab, subgroups included) with your existing git login, a
   `GITHUB_TOKEN` / `GITLAB_TOKEN`, or a token it asks for once (kept by your git credential helper). Tick
