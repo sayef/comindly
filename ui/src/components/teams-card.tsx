@@ -182,7 +182,7 @@ function Removable({ onRemove, children }: { onRemove?: () => void; children: Re
       <span className="flex items-center gap-1">
         {children}
         {onRemove && (
-          <button onClick={onRemove} aria-label={`Remove ${children}`} className="-mr-0.5 text-muted-foreground hover:text-foreground">
+          <button onClick={onRemove} aria-label={`Remove ${children}`} className="relative after:absolute after:-inset-1.5 after:content-[''] -mr-0.5 text-muted-foreground hover:text-foreground">
             <X className="size-3" />
           </button>
         )}

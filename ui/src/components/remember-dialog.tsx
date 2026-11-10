@@ -38,7 +38,7 @@ function SymbolPicker({ value, onChange }: { value: Node[]; onChange: (v: Node[]
           {value.map((n) => (
             <span key={n.id} className="flex items-center gap-1 rounded-sm bg-muted px-2 py-0.5 text-xs">
               <RepoDot repo={n.repo} /> {n.name}
-              <button type="button" aria-label={`Remove ${n.name}`} onClick={() => onChange(value.filter((x) => x.id !== n.id))}>
+              <button type="button" aria-label={`Remove ${n.name}`} className="relative after:absolute after:-inset-1.5 after:content-['']" onClick={() => onChange(value.filter((x) => x.id !== n.id))}>
                 <X className="size-3" />
               </button>
             </span>

@@ -6,6 +6,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- On phones, choosing a run in Activity brings its details into view instead of leaving them below
+  the list.
+- On phones, the overview's Needs attention rows put the record's text on its own line instead of
+  squeezing it between the badge and its kind.
+- On phones, contract routes wrap instead of being cut short, so routes that share a start can be
+  told apart.
+- On phones, a ledger record's symbols sit under "About" and long names wrap instead of running past
+  the card's edge.
+- The remove buttons on team and symbol chips are easier to tap.
+- Ledger records written by an agent through a gateway name the agent ("Claude Code") instead of
+  the MCP library ("rmcp").
+
 ## [0.5.0-beta.8](https://github.com/sayef/comindly/compare/v0.5.0-beta.7...v0.5.0-beta.8) - 2026-11-09
 
 ### Changed

@@ -92,7 +92,7 @@ export function EntryCard({
   const status = statusLabel(entry);
   const ghostFirst = !asking && !(due && !retired);
   const about = r.anchors.length > 0 && (
-    <div className="flex items-baseline gap-2">
+    <div className="flex items-baseline gap-2 max-sm:flex-col max-sm:gap-1">
       <dt className="w-24 shrink-0 text-muted-foreground">About</dt>
       <dd className="flex min-w-0 flex-1 flex-wrap gap-1.5">
         {r.anchors.map((a) => (
@@ -102,7 +102,7 @@ export function EntryCard({
             title={`${a.path}:${a.line}${a.commit ? ` at ${a.commit.slice(0, 8)}` : ""}`}
           >
             <RepoDot repo={a.repo} />
-            <span className="shrink-0 truncate font-mono sm:max-w-[60%]">{a.name}</span>
+            <span className="min-w-0 truncate font-mono max-sm:whitespace-normal max-sm:[overflow-wrap:anywhere] sm:max-w-[60%] sm:shrink-0">{a.name}</span>
             {/* The path gives way from its start; the file name and line stay. */}
             <span className="flex min-w-0 font-mono text-muted-foreground">
               <span className="truncate [direction:rtl]">{a.path}</span>

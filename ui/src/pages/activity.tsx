@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Check, CircleSlash, Clock, Copy, FolderGit2, Loader2, PauseCircle, X } from "lucide-react";
 import { Link, useParams, useSearchParams } from "react-router";
+import { useEffect, useRef } from "react";
 import { ConfirmButton } from "@/components/confirm";
 import { duration, IndexLog, shortStatus, useCopy } from "@/components/index-log";
 import { PageHeader } from "@/components/page-header";
@@ -130,6 +131,11 @@ export function ActivityPage() {
   const all = jobs.data ?? [];
   const shown = all.filter((j) => matches(filter, j.status));
   const selected = id ?? (all.find((j) => j.status === "running") ?? all[0])?.id;
+  const detail = useRef<HTMLDivElement>(null);
+  // Stacked under the list on narrow screens, a chosen run's details are brought into view.
+  useEffect(() => {
+    if (id && window.matchMedia("(max-width: 1023px)").matches) detail.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+  }, [id]);
   const count = (f: Filter) => all.filter((j) => matches(f, j.status)).length;
   const lastOk = all.find((j) => j.status === "succeeded");
   const lastBad = all.find((j) => failedLike(j.status));
@@ -249,7 +255,11 @@ export function ActivityPage() {
               </div>
               <p className="border-t px-4 py-2 text-xs text-muted-foreground">The last 50 runs are kept.</p>
             </Card>
-            {selected && <Detail id={selected} who={who} />}
+            {selected && (
+              <div ref={detail} className="min-w-0 scroll-mt-4">
+                <Detail id={selected} who={who} />
+              </div>
+            )}
           </div>
         </>
       )}
