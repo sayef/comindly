@@ -4,6 +4,8 @@
 > Decision 2026-10-16: no automatic sources. Git harvest and the MR distiller were removed; records
 > come from people (`comindly remember`) and agents (MCP, hooks). Sections on harvest and the distiller
 > are historical.
+> Decision 2026-11-11: no stale status. Code changes add notes (moved, renamed, changed, with the commit
+> the record saw); a record stays active until someone retires it. Sections on staleness are historical.
 > One line: *the code graph says what breaks; the ledger says why it is this way, what was
 > already tried, and what must not be done — anchored to symbols, across repos, never stale.*
 

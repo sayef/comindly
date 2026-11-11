@@ -959,6 +959,7 @@ async fn overview(who: Member, Cur(s): Cur) -> Json<api::Overview> {
         contracts: d.contracts.len(),
         linked_contracts: linked,
         ledger: status,
+        review: crate::ledger::inbox(&entries, true).len(),
         skew,
         // Viewers read only.
         writable: d.root.is_some()

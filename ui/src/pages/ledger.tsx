@@ -118,7 +118,7 @@ export function LedgerPage() {
               "No notes from other teams are waiting for your teams."
             ) : view === "review" && !q ? (
               <>
-                Nothing needs review. Records that go stale, lose their symbol or get disputed land here; the{" "}
+                Nothing needs review. Records that lose their symbol, get disputed or repeat another land here; the{" "}
                 <button className="font-semibold text-brand hover:underline" onClick={() => setView("timeline")}>
                   timeline
                 </button>{" "}
@@ -130,7 +130,7 @@ export function LedgerPage() {
           )}
         </div>
       )}
-      <div className="grid gap-3">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-3">
         {rows.map((e) => {
           const m = when(e).slice(0, 7);
           const head = view === "timeline" && m !== month;

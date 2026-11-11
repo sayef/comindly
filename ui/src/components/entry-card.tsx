@@ -9,18 +9,35 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useAccess } from "@/lib/me";
-import { api, attention, type Entry, isChallenged, type ReviewAction, when } from "@/lib/api";
+import { KINDS } from "@/components/remember-dialog";
+import { api, attention, type Entry, isChallenged, type Note, type ReviewAction, when } from "@/lib/api";
 import { cn, date, sentence } from "@/lib/utils";
 
 const DONE: Record<string, string> = { confirm: "Confirmed", archive: "Archived", invalidate: "Invalidated", dispute: "Disputed", supersede: "Superseded", retract: "Retracted" };
 
 const STATUS: Record<string, "brand" | "warning" | "danger" | "outline"> = {
   active: "brand",
-  moved: "brand",
-  stale: "warning",
   orphaned: "danger",
   superseded: "outline",
   retracted: "outline",
+};
+
+const STATUS_HINT: Record<string, string> = {
+  orphaned: "None of the code it is about exists any more",
+  archived: "Was true, no longer applies; kept as history",
+  invalid: "Was never right; kept, marked invalid",
+  superseded: "Replaced by a newer record",
+  retracted: "Withdrawn; kept as history",
+};
+
+const KIND_HINT: Record<string, string> = Object.fromEntries(KINDS.map(([k, , hint]) => [k, hint]));
+
+const noteText = (n: Note) => {
+  const since = n.since ? ` since ${n.since.slice(0, 8)}` : "";
+  const now = n.now ? `, now at ${n.now}` : "";
+  if (n.what === "renamed") return `${n.name} renamed to ${n.renamed}${since}${now}`;
+  if (n.what === "gone") return `${n.name} no longer exists${since}`;
+  return `${n.name} ${n.what}${since}${now}`;
 };
 
 const TRUST: Record<string, [string, string]> = {
@@ -31,13 +48,17 @@ const TRUST: Record<string, [string, string]> = {
   T0: ["untrusted", "Failed signature or unsafe content: agents never see it"],
 };
 
-type Asked = "confirm" | "archive" | "invalidate";
+type Asked = "confirm" | "archive" | "invalidate" | "same";
 
 const PROMPT: Record<Asked, [string, string]> = {
   confirm: ["Confirm", "What did you check?"],
   archive: ["Archive", "What changed? It was true, but no longer applies."],
   invalidate: ["Invalidate", "Why is it wrong?"],
+  same: ["Archive as repeat", "What does the earlier record already say?"],
 };
+
+// Matches the server's cap on a review's reason.
+const MAX_REASON = 4000;
 
 export const trustLabel = (t: string) => sentence(TRUST[t]?.[0] ?? t);
 
@@ -52,7 +73,7 @@ export function TrustBadge({ trust }: { trust: string }) {
 }
 
 // Statuses that are the normal case and need no badge.
-const ROUTINE = new Set(["active", "moved"]);
+const ROUTINE = new Set(["active"]);
 
 export function statusLabel(e: Entry) {
   if (e.retired === "outdated") return "archived";
@@ -92,15 +113,18 @@ export function EntryCard({
   const erase = useMutation({ mutationFn: () => api.erase(r.id), onSuccess: refresh });
   const retired = entry.status === "retracted" || entry.status === "superseded";
   const challenged = isChallenged(entry);
-  const due = attention(entry) < 3;
+  const notes = entry.notes ?? [];
+  const due = attention(entry) < 3 || notes.length > 0;
   const fields = Object.entries(r.fields).filter(([k]) => k !== "at");
   const status = statusLabel(entry);
   const ghostFirst = !asking && !((due || entry.trust !== "T3") && !retired);
   const anchors = entry.vouched?.length ? entry.vouched : r.anchors;
   const alike = !retired ? entry.alike : undefined;
   const about = anchors.length > 0 && (
-    <div className="flex items-baseline gap-2 max-sm:flex-col max-sm:gap-1">
-      <dt className="w-24 shrink-0 text-muted-foreground">About</dt>
+    <div className="flex items-baseline gap-2 max-sm:flex-col max-sm:items-stretch max-sm:gap-1">
+      <dt className="w-24 shrink-0 text-muted-foreground" title="The code it is about, where it was when written or last confirmed">
+        About
+      </dt>
       <dd className="flex min-w-0 flex-1 flex-wrap gap-1.5">
         {anchors.map((a) => (
           <span
@@ -125,8 +149,19 @@ export function EntryCard({
   return (
     <Card className={cn("p-4", retired && "opacity-70")}>
       <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-        <Badge variant="outline">{sentence(r.kind)}</Badge>
-        {!ROUTINE.has(status) && <Badge variant={STATUS[entry.status] ?? "outline"}>{sentence(status)}</Badge>}
+        <Badge variant="outline" title={KIND_HINT[r.kind]}>
+          {sentence(r.kind)}
+        </Badge>
+        {!ROUTINE.has(status) && (
+          <Badge variant={STATUS[entry.status] ?? "outline"} title={STATUS_HINT[status]}>
+            {sentence(status)}
+          </Badge>
+        )}
+        {!retired && notes.length > 0 && entry.status !== "orphaned" && (
+          <Badge variant="outline" title="The code it is about moved, was renamed or changed since this was written. Check it, and confirm if it still holds">
+            Code changed
+          </Badge>
+        )}
         {entry.trust !== "T3" && !entry.outside?.length && <TrustBadge trust={entry.trust} />}
         {entry.outside?.length ? (
           <Badge variant="outline" title="Written about another team's code; it counts less until one of that team's members confirms it">
@@ -156,11 +191,13 @@ export function EntryCard({
       </div>
       <H className="mt-2.5 leading-snug font-semibold">{r.title}</H>
       {!compact && r.body && r.body !== r.title && <p className="mt-1.5 text-sm text-muted-foreground">{r.body}</p>}
-      {!compact && (r.trigger || fields.length > 0 || r.evidence.length > 0 || anchors.length > 0 || alike) && (
+      {!compact && (r.trigger || fields.length > 0 || r.evidence.length > 0 || anchors.length > 0 || alike || notes.length > 0) && (
         <dl className="mt-3 grid grid-cols-[minmax(0,1fr)] gap-1 text-xs">
           {alike && (
             <div className="flex gap-2">
-              <dt className="w-24 shrink-0 text-muted-foreground">Reads like</dt>
+              <dt className="w-24 shrink-0 text-muted-foreground" title="The earlier record this one may repeat">
+                Reads like
+              </dt>
               <dd className="min-w-0 [overflow-wrap:anywhere]">
                 {alike.title} <span className="font-mono text-muted-foreground">{alike.id.slice(0, 8)}</span>
               </dd>
@@ -168,7 +205,9 @@ export function EntryCard({
           )}
           {r.trigger && (
             <div className="flex gap-2">
-              <dt className="w-24 shrink-0 text-muted-foreground">Relevant when</dt>
+              <dt className="w-24 shrink-0 text-muted-foreground" title="When an agent or person should think of it">
+                Relevant when
+              </dt>
               <dd>{r.trigger}</dd>
             </div>
           )}
@@ -180,11 +219,25 @@ export function EntryCard({
           ))}
           {r.evidence.length > 0 && (
             <div className="flex gap-2">
-              <dt className="w-24 shrink-0 text-muted-foreground">Evidence</dt>
+              <dt className="w-24 shrink-0 text-muted-foreground" title="Commits, merge requests or tests that back it up">
+                Evidence
+              </dt>
               <dd className="font-mono break-all">{r.evidence.join(", ")}</dd>
             </div>
           )}
           {about}
+          {!retired && notes.length > 0 && (
+            <div className="flex gap-2 max-sm:flex-col max-sm:gap-1">
+              <dt className="w-24 shrink-0 text-muted-foreground" title="What happened to the code since the record, or its last confirmation, saw it; the commit is what it saw">
+                Since then
+              </dt>
+              <dd className="flex min-w-0 flex-col gap-0.5 font-mono [overflow-wrap:anywhere]">
+                {notes.map((n, i) => (
+                  <span key={i}>{noteText(n)}</span>
+                ))}
+              </dd>
+            </div>
+          )}
         </dl>
       )}
       {compact && about && <dl className="mt-3 text-xs">{about}</dl>}
@@ -220,12 +273,13 @@ export function EntryCard({
               <Input
                 autoFocus
                 value={reason}
+                maxLength={MAX_REASON}
                 onChange={(e) => setReason(e.target.value)}
                 placeholder={PROMPT[asking][1]}
                 aria-label={PROMPT[asking][1]}
                 className="h-8 max-w-sm"
               />
-              <Button size="sm" variant="outline" disabled={!reason.trim()} loading={review.isPending} onClick={() => review.mutate({ action: asking, why: reason })}>
+              <Button size="sm" variant="outline" disabled={!reason.trim()} loading={review.isPending} onClick={() => review.mutate(asking === "same" ? { action: "archive", why: `Same as ${alike?.id.slice(0, 8) ?? "an earlier record"}: ${reason.trim()}` } : { action: asking, why: reason })}>
                 {PROMPT[asking][0]}
               </Button>
               <Button size="sm" variant="ghost" onClick={() => setAsking(null)}>
@@ -245,8 +299,7 @@ export function EntryCard({
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => review.mutate({ action: "archive", why: `Same as ${alike.id.slice(0, 8)}: ${alike.title}` })}
-                      loading={review.isPending}
+                      onClick={() => setAsking("same")}
                       title="Archive this one; the earlier record stands"
                     >
                       <Copy /> Same as earlier

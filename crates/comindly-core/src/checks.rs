@@ -442,6 +442,7 @@ mod tests {
             confirmers: Vec::new(),
             vouched: Vec::new(),
             alike: None,
+            notes: Vec::new(),
         }];
         assert!(revivals(&e, &[row("1.0.1")]).is_empty());
         assert_eq!(revivals(&e, &[row("1.3.0")]).len(), 1);

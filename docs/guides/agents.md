@@ -49,9 +49,11 @@ this first".
 
 ## Telling agents when to use it
 
-comindly sends agents guidance on when to reach for each tool: as the MCP server's instructions when
-they connect, and at the start of each session through the [hooks](#hooks). To put the same guidance
-in a repository, where agents read it before they look at their tools and your team can adjust it:
+comindly sends agents short guidance on when to reach for each tool: as the MCP server's instructions
+when they connect, and at the start of each session through the [hooks](#hooks). A repository can
+carry the full playbook, where agents read it before they look at their tools and your team can adjust
+it: how comindly sees the code, a change step by step, how to read notes and trust, and how to write
+and review records:
 
 ```sh
 comindly init-agents >> AGENTS.md          # or CLAUDE.md

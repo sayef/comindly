@@ -332,11 +332,17 @@ impl Record {
 
     /// Reject records that would mislead or carry secrets; caps keep them reviewable.
     pub fn validate(&self) -> Result<()> {
-        if self.title.is_empty() || self.title.chars().count() > 160 {
-            bail!("title must be 1–160 characters");
+        // A review keeps its reason in the title.
+        let (cap, what) = if self.kind == Kind::Relation {
+            (MAX_REASON, "a reason")
+        } else {
+            (MAX_TITLE, "a title")
+        };
+        if self.title.is_empty() || self.title.chars().count() > cap {
+            bail!("{what} must be 1–{cap} characters");
         }
-        if self.body.chars().count() > 4000 {
-            bail!("body is limited to 4000 characters");
+        if self.body.chars().count() > MAX_BODY {
+            bail!("the body is limited to {MAX_BODY} characters");
         }
         if self.kind != Kind::Relation && self.anchors.is_empty() {
             bail!("a record needs at least one anchor (a symbol it is about)");
@@ -351,9 +357,9 @@ impl Record {
             s.path.trim().is_empty()
                 || s.code.trim().is_empty()
                 || s.code.lines().count() > MAX_SNIPPET_LINES
-                || s.code.chars().count() > 4000
+                || s.code.chars().count() > MAX_SNIPPET_CHARS
         }) {
-            bail!("a snippet needs a path and 1–{MAX_SNIPPET_LINES} lines of code (4000 characters at most)");
+            bail!("a snippet needs a path and 1–{MAX_SNIPPET_LINES} lines of code ({MAX_SNIPPET_CHARS} characters at most)");
         }
         if self.kind == Kind::Attempt && self.evidence.is_empty() {
             bail!("an attempt needs evidence (a revert commit, failing test, error, MR, …)");
@@ -376,12 +382,10 @@ impl Record {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 pub enum Status {
+    /// Standing until someone retires it; code changes only add notes. Older engines said moved or stale.
+    #[serde(alias = "moved", alias = "stale")]
     Active,
-    /// The anchored symbol moved or was renamed; its body is unchanged.
-    Moved,
-    /// The anchored symbol's body changed since the record was written: re-verify.
-    Stale,
-    /// The anchored symbol no longer exists.
+    /// None of the anchored symbols exist any more.
     Orphaned,
     Superseded,
     Retracted,
@@ -428,6 +432,51 @@ pub struct Entry {
     /// An older standing record this one reads like, until a person keeps or retires it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub alike: Option<Alike>,
+    /// What happened to the anchored code since the record, or its latest confirmation, saw it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<Note>,
+}
+
+/// A change to one anchored symbol: `changed`, `moved` (another file), `renamed` or `gone`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Note {
+    pub what: String,
+    /// The symbol's name when the record saw it.
+    pub name: String,
+    /// Where it is now (`path:line`); absent when gone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub now: Option<String>,
+    /// Its name now, when renamed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub renamed: Option<String>,
+    /// The indexed commit the record saw, to compare against.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since: Option<String>,
+}
+
+impl Note {
+    /// One line for agents and people: "`merge` changed since 0cdb88b, now at app/x.py:40".
+    pub fn text(&self) -> String {
+        let since = self
+            .since
+            .as_deref()
+            .map(|c| format!(" since {}", &c[..c.len().min(8)]))
+            .unwrap_or_default();
+        let now = self
+            .now
+            .as_deref()
+            .map(|n| format!(", now at {n}"))
+            .unwrap_or_default();
+        match self.what.as_str() {
+            "renamed" => format!(
+                "`{}` renamed to `{}`{since}{now}",
+                self.name,
+                self.renamed.as_deref().unwrap_or("?")
+            ),
+            "gone" => format!("`{}` no longer exists{since}", self.name),
+            what => format!("`{}` {what}{since}{now}", self.name),
+        }
+    }
 }
 
 impl Entry {
@@ -461,6 +510,10 @@ pub fn review_action(action: &str) -> Option<(RelationKind, Option<&'static str>
     }
 }
 
+pub const MAX_TITLE: usize = 500;
+pub const MAX_REASON: usize = 4000;
+pub const MAX_BODY: usize = 20000;
+pub const MAX_SNIPPET_CHARS: usize = 16000;
 pub const MAX_SNIPPETS: usize = 3;
 
 pub const MAX_SNIPPET_LINES: usize = 60;
