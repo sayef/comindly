@@ -54,6 +54,8 @@ export interface Overview {
   contracts: number;
   linked_contracts: number;
   ledger: Record<string, number>;
+  /** Records waiting in Needs review. */
+  review?: number;
   skew: { package: string; publisher: string; published: string | null; consumer: string; locked: string | null }[];
   writable: boolean;
   root: string | null;
@@ -113,6 +115,16 @@ export interface Entry {
   vouched?: LedgerRecord["anchors"];
   /** An older standing record this one reads like, until a person keeps or retires it. */
   alike?: { id: string; title: string; score: number };
+  /** What happened to the anchored code since the record, or its latest confirmation, saw it. */
+  notes?: Note[];
+}
+
+export interface Note {
+  what: "changed" | "moved" | "renamed" | "gone";
+  name: string;
+  now?: string;
+  renamed?: string;
+  since?: string;
 }
 
 export interface LedgerEvent {
@@ -670,9 +682,8 @@ export const api = {
 /** When a record's fact happened (older harvested records carry `at`), else when it was recorded. */
 export const when = (e: Entry) => (e.record.fields.at as string | undefined) ?? e.record.created;
 
-/** 0 challenged, 1 stale, orphaned or a likely repeat, 3 nothing to do. */
-export const attention = (e: Entry) =>
-  isChallenged(e) ? 0 : ["stale", "orphaned"].includes(e.status) || e.alike ? 1 : 3;
+/** 0 challenged, 1 orphaned or a likely repeat, 3 nothing to do. */
+export const attention = (e: Entry) => (isChallenged(e) ? 0 : e.status === "orphaned" || e.alike ? 1 : 3);
 
 export const isChallenged = (e: Entry) =>
   !["superseded", "retracted"].includes(e.status) && e.related.some(([k]) => ["supersedes", "retracts", "disputes"].includes(k));

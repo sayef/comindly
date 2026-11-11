@@ -298,7 +298,7 @@ pub fn hook(
     let fresh: Vec<&Entry> = crate::ledger::about(entries, &ids)
         .into_iter()
         .filter(|e| e.trust >= Trust::T2)
-        .filter(|e| matches!(e.status, Status::Active | Status::Moved | Status::Stale))
+        .filter(|e| e.status == Status::Active)
         .filter(|e| !seen.contains(&e.record.id))
         .take(limit)
         .collect();

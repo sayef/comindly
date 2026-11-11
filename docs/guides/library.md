@@ -75,7 +75,8 @@ for entry in comindly_engine::ledger::derive(&records, &symbols, &verifier) {
 }
 ```
 
-`derive` adds each record's status (active, stale, orphaned, superseded) against the current code, as
+`derive` adds each record's status (active, orphaned, superseded, retracted) and notes on moved or
+changed code against the current code, as
 the app shows it. `Verifier::new(allowed_signers, cache)` also checks records' signatures; the default
 checks none.
 

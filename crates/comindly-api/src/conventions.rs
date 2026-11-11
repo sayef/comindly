@@ -84,11 +84,11 @@ impl Manual {
     }
 
     pub fn validate(&self) -> Result<()> {
-        if self.rule.trim().is_empty() || self.rule.chars().count() > 500 {
-            bail!("rule must be 1–500 characters");
+        if self.rule.trim().is_empty() || self.rule.chars().count() > 2000 {
+            bail!("rule must be 1–2000 characters");
         }
-        if self.dimension.is_empty() || self.dimension.len() > 40 {
-            bail!("dimension must be 1–40 characters");
+        if self.dimension.is_empty() || self.dimension.len() > 100 {
+            bail!("dimension must be 1–100 characters");
         }
         if let Some(why) = crate::ledger::suspicious(&self.rule) {
             bail!("rule rejected: {why}");

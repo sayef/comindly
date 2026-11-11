@@ -181,14 +181,7 @@ impl ComindlyServer {
         about
             .into_iter()
             .filter(|e| e.trust >= crate::ledger::Trust::T2)
-            .filter(|e| {
-                matches!(
-                    e.status,
-                    crate::ledger::Status::Active
-                        | crate::ledger::Status::Moved
-                        | crate::ledger::Status::Stale
-                )
-            })
+            .filter(|e| e.status == crate::ledger::Status::Active)
             .take(limit)
             .map(crate::ledger::line)
             .collect()
@@ -1018,7 +1011,7 @@ impl ComindlyServer {
 
     #[tool(
         name = "why",
-        description = "Reasoning blame for a symbol: recorded decisions, failed attempts, constraints, gotchas and intents about it or its class/file — with status (active / stale since the code changed / orphaned), trust and evidence. Check before changing code so you don't repeat a failed approach or break a constraint."
+        description = "Reasoning blame for a symbol: recorded decisions, failed attempts, constraints, gotchas and intents about it or its class/file — with status (active / orphaned), notes on code that changed since, trust and evidence. Check before changing code so you don't repeat a failed approach or break a constraint."
     )]
     async fn why(&self, Parameters(p): Parameters<FocusParam>) -> CallToolResult {
         let Some((name, ids)) = self.graph.scope_of(&p.focus) else {

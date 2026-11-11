@@ -441,7 +441,7 @@ export function OverviewPage() {
               key: k,
               value: n,
               label: k,
-              color: k === "stale" ? "var(--color-warning)" : k === "orphaned" ? "var(--color-danger)" : k === "active" || k === "moved" ? "var(--color-brand)" : "var(--color-input)",
+              color: k === "orphaned" ? "var(--color-danger)" : k === "active" ? "var(--color-brand)" : "var(--color-input)",
             }))}
             hint={
               totalRecords === 0
@@ -464,8 +464,8 @@ export function OverviewPage() {
           <Panel title={`Needs attention (${needs.length})`} to="/ledger" link="Ledger">
             {needs.slice(0, 4).map((e) => (
               <Link key={e.record.id} to="/ledger" className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-5 py-2.5 last:border-0 hover:bg-muted/60">
-                <Badge variant={isChallenged(e) ? "warning" : ["stale", "orphaned"].includes(e.status) ? "danger" : "default"}>
-                  {isChallenged(e) ? "Disputed" : ["stale", "orphaned"].includes(e.status) ? sentenceCase(e.status) : "Unconfirmed"}
+                <Badge variant={isChallenged(e) ? "warning" : e.status === "orphaned" ? "danger" : "default"}>
+                  {isChallenged(e) ? "Disputed" : e.status === "orphaned" ? "Orphaned" : e.alike ? "Possible repeat" : "Unconfirmed"}
                 </Badge>
                 <span className="order-last min-w-0 basis-full sm:order-none sm:basis-0 sm:flex-1">{e.record.title}</span>
                 <span className="text-xs text-muted-foreground">

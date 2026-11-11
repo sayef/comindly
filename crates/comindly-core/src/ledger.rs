@@ -14,12 +14,13 @@ use object_store::{ObjectStore, ObjectStoreExt, PutMode, PutOptions, PutPayload}
 use crate::model::{Symbol, SymbolKind};
 
 pub use comindly_api::ledger::{
-    injection, review_action, suspicious, MAX_SNIPPETS, MAX_SNIPPET_LINES, SCHEMA,
+    injection, review_action, suspicious, MAX_BODY, MAX_REASON, MAX_SNIPPETS, MAX_SNIPPET_CHARS,
+    MAX_SNIPPET_LINES, MAX_TITLE, SCHEMA,
 };
 
 pub use comindly_api::ledger::{
-    Alike, Anchor, AuthorKind, Entry, Identity, Kind, Provenance, Record, Relation, RelationKind,
-    Snippet, Status, Trust,
+    Alike, Anchor, AuthorKind, Entry, Identity, Kind, Note, Provenance, Record, Relation,
+    RelationKind, Snippet, Status, Trust,
 };
 
 /// An object store rooted at `<index_root>/<sub>` (local directory or remote prefix).
@@ -374,13 +375,18 @@ pub fn derive(
                     );
                 }
             }
-            let mut status = Status::Active;
-            let mut current = Vec::new();
-            for a in vouched.map_or(&r.anchors, |x| &x.anchors) {
-                let (st, now) = anchor_status(a, &by_id, &by_shape);
+            let anchors = vouched.map_or(&r.anchors, |x| &x.anchors);
+            let (mut current, mut notes) = (Vec::new(), Vec::new());
+            for a in anchors {
+                let (now, n) = anchor_state(a, &by_id, &by_shape);
                 current.extend(now);
-                status = status.max(st);
+                notes.extend(n);
             }
+            let mut status = if !anchors.is_empty() && current.is_empty() {
+                Status::Orphaned
+            } else {
+                Status::Active
+            };
             let counts = |kind: RelationKind| rels.iter().any(|(k, _, _)| *k == kind);
             if counts(RelationKind::Supersedes) {
                 status = Status::Superseded;
@@ -454,6 +460,7 @@ pub fn derive(
                 confirmers,
                 vouched: vouched.map(|x| x.anchors.clone()).unwrap_or_default(),
                 alike: None,
+                notes,
             }
         })
         .collect()
@@ -521,26 +528,45 @@ fn person_key(p: &Provenance) -> String {
     p.name.clone().unwrap_or_else(|| p.actor.clone())
 }
 
-fn anchor_status(
+/// The anchor's symbol now, and notes on what changed since the record saw it.
+fn anchor_state(
     a: &Anchor,
     by_id: &HashMap<String, &Symbol>,
     by_shape: &HashMap<(&str, u64), Vec<&Symbol>>,
-) -> (Status, Option<String>) {
-    match (by_id.get(&a.symbol), a.fingerprint) {
-        (Some(s), Some(fp)) => match s.fingerprint {
-            Some(now) if now.body != fp.body => (Status::Stale, Some(a.symbol.clone())),
-            _ => (Status::Active, Some(a.symbol.clone())),
-        },
-        (Some(_), None) => (Status::Active, Some(a.symbol.clone())),
-        (None, Some(fp)) => match by_shape
-            .get(&(a.repo.as_str(), fp.shape))
-            .map(Vec::as_slice)
+) -> (Option<String>, Vec<Note>) {
+    let note = |what: &str, s: Option<&Symbol>| Note {
+        what: what.into(),
+        name: a.name.clone(),
+        now: s.map(|s| format!("{}:{}", s.file_path, s.range.start.line)),
+        renamed: s.filter(|s| s.name != a.name).map(|s| s.name.clone()),
+        since: a.commit.clone(),
+    };
+    if let Some(s) = by_id.get(&a.symbol) {
+        let mut notes = Vec::new();
+        if matches!((a.fingerprint, s.fingerprint), (Some(was), Some(now)) if was.body != now.body)
         {
-            // Renamed or moved with an unchanged shape: follow it.
-            Some([only]) => (Status::Moved, Some(only.id.render())),
-            _ => (Status::Orphaned, None),
-        },
-        (None, None) => (Status::Orphaned, None),
+            notes.push(note("changed", Some(s)));
+        }
+        if s.file_path != a.path {
+            notes.push(note("moved", Some(s)));
+        }
+        return (Some(a.symbol.clone()), notes);
+    }
+    let shaped = a
+        .fingerprint
+        .and_then(|fp| by_shape.get(&(a.repo.as_str(), fp.shape)))
+        .map(Vec::as_slice);
+    match shaped {
+        // Renamed or moved with an unchanged shape: follow it.
+        Some([only]) => {
+            let what = if only.name != a.name {
+                "renamed"
+            } else {
+                "moved"
+            };
+            (Some(only.id.render()), vec![note(what, Some(only))])
+        }
+        _ => (None, vec![note("gone", None)]),
     }
 }
 
@@ -678,7 +704,7 @@ pub fn about<'e>(entries: &'e [Entry], symbols: &[String]) -> Vec<&'e Entry> {
     v
 }
 
-/// The review inbox (stale, orphaned, or unconfirmed agent records) or everything; most urgent first.
+/// The review inbox (challenged, orphaned or likely repeats) or everything; most urgent first.
 /// A machine proposed retiring this record but could not (it is human-backed): a person decides.
 pub fn challenged(e: &Entry) -> bool {
     !matches!(e.status, Status::Superseded | Status::Retracted)
@@ -694,10 +720,7 @@ pub fn inbox(entries: &[Entry], only_attention: bool) -> Vec<&Entry> {
     let mut v: Vec<&Entry> = entries
         .iter()
         .filter(|e| {
-            !only_attention
-                || challenged(e)
-                || matches!(e.status, Status::Stale | Status::Orphaned)
-                || e.alike.is_some()
+            !only_attention || challenged(e) || e.status == Status::Orphaned || e.alike.is_some()
         })
         .collect();
     v.sort_by_key(|e| (attention(e.status), e.trust));
@@ -706,10 +729,9 @@ pub fn inbox(entries: &[Entry], only_attention: bool) -> Vec<&Entry> {
 
 fn attention(s: Status) -> u8 {
     match s {
-        Status::Stale => 0,
-        Status::Orphaned => 1,
-        Status::Active | Status::Moved => 2,
-        Status::Superseded | Status::Retracted => 3,
+        Status::Orphaned => 0,
+        Status::Active => 1,
+        Status::Superseded | Status::Retracted => 2,
     }
 }
 
@@ -798,6 +820,12 @@ pub fn markdown(title: &str, entries: &[&Entry]) -> String {
                 h.at.get(..10).unwrap_or(&h.at)
             ));
         }
+        for n in &e.notes {
+            o.push_str(&format!("- note: {}\n", n.text()));
+        }
+        if !e.notes.is_empty() {
+            o.push_str("- the code changed since: check it before relying on this; confirm if it still holds\n");
+        }
         if !e.confirmers.is_empty() {
             o.push_str(&format!(
                 "- also confirmed by {} ({})\n",
@@ -871,8 +899,6 @@ pub fn line(e: &Entry) -> String {
 fn status_label(s: Status) -> &'static str {
     match s {
         Status::Active => "active",
-        Status::Moved => "active, symbol moved",
-        Status::Stale => "STALE — code changed since",
         Status::Orphaned => "orphaned — symbol gone",
         Status::Superseded => "superseded",
         Status::Retracted => "retracted",
@@ -947,13 +973,20 @@ mod tests {
                 .vouching(&note, |_| Some(Anchor::of(&new)))
         };
         let status = |extra: Record| {
-            derive(
+            let e = derive(
                 &[note.clone(), extra],
                 std::slice::from_ref(&new),
                 &crate::signing::Verifier::default(),
-            )[0]
-            .status
+            );
+            assert!(e[0].notes.is_empty(), "a confirmation clears the notes");
+            e[0].status
         };
+        let alone = derive(
+            std::slice::from_ref(&note),
+            std::slice::from_ref(&new),
+            &crate::signing::Verifier::default(),
+        );
+        assert_eq!(alone[0].notes[0].what, "changed");
         assert!(Record::review(&note, "confirm", " ", prov(AuthorKind::Agent)).is_err());
         assert_eq!(
             status(review(
@@ -1160,21 +1193,30 @@ mod tests {
             &crate::signing::Verifier::default(),
         );
         assert_eq!((e[0].status, e[0].trust), (Status::Active, Trust::T3));
-        // Body changed → stale.
+        assert!(e[0].notes.is_empty());
+        // Body changed → still active, with a note.
         let e = derive(
             &records,
             &[sym("check", 11, 8)],
             &crate::signing::Verifier::default(),
         );
-        assert_eq!(e[0].status, Status::Stale);
-        // Renamed, same shape → moved, re-anchored.
+        assert_eq!(e[0].status, Status::Active);
+        assert_eq!(e[0].notes[0].what, "changed");
+        // Renamed, same shape → followed, with a note.
         let e = derive(
             &records,
             &[sym("verify", 99, 7)],
             &crate::signing::Verifier::default(),
         );
-        assert_eq!(e[0].status, Status::Moved);
+        assert_eq!(e[0].status, Status::Active);
         assert!(e[0].current[0].contains("verify"));
+        assert_eq!(
+            (
+                e[0].notes[0].what.as_str(),
+                e[0].notes[0].renamed.as_deref()
+            ),
+            ("renamed", Some("verify"))
+        );
         // Gone → orphaned.
         let e = derive(
             &records,
@@ -1228,6 +1270,33 @@ mod tests {
         );
         bidi.body = "safe\u{202E}evil".into();
         assert!(bidi.validate().is_err());
+    }
+
+    #[test]
+    fn reviews_take_long_reasons() {
+        let s = sym("f", 1, 1);
+        let rec = Record::new(
+            Kind::Decision,
+            "use the column",
+            vec![Anchor::of(&s)],
+            prov(AuthorKind::Human),
+        );
+        let checked = "checked the merge route and the migration; ".repeat(40);
+        let ok = Record::relation(
+            RelationKind::Confirms,
+            &rec,
+            &checked,
+            prov(AuthorKind::Human),
+        );
+        assert!(ok.validate().is_ok(), "a reason well past a title's length");
+        let long = Record::relation(
+            RelationKind::Confirms,
+            &rec,
+            &"x".repeat(MAX_REASON + 1),
+            prov(AuthorKind::Human),
+        );
+        let err = long.validate().unwrap_err().to_string();
+        assert!(err.starts_with("a reason must be"), "{err}");
     }
 
     #[tokio::test]

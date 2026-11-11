@@ -25,10 +25,8 @@ anchored to symbols with a fingerprint of the code they describe:
 
 | Status | Meaning |
 |---|---|
-| active | the code is as it was |
-| moved | the symbol moved or was renamed, its body is unchanged |
-| stale | the code changed since the record was written: re-verify |
-| orphaned | the code is gone |
+| active | standing; notes say where its code moved, was renamed or changed since, and the commit it saw |
+| orphaned | all of its code is gone |
 | superseded / retracted | retired by a person or an agent acting for one; archive and invalidate retract a record |
 
 | Trust | Source |

@@ -21,6 +21,9 @@ pub struct Overview {
     pub linked_contracts: usize,
     /// Ledger entries per status.
     pub ledger: BTreeMap<String, usize>,
+    /// Records waiting in Needs review.
+    #[serde(default)]
+    pub review: usize,
     pub skew: Vec<Skew>,
     /// Whether this caller may write to the ledger and conventions.
     pub writable: bool,

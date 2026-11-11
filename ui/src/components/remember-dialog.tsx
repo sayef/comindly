@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { api, type Node } from "@/lib/api";
 import { cn, sentence } from "@/lib/utils";
 
-const KINDS = [
+export const KINDS = [
   ["constraint", "Constraint", "A rule the code must keep"],
   ["decision", "Decision", "A choice between alternatives, and why"],
   ["attempt", "Failed attempt", "Something tried that did not work (needs evidence)"],
@@ -173,7 +173,7 @@ export function RememberDialog({ open, onOpenChange, about = [] }: { open: boole
           </div>
           <label className={label}>
             Title
-            <Input value={title} maxLength={160} onChange={(e) => setTitle(e.target.value)} placeholder="One neutral, factual line…" />
+            <Input value={title} maxLength={500} onChange={(e) => setTitle(e.target.value)} placeholder="One neutral, factual line…" />
           </label>
           <label className={label}>
             Why

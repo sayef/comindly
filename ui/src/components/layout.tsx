@@ -140,11 +140,7 @@ export function Layout() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const inbox = overview.data
-    ? Object.entries(overview.data.ledger)
-        .filter(([k]) => k === "stale" || k === "orphaned")
-        .reduce((n, [, v]) => n + v, 0)
-    : 0;
+  const inbox = overview.data?.review ?? 0;
   const job = useQuery({ queryKey: ["index-job"], queryFn: api.indexJob });
   const busy = (job.data?.running ? 1 : 0) + (job.data?.queued?.length ?? 0);
   const version = versions.data?.length ?? 0;

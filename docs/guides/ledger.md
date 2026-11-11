@@ -4,8 +4,9 @@ What the code does not say.
 
 Records are short, typed facts anchored to symbols: an `attempt` that failed or was reverted, a
 `decision` with its rejected alternatives, a `constraint`, a `gotcha`, an `intent`, a `question`.
-They follow the code: moved code keeps its records, changed code marks them **stale**, deleted
-code marks them **orphaned**. Each anchor stores the indexed commit it was written against, and a
+They follow the code and stay active until someone archives, invalidates or supersedes them. When
+their code moves, is renamed or changes, a record gets a note saying so (**Code changed** in the
+app), with the commit it saw; when all of its code is gone it is **orphaned**. Each anchor stores the indexed commit it was written against, and a
 record can carry up to three short snippets of the code that shaped it, so a reader can see what was
 true then:
 
@@ -26,7 +27,7 @@ Hooks and the ledger sections of `zoom`/`context_pack` only use records at **T2 
 reason (a record's body, a review's `--reason`), so the next agent or person can see why and fix it:
 
 ```bash
-comindly ledger --inbox                       # stale, orphaned, disputed and likely repeats
+comindly ledger --inbox                       # orphaned, disputed and likely repeats
 comindly review <id> confirm --reason "…"     # still true: what you checked
 comindly review <id> archive --reason "…"     # was true, no longer applies (kept as history)
 comindly review <id> invalidate --reason "…"  # was wrong (kept, marked invalid)
@@ -40,16 +41,17 @@ archiving, invalidating and superseding; deleting is for people only (CLI and ap
 to confirm a record whenever they relied on it and checked it still matches the code: each person whose
 agent (or who themselves) confirmed it counts once, and cards show how many. A record a person wrote
 or confirmed, in the app or through their agent with `from_person`, is the team's rule (T3). A
-confirmation also vouches for the code as indexed then, so a stale record turns active again until
-that code changes. Reviewing in the app is optional.
+confirmation also vouches for the code as indexed then, so its notes clear until that code changes
+again. Reviewing in the app is optional.
 
 Before an agent's record is written, it is compared with the standing records on the same symbols or
 files. If one reads alike, nothing is written and the agent is pointed at it: it confirms that record
 (adding what it knows in the reason), or writes its own anyway with `distinct`, saying how it differs.
 That note is kept on the record as **Differs from**.
 Records that already repeat an earlier one on the same code (written in the app, or before this check)
-wait in **Needs review** as a **Possible repeat**: **Same as earlier** archives the later one, and
-**Keep both** confirms it.
+wait in **Needs review** as a **Possible repeat**: **Same as earlier** asks what the earlier record
+already says and archives the later one, and **Keep both** confirms it.
+A review's reason can run to a few paragraphs; titles stay short enough to read in a list.
 Every record and review shows who made it and when: the person's name (config `author_name`, else git
 `user.name`), and for agents also the agent ("claude-code for Ada Lovelace", taken from the MCP client
 or `COMINDLY_AGENT`). Set `record_names = false` (`comindly config set record_names=false`) to store
