@@ -6,7 +6,11 @@ Records are short, typed facts anchored to symbols: an `attempt` that failed or 
 `decision` with its rejected alternatives, a `constraint`, a `gotcha`, an `intent`, a `question`.
 They follow the code and stay active until someone archives, invalidates or supersedes them. When
 their code moves, is renamed or changes, a record gets a note saying so (**Code changed** in the
-app), with the commit it saw; when all of its code is gone it is **orphaned**. Each anchor stores the indexed commit it was written against, and a
+app), with the commit it saw; when all of its code is gone it is **orphaned**. A change the record
+already knew about leaves no note: one committed before it was written, or one its evidence cites,
+as a commit or as a merge or pull request (`mr:!123`, `pr:#123`). With the token it clones with,
+comindly asks GitLab or GitHub where a cited request or branch commit landed on the default branch,
+and shows it with the evidence ("mr:!123 (landed as f16857c)"). Each anchor stores the indexed commit it was written against, and a
 record can carry up to three short snippets of the code that shaped it, so a reader can see what was
 true then:
 

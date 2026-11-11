@@ -579,6 +579,97 @@ pub async fn write_repo_commits(uri: &str, repos: &[IndexedRepo]) -> Result<()> 
     Ok(())
 }
 
+/// One commit of a repository's recent default-branch history, newest first in [`RepoLogs`].
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct LoggedCommit {
+    pub sha: String,
+    /// Commit time, seconds since the epoch.
+    pub time: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mr: Option<u64>,
+    /// Files the commit added or changed.
+    pub files: Vec<String>,
+}
+
+/// A repository's recent default-branch history, and where cited work landed on it.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct RepoLog {
+    /// Newest first.
+    pub commits: Vec<LoggedCommit>,
+    /// Evidence (`mr:!N`, `commit:<branch sha>`) and the default-branch commits it became.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub landed: std::collections::BTreeMap<String, Vec<String>>,
+}
+
+/// Recent history per repository name.
+pub type RepoLogs = HashMap<String, RepoLog>;
+
+/// How many recent commits per repository the index keeps.
+pub const LOG_DEPTH: usize = 1000;
+
+impl From<crate::git::CommitFiles> for LoggedCommit {
+    fn from(c: crate::git::CommitFiles) -> Self {
+        LoggedCommit {
+            sha: c.sha,
+            time: c.time,
+            mr: c.mr,
+            files: c.changed,
+        }
+    }
+}
+
+/// Store each repository's recent history (`repo_log`: repo, JSON log).
+pub async fn write_repo_logs(uri: &str, logs: &RepoLogs) -> Result<()> {
+    if logs.is_empty() {
+        return Ok(());
+    }
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("repo", DataType::Utf8, false),
+        Field::new("log", DataType::Utf8, false),
+    ]));
+    let (names, json): (Vec<String>, Vec<String>) = logs
+        .iter()
+        .map(|(r, l)| Ok((r.clone(), serde_json::to_string(l)?)))
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
+        .unzip();
+    let batch = RecordBatch::try_new(
+        schema,
+        vec![
+            Arc::new(StringArray::from(names)) as ArrayRef,
+            Arc::new(StringArray::from(json)) as ArrayRef,
+        ],
+    )
+    .context("build repo_log batch")?;
+    let db = crate::storage::connect(uri).execute().await?;
+    write_versioned(&db, "repo_log", batch).await?;
+    Ok(())
+}
+
+/// Each repository's recent history; empty for indexes made before it was kept.
+pub async fn read_repo_logs(uri: &str) -> Result<RepoLogs> {
+    let db = crate::storage::connect(uri).execute().await?;
+    let Ok(tbl) = db.open_table("repo_log").execute().await else {
+        return Ok(RepoLogs::new());
+    };
+    let mut out = RepoLogs::new();
+    let mut st = tbl.query().execute().await?;
+    while let Some(b) = st.try_next().await? {
+        let (repo, log) = (str_col(&b, "repo")?, str_col(&b, "log")?);
+        for i in 0..b.num_rows() {
+            if let Ok(l) = serde_json::from_str(log.value(i)) {
+                out.insert(repo.value(i).to_string(), l);
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Blocking wrapper for [`read_repo_logs`].
+pub fn read_repo_logs_blocking(uri: &str) -> Result<RepoLogs> {
+    crate::rt::block_on(read_repo_logs(uri))
+}
+
 /// A repository in the index: its name, the commit and branch indexed and where it is cloned from.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct IndexedRepo {
@@ -1387,6 +1478,31 @@ async fn first_str(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn repo_logs_round_trip() {
+        let dir = std::env::temp_dir().join(format!("comindly-log-{}", std::process::id()));
+        let uri = dir.to_str().unwrap();
+        assert!(
+            read_repo_logs(uri).await.unwrap().is_empty(),
+            "older indexes have none"
+        );
+        let logs = RepoLogs::from([(
+            "orders".to_string(),
+            RepoLog {
+                commits: vec![LoggedCommit {
+                    sha: "abc".into(),
+                    time: 1,
+                    mr: Some(7),
+                    files: vec!["app.py".into()],
+                }],
+                landed: [("mr:!7".to_string(), vec!["abc".to_string()])].into(),
+            },
+        )]);
+        write_repo_logs(uri, &logs).await.unwrap();
+        assert_eq!(read_repo_logs(uri).await.unwrap(), logs);
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     #[tokio::test]
     async fn repo_meta_gains_remotes_and_old_tables_still_read() {

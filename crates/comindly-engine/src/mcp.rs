@@ -50,6 +50,8 @@ pub struct ComindlyServer {
     flows: Arc<HashMap<String, (String, Vec<String>)>>,
     /// Symbols by rendered id — used by `search` to look up candidate metadata.
     symbols: Arc<HashMap<String, Symbol>>,
+    /// Each repository's recent history, to settle notes on records.
+    logs: Arc<crate::index::RepoLogs>,
     /// Query embedder for `search`; `None` if the model could not be loaded (offline).
     embedder: Option<Arc<Embedder>>,
     uri: Arc<String>,
@@ -102,6 +104,7 @@ impl ComindlyServer {
         symbols: &[Symbol],
     ) -> Vec<crate::ledger::Entry> {
         let mut e = crate::ledger::derive(records, symbols, &crate::config::local_verifier());
+        crate::ledger::settle_notes(&mut e, records, &self.logs);
         crate::ledger::weigh_teams(&mut e, records, &self.team_settings());
         if let Some(embedder) = self.embedder.as_deref() {
             crate::ledger::flag_lookalikes(&mut e, records, embedder);
@@ -594,7 +597,7 @@ struct RememberParam {
     /// When a future engineer would need this.
     #[serde(default)]
     trigger: Option<String>,
-    /// Evidence: `commit:<sha>`, `mr:!123`, `test:<path>::<name>`, error text… Required for `attempt`.
+    /// Evidence: `commit:<sha>`, `mr:!123` or `pr:#123`, `test:<path>::<name>`, error text… Required for `attempt`.
     #[serde(default)]
     evidence: Vec<String>,
     /// Kind-specific fields, e.g. `{"outcome": "reverted"}`, `{"alternatives": "…"}`.
@@ -1931,6 +1934,7 @@ pub async fn load(uri: &str, markdown: bool, fresh: std::time::Duration) -> Resu
         style_guides: Arc::new(style_guides),
         flows: Arc::new(flows),
         symbols: Arc::new(by_id),
+        logs: Arc::new(crate::index::read_repo_logs(uri).await.unwrap_or_default()),
         embedder,
         uri: Arc::new(uri.to_string()),
         tables: Arc::new(crate::index::Tables::connect(uri, fresh).await?),

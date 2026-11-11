@@ -461,9 +461,108 @@ pub fn derive(
                 vouched: vouched.map(|x| x.anchors.clone()).unwrap_or_default(),
                 alike: None,
                 notes,
+                landed: Default::default(),
             }
         })
         .collect()
+}
+
+/// Drop `changed` and `moved` notes when every commit that touched the code since was already known
+/// to the record or a confirmation: cited as `commit:<sha>` or `mr:!N`, or committed before it was written.
+pub fn settle_notes(entries: &mut [Entry], records: &[Record], logs: &crate::index::RepoLogs) {
+    if logs.is_empty() {
+        return;
+    }
+    let mut about: HashMap<&str, Vec<&Record>> = HashMap::new();
+    for r in records {
+        match &r.relation {
+            None => about.entry(r.id.as_str()).or_default().push(r),
+            Some(rel) if rel.kind == RelationKind::Confirms => {
+                about.entry(rel.target.as_str()).or_default().push(r)
+            }
+            Some(_) => {}
+        }
+    }
+    for e in entries.iter_mut() {
+        for a in &e.record.anchors {
+            for ev in &e.record.evidence {
+                if let Some(shas) = logs.get(&a.repo).and_then(|l| l.landed.get(ev)) {
+                    e.landed.insert(ev.clone(), shas.clone());
+                }
+            }
+        }
+        if e.notes.is_empty() {
+            continue;
+        }
+        let known = about.get(e.record.id.as_str()).cloned().unwrap_or_default();
+        let latest = known
+            .iter()
+            .filter_map(|r| chrono::DateTime::parse_from_rfc3339(&r.created).ok())
+            .map(|t| t.timestamp())
+            .max();
+        let cited: Vec<&str> = known
+            .iter()
+            .flat_map(|r| r.evidence.iter())
+            .map(String::as_str)
+            .collect();
+        let anchors: Vec<&Anchor> = known.iter().flat_map(|r| r.anchors.iter()).collect();
+        e.notes.retain(|n| {
+            if !matches!(n.what.as_str(), "changed" | "moved") {
+                return true;
+            }
+            let Some(a) = anchors
+                .iter()
+                .find(|a| a.name == n.name && a.commit == n.since)
+            else {
+                return true;
+            };
+            let now = n
+                .now
+                .as_deref()
+                .and_then(|p| p.rsplit_once(':'))
+                .map(|p| p.0);
+            !own_change(logs.get(&a.repo), a, now, latest, &cited)
+        });
+    }
+}
+
+fn own_change(
+    log: Option<&crate::index::RepoLog>,
+    a: &Anchor,
+    now: Option<&str>,
+    written: Option<i64>,
+    cited: &[&str],
+) -> bool {
+    let (Some(log), Some(since)) = (log, a.commit.as_deref()) else {
+        return false;
+    };
+    let Some(end) = log.commits.iter().position(|c| c.sha == since) else {
+        return false;
+    };
+    let touched: Vec<_> = log.commits[..end]
+        .iter()
+        .filter(|c| {
+            c.files
+                .iter()
+                .any(|f| *f == a.path || Some(f.as_str()) == now)
+        })
+        .collect();
+    let landed: Vec<&str> = cited
+        .iter()
+        .filter_map(|ev| log.landed.get(*ev))
+        .flatten()
+        .map(String::as_str)
+        .collect();
+    let known = |c: &crate::index::LoggedCommit| {
+        written.is_some_and(|w| c.time <= w)
+            || landed.contains(&c.sha.as_str())
+            || cited.iter().any(|ev| match crate::landed::reference(ev) {
+                Some(crate::landed::Ref::Commit(x)) => c.sha.starts_with(x),
+                Some(crate::landed::Ref::Request(n)) => c.mr == Some(n),
+                None => false,
+            })
+    };
+    !touched.is_empty() && touched.iter().all(|c| known(c))
 }
 
 /// Notes on another team's code count less until one of its members confirms them, unless that
@@ -749,6 +848,22 @@ fn kind_rank(k: Kind) -> u8 {
 }
 
 /// Render entries as quoted, attributed facts with a verify pointer (never as instructions).
+/// Evidence with where it landed: "mr:!476 (landed as f16857c)".
+pub fn evidence_text(e: &Entry) -> String {
+    e.record
+        .evidence
+        .iter()
+        .map(|ev| match e.landed.get(ev) {
+            Some(shas) if !shas.is_empty() => {
+                let short: Vec<&str> = shas.iter().map(|s| &s[..s.len().min(7)]).collect();
+                format!("{ev} (landed as {})", short.join(", "))
+            }
+            _ => ev.clone(),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 pub fn markdown(title: &str, entries: &[&Entry]) -> String {
     let mut o = format!("## {title}\n");
     if entries.is_empty() {
@@ -776,7 +891,7 @@ pub fn markdown(title: &str, entries: &[&Entry]) -> String {
             o.push_str(&format!("- relevant when: {t}\n"));
         }
         if !r.evidence.is_empty() {
-            o.push_str(&format!("- evidence: {}\n", r.evidence.join(", ")));
+            o.push_str(&format!("- evidence: {}\n", evidence_text(e)));
         }
         let at: Vec<String> = e
             .anchors()
@@ -881,7 +996,7 @@ pub fn line(e: &Entry) -> String {
     let ev = if r.evidence.is_empty() {
         String::new()
     } else {
-        format!(" · evidence {}", r.evidence.join(", "))
+        format!(" · evidence {}", evidence_text(e))
     };
     format!(
         "[{} · {:?} · {}{}] {}{at}{ev} · by {}, {} · id `{}`",
@@ -998,6 +1113,88 @@ mod tests {
         assert_eq!(
             status(review(AuthorKind::Human, "still how we do it")),
             Status::Active
+        );
+    }
+
+    #[test]
+    fn a_change_the_record_already_knew_leaves_no_note() {
+        use crate::index::LoggedCommit;
+        let (old, new) = (sym("check", 10, 7), sym("check", 11, 7));
+        let mut anchor = Anchor::of(&old);
+        anchor.commit = Some("aaa0000".into());
+        let mut note = Record::new(
+            Kind::Decision,
+            "checks stay",
+            vec![anchor],
+            prov(AuthorKind::Agent),
+        );
+        note.created = "2026-11-11T13:20:00Z".into();
+        let written = chrono::DateTime::parse_from_rfc3339(&note.created)
+            .unwrap()
+            .timestamp();
+        let commit = |sha: &str, time: i64, mr: Option<u64>, file: &str| LoggedCommit {
+            sha: sha.into(),
+            time,
+            mr,
+            files: vec![file.into()],
+        };
+        let base = commit("aaa0000", written - 7200, None, "m.py");
+        let notes = |log: Vec<LoggedCommit>, evidence: &[&str]| {
+            let mut r = note.clone();
+            r.evidence = evidence.iter().map(|e| e.to_string()).collect();
+            let records = [r];
+            let mut e = derive(&records, std::slice::from_ref(&new), &Default::default());
+            let logs = crate::index::RepoLogs::from([(
+                "r".to_string(),
+                crate::index::RepoLog {
+                    commits: log,
+                    landed: [("commit:51a59d4".to_string(), vec!["fff5555".to_string()])].into(),
+                },
+            )]);
+            settle_notes(&mut e, &records, &logs);
+            e[0].notes.len()
+        };
+        let merged_before = commit("bbb1111", written - 600, None, "m.py");
+        let merged_after = commit("ccc2222", written + 600, None, "m.py");
+        let elsewhere = commit("ddd3333", written + 600, None, "other.py");
+        let merge = commit("eee4444", written + 600, Some(476), "m.py");
+        assert_eq!(
+            notes(vec![merged_before.clone(), base.clone()], &[]),
+            0,
+            "index lag"
+        );
+        assert_eq!(
+            notes(vec![merged_after.clone(), base.clone()], &[]),
+            1,
+            "a later change"
+        );
+        assert_eq!(
+            notes(
+                vec![merged_after.clone(), base.clone()],
+                &["commit:ccc2222"]
+            ),
+            0
+        );
+        assert_eq!(notes(vec![merge, base.clone()], &["mr:!476"]), 0);
+        let squashed = commit("fff5555", written + 600, None, "m.py");
+        assert_eq!(
+            notes(vec![squashed, base.clone()], &["commit:51a59d4"]),
+            0,
+            "landed as"
+        );
+        assert_eq!(
+            notes(vec![merged_after, merged_before, base.clone()], &[]),
+            1
+        );
+        assert_eq!(
+            notes(vec![elsewhere, base], &[]),
+            1,
+            "nothing explains the change"
+        );
+        assert_eq!(
+            notes(vec![commit("bbb1111", 0, None, "m.py")], &[]),
+            1,
+            "since not in the log"
         );
     }
 

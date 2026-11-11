@@ -23,6 +23,8 @@ pub struct Data {
     pub root: Option<String>,
     /// Why the index could not be loaded (the UIs then start empty).
     pub problem: Option<String>,
+    /// Each repository's recent history, to tell a record's own change from a later one.
+    pub logs: crate::index::RepoLogs,
 }
 
 impl Data {
@@ -38,7 +40,9 @@ impl Data {
         conventions.extend(crate::index::read_recipes_blocking(&dir).unwrap_or_default());
         let manual = crate::conventions::manual_blocking(root).unwrap_or_default();
         let records = crate::ledger::all_blocking(root).unwrap_or_default();
+        let logs = crate::index::read_repo_logs_blocking(&dir).unwrap_or_default();
         let mut entries = crate::ledger::derive(&records, &symbols, verifier);
+        crate::ledger::settle_notes(&mut entries, &records, &logs);
         let packages = crate::index::read_packages_blocking(&dir).unwrap_or_default();
         let findings = crate::checks::run(&entries, &symbols, &edges, &packages);
         crate::checks::promote(&mut entries, &findings);
@@ -53,6 +57,7 @@ impl Data {
             problem: None,
         });
         data.root = Some(root.to_string());
+        data.logs = logs;
         Ok(data)
     }
 
@@ -71,6 +76,7 @@ impl Data {
             deps: v.deps.into_owned(),
             root: None,
             problem: v.problem,
+            logs: Default::default(),
         }
     }
 
@@ -87,6 +93,7 @@ impl Data {
             deps: Vec::new(),
             root: Some(root.to_string()),
             problem: Some(problem),
+            logs: Default::default(),
         }
     }
 

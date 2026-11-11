@@ -117,6 +117,8 @@ export interface Entry {
   alike?: { id: string; title: string; score: number };
   /** What happened to the anchored code since the record, or its latest confirmation, saw it. */
   notes?: Note[];
+  /** Evidence and the default-branch commits it became. */
+  landed?: Record<string, string[]>;
 }
 
 export interface Note {

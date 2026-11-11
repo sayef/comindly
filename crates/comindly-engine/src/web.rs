@@ -185,6 +185,7 @@ impl Session {
             &self.data.symbols,
             &crate::config::local_verifier(),
         );
+        crate::ledger::settle_notes(&mut entries, records, &self.data.logs);
         {
             let teams = self.teams.read().unwrap_or_else(|e| e.into_inner());
             crate::ledger::weigh_teams(&mut entries, records, &teams);

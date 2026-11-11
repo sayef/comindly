@@ -435,6 +435,9 @@ pub struct Entry {
     /// What happened to the anchored code since the record, or its latest confirmation, saw it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<Note>,
+    /// Evidence (a merge or pull request, a branch commit) and the default-branch commits it became.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub landed: std::collections::BTreeMap<String, Vec<String>>,
 }
 
 /// A change to one anchored symbol: `changed`, `moved` (another file), `renamed` or `gone`.
