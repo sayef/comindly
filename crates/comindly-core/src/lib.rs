@@ -21,6 +21,7 @@ pub mod graph;
 pub mod hosting;
 pub mod index;
 pub mod infra;
+pub mod landed;
 pub mod lang;
 pub mod ledger;
 pub mod llm;

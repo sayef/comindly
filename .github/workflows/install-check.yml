@@ -70,7 +70,11 @@ jobs:
     name: cargo install (Rust 1.95)
     runs-on: ubuntu-latest
     steps:
-      - run: sudo apt-get update && sudo apt-get install -y protobuf-compiler cmake
+      # protoc from GitHub releases; cmake comes with the runner image (no Ubuntu mirror needed).
+      - uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: cmake --version
       - uses: dtolnay/rust-toolchain@1.95
       - name: Install from crates.io and run
         env:

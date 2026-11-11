@@ -128,6 +128,8 @@ mod tests {
     fn c(sha: &str, added: &[&str], changed: &[&str]) -> CommitFiles {
         CommitFiles {
             sha: sha.into(),
+            time: 0,
+            mr: None,
             subject: format!("commit {sha}"),
             added: added.iter().map(|s| s.to_string()).collect(),
             changed: changed.iter().map(|s| s.to_string()).collect(),

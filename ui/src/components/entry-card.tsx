@@ -219,10 +219,17 @@ export function EntryCard({
           ))}
           {r.evidence.length > 0 && (
             <div className="flex gap-2">
-              <dt className="w-24 shrink-0 text-muted-foreground" title="Commits, merge requests or tests that back it up">
+              <dt className="w-24 shrink-0 text-muted-foreground" title="Commits, merge or pull requests, or tests that back it up; where a request or branch commit landed on the default branch">
                 Evidence
               </dt>
-              <dd className="font-mono break-all">{r.evidence.join(", ")}</dd>
+              <dd className="font-mono break-all">
+                {r.evidence
+                  .map((ev) => {
+                    const shas = entry.landed?.[ev];
+                    return shas?.length ? `${ev} (landed as ${shas.map((s) => s.slice(0, 7)).join(", ")})` : ev;
+                  })
+                  .join(", ")}
+              </dd>
             </div>
           )}
           {about}

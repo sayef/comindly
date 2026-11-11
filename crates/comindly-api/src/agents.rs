@@ -56,8 +56,8 @@ index reflects each repository's default branch as of the last indexing.
   commit it saw: check the code before relying on it, and confirm it with what you checked if it holds.
 - When you learn something a later change must know (a decision and its reason, a constraint, an
   approach that failed and why, a trap), offer to record it with `remember`: one factual title, the
-  symbols it is about (`on`), and evidence such as `commit:<sha>` or `mr:!123` (required for a failed
-  attempt); anchor it on the narrowest symbols. `review` confirms, archives, invalidates, supersedes
+  symbols it is about (`on`), and evidence such as `commit:<sha>`, `mr:!123` or `pr:#123` (required
+  for a failed attempt); anchor it on the narrowest symbols. `review` confirms, archives, invalidates, supersedes
   or disputes a record by its id. Ask the user before recording, archiving, invalidating or
   superseding. When you relied on a record and checked it still matches the code, confirm it without
   asking. Every change needs a reason other agents can read.
@@ -163,7 +163,9 @@ Make it useful to an agent that has never seen this conversation:
 - **on**: the narrowest symbols it is about. Prefer the method to its class, and the class to its
   file, so that changes elsewhere do not raise notes on it.
 - **trigger**: when someone would need it ("changing how merges are stored").
-- **evidence**: `commit:<sha>`, `mr:!123`, `test:<path>::<name>`, an error message.
+- **evidence**: `commit:<sha>`, `mr:!123` or `pr:#123`, `test:<path>::<name>`, an error message.
+  Cite the merge or pull request when the work is on a branch: once it is merged, comindly follows it
+  to the default branch, so the record does not get a note for its own change.
 - **snippets**: up to three short excerpts of the code that shaped it, when the code says it best.
 
 If `remember` answers that a similar record already stands, it is usually the same knowledge:

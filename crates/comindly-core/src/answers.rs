@@ -49,12 +49,21 @@ pub fn search(query: &str, mut hits: Vec<SearchHit>, repos: &[String]) -> Search
 
 /// `why`: the ledger about `focus` and what it contains.
 pub fn why(g: &CodeGraph, entries: &[Entry], focus: &str) -> Option<Why> {
-    let (name, ids) = g.scope_of(focus)?;
+    let (name, ids, n) = g.scopes_of(focus)?;
     let about = crate::ledger::about(entries, &ids);
     Some(Why {
-        markdown: crate::ledger::markdown(&format!("why `{name}`"), &about),
+        markdown: crate::ledger::markdown(&why_title(&name, n), &about),
         name,
     })
+}
+
+/// "why `get`", or with several symbols of that name "why `get` (3 symbols of that name)".
+pub fn why_title(name: &str, n: usize) -> String {
+    if n > 1 {
+        format!("why `{name}` ({n} symbols of that name; pass an id from `find` for one)")
+    } else {
+        format!("why `{name}`")
+    }
 }
 
 /// `ledger`: the records, or the inbox of those needing attention; with `check`, constraint checks.

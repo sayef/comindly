@@ -88,6 +88,10 @@ pub fn changed_files(repo_path: &Path, base_sha: &str) -> Result<ChangeSet> {
 pub struct CommitFiles {
     pub sha: String,
     pub subject: String,
+    /// Commit time, seconds since the epoch.
+    pub time: i64,
+    /// The merge request a merge commit names ("See merge request group/repo!123").
+    pub mr: Option<u64>,
     pub added: Vec<String>,
     pub changed: Vec<String>,
 }
@@ -113,6 +117,8 @@ pub fn history(repo_path: &Path, limit: usize) -> Result<Vec<CommitFiles>> {
                 .flatten()
                 .unwrap_or_default()
                 .to_string(),
+            time: commit.time().seconds(),
+            mr: commit.message().ok().and_then(merge_request),
             added: Vec::new(),
             changed: Vec::new(),
         };
@@ -130,6 +136,19 @@ pub fn history(repo_path: &Path, limit: usize) -> Result<Vec<CommitFiles>> {
         out.push(c);
     }
     Ok(out)
+}
+
+/// The merge or pull request a commit message names: GitLab's "See merge request group/repo!N",
+/// GitHub's "Merge pull request #N from …" or a squash title ending in "(#N)".
+fn merge_request(msg: &str) -> Option<u64> {
+    if let Some(line) = msg.lines().find(|l| l.starts_with("See merge request ")) {
+        return line.rsplit_once('!')?.1.trim().parse().ok();
+    }
+    let first = msg.lines().next()?.trim_end();
+    if let Some(rest) = first.strip_prefix("Merge pull request #") {
+        return rest.split_whitespace().next()?.parse().ok();
+    }
+    first.strip_suffix(')')?.rsplit_once("(#")?.1.parse().ok()
 }
 
 /// A changed file and its changed new-side line ranges.
@@ -165,4 +184,22 @@ pub fn working_changes(repo_path: &Path, base: &str) -> Result<Vec<FileHunks>> {
         None,
     )?;
     Ok(out.into_inner())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn merge_request_from_merge_commit() {
+        let msg = "Merge branch 'x' into 'main'\n\nFix it\n\nSee merge request team/orders!476";
+        assert_eq!(super::merge_request(msg), Some(476));
+        assert_eq!(
+            super::merge_request("Merge pull request #12 from a/b\n\nFix"),
+            Some(12)
+        );
+        assert_eq!(
+            super::merge_request("Fix the retry (#34)\n\nbody"),
+            Some(34)
+        );
+        assert_eq!(super::merge_request("Fix it"), None);
+    }
 }

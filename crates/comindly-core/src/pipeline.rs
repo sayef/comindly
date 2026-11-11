@@ -224,8 +224,22 @@ pub fn link<'a>(
             .iter()
             .map(|s| (s.name.clone(), s.path.clone(), s.branch.clone()))
             .collect();
-        let heads = blocking(move || {
-            paths
+        let (heads, mut logs) = blocking(move || {
+            let logs: crate::index::RepoLogs = paths
+                .iter()
+                .filter_map(|(name, p, _)| {
+                    let log = crate::git::history(p, crate::index::LOG_DEPTH).ok()?;
+                    let commits = log.into_iter().map(Into::into).collect();
+                    Some((
+                        name.clone(),
+                        crate::index::RepoLog {
+                            commits,
+                            landed: Default::default(),
+                        },
+                    ))
+                })
+                .collect();
+            let heads = paths
                 .into_iter()
                 .filter_map(|(name, p, branch)| {
                     crate::git::head_commit(&p)
@@ -237,7 +251,8 @@ pub fn link<'a>(
                             branch: branch.or_else(|| crate::worktree::current_branch(&p)),
                         })
                 })
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            (heads, logs)
         })
         .await?;
         let stale: HashSet<String> = if incremental {
@@ -256,6 +271,8 @@ pub fn link<'a>(
         let edges = Arc::new(edges);
         enrich_all(ctx, &dst, &symbols, &edges, &stale, incremental, &roots).await?;
         crate::index::write_repo_commits(&dst, &heads).await?;
+        crate::landed::resolve(ctx, &heads, &mut logs).await;
+        crate::index::write_repo_logs(&dst, &logs).await?;
 
         Ok(LinkReport {
             symbols: symbols.len(),
