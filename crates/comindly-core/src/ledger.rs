@@ -468,7 +468,7 @@ pub fn derive(
 }
 
 /// Drop `changed` and `moved` notes when every commit that touched the code since was already known
-/// to the record or a confirmation: cited as `commit:<sha>` or `mr:!N`, or committed before it was written.
+/// to the record or a confirmation: cited as `commit:<sha>` or `mr:!N` (or `mr:<repo>!N`), or committed before it was written.
 pub fn settle_notes(entries: &mut [Entry], records: &[Record], logs: &crate::index::RepoLogs) {
     if logs.is_empty() {
         return;
@@ -557,8 +557,9 @@ fn own_change(
         written.is_some_and(|w| c.time <= w)
             || landed.contains(&c.sha.as_str())
             || cited.iter().any(|ev| match crate::landed::reference(ev) {
-                Some(crate::landed::Ref::Commit(x)) => c.sha.starts_with(x),
-                Some(crate::landed::Ref::Request(n)) => c.mr == Some(n),
+                Some(r) if !r.names(&a.repo) => false,
+                Some(crate::landed::Ref::Commit(_, x)) => c.sha.starts_with(x),
+                Some(crate::landed::Ref::Request(_, n)) => c.mr == Some(n),
                 None => false,
             })
     };
@@ -1175,7 +1176,13 @@ mod tests {
             ),
             0
         );
-        assert_eq!(notes(vec![merge, base.clone()], &["mr:!476"]), 0);
+        assert_eq!(notes(vec![merge.clone(), base.clone()], &["mr:!476"]), 0);
+        assert_eq!(notes(vec![merge.clone(), base.clone()], &["mr:r!476"]), 0);
+        assert_eq!(
+            notes(vec![merge, base.clone()], &["mr:other!476"]),
+            1,
+            "another repository's request"
+        );
         let squashed = commit("fff5555", written + 600, None, "m.py");
         assert_eq!(
             notes(vec![squashed, base.clone()], &["commit:51a59d4"]),
