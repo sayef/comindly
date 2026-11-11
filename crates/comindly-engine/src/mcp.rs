@@ -1017,7 +1017,7 @@ impl ComindlyServer {
         description = "Reasoning blame for a symbol: recorded decisions, failed attempts, constraints, gotchas and intents about it or its class/file — with status (active / orphaned), notes on code that changed since, trust and evidence. Check before changing code so you don't repeat a failed approach or break a constraint."
     )]
     async fn why(&self, Parameters(p): Parameters<FocusParam>) -> CallToolResult {
-        let Some((name, ids)) = self.graph.scope_of(&p.focus) else {
+        let Some((name, ids, n)) = self.graph.scopes_of(&p.focus) else {
             let dto = LedgerDto {
                 ok: false,
                 message: format!("no symbol matches `{}`", p.focus),
@@ -1029,7 +1029,7 @@ impl ComindlyServer {
         let symbols: Vec<Symbol> = self.symbols.values().cloned().collect();
         let entries = self.entries(&records, &symbols);
         let about = crate::ledger::about(&entries, &ids);
-        let md = crate::ledger::markdown(&format!("why `{name}`"), &about);
+        let md = crate::ledger::markdown(&crate::answers::why_title(&name, n), &about);
         let dto = LedgerDto {
             ok: true,
             message: md.clone(),

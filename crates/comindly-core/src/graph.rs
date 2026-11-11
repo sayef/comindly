@@ -166,8 +166,13 @@ impl CodeGraph {
     /// descriptor, then descriptor substring, then symbol name. Prefers definitions
     /// (functions/classes) over files, and shorter descriptors (less nested) on ties.
     pub fn lookup(&self, focus: &str) -> Option<NodeIndex> {
+        self.ranked(focus).first().copied()
+    }
+
+    /// Every symbol `focus` could mean, best first (an exact id gives just that one).
+    fn ranked(&self, focus: &str) -> Vec<NodeIndex> {
         if let Some(&i) = self.by_id.get(focus) {
-            return Some(i);
+            return vec![i];
         }
         let mut candidates: Vec<NodeIndex> = self
             .g
@@ -193,15 +198,36 @@ impl CodeGraph {
                 .filter(|&i| self.node_of(i).name == focus)
                 .collect();
         }
-        candidates.sort_by_key(|&i| {
-            let s = &self.g[i].sym;
-            let inexact = (s.name != focus && self.node_of(i).name != focus) as usize;
-            let is_file = matches!(s.kind, crate::model::SymbolKind::File) as usize;
-            let path = s.file_path.to_ascii_lowercase();
-            let is_test = (path.contains("test") || path.contains("spec")) as usize;
-            (inexact, is_file, is_test, s.id.descriptor.len())
-        });
-        candidates.first().copied()
+        candidates.sort_by_key(|&i| (self.rank(i, focus), self.g[i].sym.id.descriptor.len()));
+        candidates
+    }
+
+    fn rank(&self, i: NodeIndex, focus: &str) -> (usize, usize, usize) {
+        let s = &self.g[i].sym;
+        let inexact = (s.name != focus && self.node_of(i).name != focus) as usize;
+        let is_file = matches!(s.kind, crate::model::SymbolKind::File) as usize;
+        let path = s.file_path.to_ascii_lowercase();
+        let is_test = (path.contains("test") || path.contains("spec")) as usize;
+        (inexact, is_file, is_test)
+    }
+
+    /// Like [`Self::scope_of`], for every equally good match of a name: what `why` reads, so records on
+    /// another symbol of the same name are not missed. Also returns how many symbols matched.
+    pub fn scopes_of(&self, focus: &str) -> Option<(String, Vec<String>, usize)> {
+        let ranked = self.ranked(focus);
+        let best = self.rank(*ranked.first()?, focus);
+        let mut ids: Vec<String> = Vec::new();
+        let mut n = 0;
+        for i in ranked.into_iter().filter(|&i| self.rank(i, focus) == best) {
+            n += 1;
+            for id in self.scope_of(&self.g[i].sym.id.render())?.1 {
+                if !ids.contains(&id) {
+                    ids.push(id);
+                }
+            }
+        }
+        let name = self.node_of(self.lookup(focus)?).name;
+        Some((name, ids, n))
     }
 
     /// Indexed repos with their symbol counts (for a `repos` overview tool).
@@ -655,5 +681,19 @@ mod tests {
 
         let tiny = g.context_pack(focus, 1); // only focus fits
         assert_eq!(tiny.len(), 1);
+    }
+
+    #[test]
+    fn why_reads_every_symbol_of_an_ambiguous_name() {
+        let a = sym("lib", "lib/get().", "get", SymbolKind::Function);
+        let b = sym("app", "app/get().", "get", SymbolKind::Function);
+        let c = sym("app", "app/get_all().", "get_all", SymbolKind::Function);
+        let g = CodeGraph::build(&[a.clone(), b.clone(), c.clone()], &[]);
+        let (_, ids, n) = g.scopes_of("get").unwrap();
+        assert_eq!(n, 2);
+        assert!(ids.contains(&a.id.render()) && ids.contains(&b.id.render()));
+        assert!(!ids.contains(&c.id.render()));
+        let (_, ids, n) = g.scopes_of(&a.id.render()).unwrap();
+        assert_eq!((n, ids), (1, vec![a.id.render()]));
     }
 }
