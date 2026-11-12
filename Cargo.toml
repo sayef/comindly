@@ -60,7 +60,7 @@ lettre = { version = "0.11.23", default-features = false, features = ["smtp-tran
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 globset = "0.4"
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio", "matched-path"] }
-tower-http = { version = "0.6", default-features = false, features = ["compression-gzip"] }
+tower-http = { version = "0.7", default-features = false, features = ["compression-gzip"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "registry"] }
 # OTLP trace export, behind the server's `otel` feature.
