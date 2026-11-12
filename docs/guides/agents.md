@@ -30,6 +30,7 @@ The agent can also write to the team's ledger:
 |---|---|---|
 | Record a decision, dead end or rule | "Remember that a TTL of `None` means cache entries never expire." | `remember` |
 | Retire or confirm a record | "That constraint about pinning the client no longer applies: archive it." | `review` |
+| Keep working notes on a task | "Open a discussion for LIN-123 and post the plan and each choice you make." | `discussion` |
 
 Names in answers are the ones you see in the UI: methods as `Class.method`, contracts as
 `http:GET /orders/{}` or `sqs:order-events`, locations as `path:line`.

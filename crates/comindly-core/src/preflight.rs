@@ -85,6 +85,22 @@ pub fn teams_affected(
     )
 }
 
+/// The open discussions on the code `changes` touch and its containers; empty when there are none.
+pub fn discussions(
+    graph: &CodeGraph,
+    symbols: &[Symbol],
+    discussions: &[crate::discussion::Transcript],
+    changes: &[Change],
+) -> String {
+    let mut scope: Vec<String> = Vec::new();
+    for id in touched(symbols, changes) {
+        if let Some((_, s)) = graph.scope_of(&id) {
+            scope.extend(s);
+        }
+    }
+    crate::discussion::mention(&crate::discussion::touching(discussions, &scope))
+}
+
 pub fn report(
     graph: &CodeGraph,
     symbols: &[Symbol],

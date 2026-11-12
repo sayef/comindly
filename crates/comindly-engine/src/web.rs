@@ -477,6 +477,12 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
         .route("/api/v1/review", post(review))
         .route("/api/v1/erase", post(erase))
         .route("/api/v1/remember", post(remember))
+        .route(
+            "/api/v1/discussion",
+            get(discussion_list).post(discussion_open),
+        )
+        .route("/api/v1/discussion/post", post(discussion_post))
+        .route("/api/v1/discussion/{id}", get(discussion_get))
         .route("/api/v1/settings", get(settings::get).post(settings::save))
         .route("/api/v1/settings/test", post(settings::test))
         .route(
@@ -1666,6 +1672,154 @@ async fn remember(
         Ok(id) => Ok(Json(api::Remembered { ok: true, id })),
         Err(e) => Err(bad(e)),
     }
+}
+
+/// Every discussion under the index root; none in a read-only UI or when the store cannot be read.
+async fn discussions(s: &Session) -> Vec<crate::discussion::Transcript> {
+    let Some(root) = s.data.root.as_deref() else {
+        return Vec::new();
+    };
+    match crate::discussion::Discussions::open(root) {
+        Ok(d) => d.all().await.unwrap_or_default(),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Discussions matching the query, newest activity first.
+async fn discussion_list(
+    Cur(s): Cur,
+    Query(q): Query<api::discussion::DiscussionQuery>,
+) -> Reply<Vec<api::discussion::Transcript>> {
+    let run = async {
+        let Some(root) = s.data.root.as_deref() else {
+            return anyhow::Ok(Vec::new());
+        };
+        let all = crate::discussion::Discussions::open(root)?.all().await?;
+        Ok(crate::discussion::search(&all, &q)
+            .into_iter()
+            .cloned()
+            .collect())
+    };
+    run.await.map(Json).map_err(bad)
+}
+
+/// One discussion with its posts.
+async fn discussion_get(
+    Cur(s): Cur,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Reply<api::discussion::Transcript> {
+    let run = async {
+        let root = s.data.root.as_deref().context("no index")?;
+        crate::discussion::Discussions::open(root)?.get(&id).await
+    };
+    match run.await {
+        Ok(Some(t)) => Ok(Json(t)),
+        Ok(None) => Err(failure(
+            StatusCode::NOT_FOUND,
+            format!("no discussion `{id}`"),
+        )),
+        Err(e) => Err(bad(e)),
+    }
+}
+
+/// Open a discussion, or join the open one for the same repository and ticket or branch.
+async fn discussion_open(
+    who: Member,
+    Cur(s): Cur,
+    Json(b): Json<api::discussion::OpenDiscussion>,
+) -> Reply<api::discussion::Opened> {
+    let run = async {
+        let root = s.data.root.as_deref().context("read-only UI")?;
+        let by = provenance(who.as_deref(), &s);
+        anyhow::ensure!(
+            s.data.symbols.iter().any(|x| x.repo.0 == b.repo),
+            "no indexed repository `{}`",
+            b.repo
+        );
+        let teams = s.teams.read().unwrap_or_else(|e| e.into_inner()).clone();
+        teams.accepts(&by.teams, &[b.repo.as_str()])?;
+        let store = crate::discussion::Discussions::open(root)?;
+        let new = crate::discussion::Discussion::new(
+            &b.repo,
+            b.ticket.as_deref(),
+            b.branch.as_deref(),
+            &b.title,
+            by.clone(),
+        );
+        let (id, existing) = store.start(&new).await?;
+        if let Some(body) = b.body.filter(|t| !t.trim().is_empty()) {
+            let anchors = post_anchors(&s, &b.on).await?;
+            let repos: Vec<&str> = anchors.iter().map(|a| a.repo.as_str()).collect();
+            teams.accepts(&by.teams, &repos)?;
+            let post = crate::discussion::new_post(
+                &id,
+                b.kind.as_deref(),
+                &body,
+                b.evidence,
+                anchors,
+                by,
+            )?;
+            store.post(&post).await?;
+        }
+        anyhow::Ok((id, existing))
+    };
+    match run.await {
+        Ok((id, existing)) => Ok(Json(api::discussion::Opened {
+            ok: true,
+            id,
+            existing,
+        })),
+        Err(e) => Err(bad(e)),
+    }
+}
+
+/// A post to a discussion.
+async fn discussion_post(
+    who: Member,
+    Cur(s): Cur,
+    Json(b): Json<api::discussion::PostRequest>,
+) -> Reply<api::discussion::Posted> {
+    let run = async {
+        let root = s.data.root.as_deref().context("read-only UI")?;
+        let by = provenance(who.as_deref(), &s);
+        let store = crate::discussion::Discussions::open(root)?;
+        let t = store
+            .get(&b.discussion)
+            .await?
+            .with_context(|| format!("no discussion `{}`", b.discussion))?;
+        let anchors = post_anchors(&s, &b.on).await?;
+        let mut repos: Vec<&str> = anchors.iter().map(|a| a.repo.as_str()).collect();
+        repos.push(&t.discussion.repo);
+        s.teams
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .accepts(&by.teams, &repos)?;
+        let post = crate::discussion::new_post(
+            &b.discussion,
+            b.kind.as_deref(),
+            &b.body,
+            b.evidence,
+            anchors,
+            by,
+        )?;
+        store.post(&post).await?;
+        anyhow::Ok(post.id)
+    };
+    match run.await {
+        Ok(id) => Ok(Json(api::discussion::Posted { ok: true, id })),
+        Err(e) => Err(bad(e)),
+    }
+}
+
+/// The anchors a post's `on` names, at the indexed commits.
+async fn post_anchors(s: &Session, on: &[String]) -> Result<Vec<crate::ledger::Anchor>> {
+    let commits = match graph_uri(s) {
+        Some(u) => crate::index::read_repo_commits(&u)
+            .await
+            .unwrap_or_default(),
+        None => Default::default(),
+    };
+    crate::discussion::anchors(&s.data.graph, s.data.symbols.iter(), on, &commits)
 }
 
 /// Permanently delete a record and the reviews about it.

@@ -39,6 +39,7 @@ you. A sign-in from an earlier version becomes a profile called `default`.
 | `comindly preflight [repo] [--base <rev>] [--strict]` | Before committing or in MR CI: constraints, dead ends, failing checks, contracts, blast radius, missing companions ([MR job](../guides/ci.md#merge-request-preflight)) |
 | `comindly remember <kind> --on <symbol> --title …` | Record a decision, failed attempt, constraint, gotcha, intent or question |
 | `comindly why <symbol>` | Reasoning blame for a symbol (status, trust, evidence) |
+| `comindly discussion open --repo <name> [--ticket <t>] [--branch <b>] --title … \| post <id> --body … [--kind <k>] \| read <id> \| list [--repo …] [--ticket …] [--branch …] [--query …]` | Working notes on a task or pull request, kept apart from the ledger; stored under `<index>/_discussions/` |
 | `comindly review <id> <confirm\|archive\|invalidate\|supersede\|dispute> [--reason "…"]` | Act on a ledger record; `comindly erase <id>` deletes one |
 | `comindly ledger [--inbox] [--check]` | All ledger records, only those needing review, or evaluate constraint checks (non-zero exit on a violated `must`, for CI) |
 | `comindly erase <id…> [--yes]` | Erase ledger records (and relations about them) for good, including old snapshot versions; dry run without `--yes` |

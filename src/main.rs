@@ -134,6 +134,11 @@ pub enum Cmd {
     },
     /// Reasoning blame: recorded decisions, failed attempts and constraints about a symbol
     Why { focus: String },
+    /// Working notes on a task or pull request, shared with colleagues and kept apart from the ledger
+    Discussion {
+        #[command(subcommand)]
+        what: DiscussionWhat,
+    },
     /// Confirm, archive, invalidate, supersede, dispute or retract a ledger record
     Review {
         id: String,
@@ -259,6 +264,61 @@ pub enum ConventionsWhat {
     Rm { id: String },
     /// Undo a change to a convention
     Restore { id: String },
+}
+
+#[derive(Subcommand)]
+pub enum DiscussionWhat {
+    /// Open one for a repository and a ticket or branch, or get the one already open
+    Open {
+        #[arg(long)]
+        repo: String,
+        #[arg(long)]
+        ticket: Option<String>,
+        #[arg(long)]
+        branch: Option<String>,
+        /// One line naming the work
+        #[arg(long)]
+        title: String,
+        /// A first post
+        #[arg(long)]
+        body: Option<String>,
+        /// plan, decision, change, question or concern
+        #[arg(long)]
+        kind: Option<String>,
+        #[arg(long)]
+        evidence: Vec<String>,
+        /// Symbols or files the first post is about
+        #[arg(long)]
+        on: Vec<String>,
+    },
+    /// Add a post: a plan, a choice, a change after review, a question or a concern
+    Post {
+        id: String,
+        #[arg(long)]
+        body: String,
+        /// plan, decision, change, question or concern
+        #[arg(long)]
+        kind: Option<String>,
+        #[arg(long)]
+        evidence: Vec<String>,
+        /// Symbols or files it is about
+        #[arg(long)]
+        on: Vec<String>,
+    },
+    /// Show a discussion with its posts
+    Read { id: String },
+    /// List discussions
+    List {
+        #[arg(long)]
+        repo: Option<String>,
+        #[arg(long)]
+        ticket: Option<String>,
+        #[arg(long)]
+        branch: Option<String>,
+        /// Text in titles and posts
+        #[arg(long)]
+        query: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]

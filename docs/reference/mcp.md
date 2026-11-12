@@ -9,7 +9,7 @@ attached (the team setting `format=json` for JSON only). How to register the ser
 [Using comindly with agents](../guides/agents.md).
 
 Over HTTP, an agent works with the role of the person whose token it uses. A viewer's agent can call
-every reading tool, but `remember` and `review` are refused; a member's or an admin's agent can also
+every reading tool, but `remember`, `review` and posting to a `discussion` are refused; a member's or an admin's agent can also
 record and review.
 
 Wherever a tool takes `focus`, it accepts a symbol name (`place_order`), a qualified method
@@ -50,8 +50,13 @@ Optional parameters are marked with `?`.
 | `why` | `focus` | Recorded decisions, failed attempts, constraints and gotchas about it, with who, when, status and trust |
 | `remember` | `kind`, `on`, `title`, `body?`, `evidence?`, `trigger?`, `fields?` | Records a `decision`, `attempt` (evidence required), `constraint`, `gotcha`, `intent` or `question`, anchored to the symbols in `on` |
 | `review` | `id`, `action`, `reason?` | `confirm`, `archive` (no longer applies), `invalidate` (was wrong), `supersede` or `dispute` a record; retiring one a person wrote or confirmed only flags it for a person |
+| `discussion` | `action` (`open`, `post`, `read`, `list`), `id?`, `repo?`, `ticket?`, `branch?`, `title?`, `body?`, `kind?`, `evidence?`, `on?`, `query?` | Working notes on a task or pull request, kept apart from the ledger: `open` one for a repository and a ticket or branch (or get the one already open), `post` a `plan`, `decision`, `change`, `question` or `concern`, `read` one by id, `list` them. `why` and `preflight` list the open discussions on the code they cover |
 
 Records written through MCP name the agent (from the MCP client, or `COMINDLY_AGENT`) and the person
 it works for (config `author_name`, else git `user.name`; on a team server, the member whose token the
 agent uses). Deleting records is not available over
 MCP.
+
+Discussion posts are not reviewed. Whoever reads them, they are shown as quoted, attributed working
+notes, never as the team's decisions; what later changes must follow still goes to the ledger with
+`remember`.

@@ -47,14 +47,18 @@ pub fn search(query: &str, mut hits: Vec<SearchHit>, repos: &[String]) -> Search
     }
 }
 
-/// `why`: the ledger about `focus` and what it contains.
-pub fn why(g: &CodeGraph, entries: &[Entry], focus: &str) -> Option<Why> {
+/// `why`: the ledger about `focus` and what it contains, and the open discussions on it.
+pub fn why(
+    g: &CodeGraph,
+    entries: &[Entry],
+    discussions: &[crate::discussion::Transcript],
+    focus: &str,
+) -> Option<Why> {
     let (name, ids, n) = g.scopes_of(focus)?;
     let about = crate::ledger::about(entries, &ids);
-    Some(Why {
-        markdown: crate::ledger::markdown(&why_title(&name, n), &about),
-        name,
-    })
+    let markdown = crate::ledger::markdown(&why_title(&name, n), &about)
+        + &crate::discussion::mention(&crate::discussion::touching(discussions, &ids));
+    Some(Why { markdown, name })
 }
 
 /// "why `get`", or with several symbols of that name "why `get` (3 symbols of that name)".
