@@ -165,7 +165,8 @@ Make it useful to an agent that has never seen this conversation:
 - **trigger**: when someone would need it ("changing how merges are stored").
 - **evidence**: `commit:<sha>`, `mr:!123` or `pr:#123`, `test:<path>::<name>`, an error message.
   Cite the merge or pull request when the work is on a branch: once it is merged, comindly follows it
-  to the default branch, so the record does not get a note for its own change.
+  to the default branch, so the record does not get a note for its own change. When the record spans
+  repositories, name the one the change is in: `mr:<repo>!123`, `pr:<repo>#123`, `commit:<repo>@<sha>`.
 - **snippets**: up to three short excerpts of the code that shaped it, when the code says it best.
 
 If `remember` answers that a similar record already stands, it is usually the same knowledge:

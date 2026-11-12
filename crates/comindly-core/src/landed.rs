@@ -26,8 +26,8 @@ pub async fn resolve(ctx: &IndexContext, heads: &[IndexedRepo], logs: &mut RepoL
     // Each cited request per anchored repository, with the earliest code a record citing it saw.
     let mut wanted: BTreeMap<(String, String), Option<i64>> = BTreeMap::new();
     for r in &records {
-        for ev in r.evidence.iter().filter(|e| reference(e).is_some()) {
-            for a in &r.anchors {
+        for (ev, re) in r.evidence.iter().filter_map(|e| Some((e, reference(e)?))) {
+            for a in r.anchors.iter().filter(|a| re.names(&a.repo)) {
                 let saw = logs.get(&a.repo).and_then(|l| {
                     let c = a.commit.as_deref()?;
                     l.commits.iter().find(|x| x.sha == c).map(|x| x.time)
@@ -57,7 +57,7 @@ pub async fn resolve(ctx: &IndexContext, heads: &[IndexedRepo], logs: &mut RepoL
         let Some(log) = logs.get_mut(&repo) else {
             continue;
         };
-        let on_main = matches!(reference(&ev), Some(Ref::Commit(sha)) if log.commits.iter().any(|c| c.sha.starts_with(sha)));
+        let on_main = matches!(reference(&ev), Some(Ref::Commit(_, sha)) if log.commits.iter().any(|c| c.sha.starts_with(sha)));
         if on_main || log.landed.contains_key(&ev) || asked >= BUDGET {
             continue;
         }
@@ -88,21 +88,50 @@ pub async fn resolve(ctx: &IndexContext, heads: &[IndexedRepo], logs: &mut RepoL
     }
 }
 
+/// A merge or pull request (`mr:!N`, `pr:#N`) or commit, optionally naming its repository:
+/// `mr:repo!N`, `pr:owner/repo#N`, `commit:repo@sha`.
 pub(crate) enum Ref<'a> {
-    /// A merge request (`mr:!N`) or pull request (`pr:#N`).
-    Request(u64),
-    Commit(&'a str),
+    Request(Option<&'a str>, u64),
+    Commit(Option<&'a str>, &'a str),
+}
+
+impl Ref<'_> {
+    /// Whether this evidence can be about `repo` (unqualified evidence is about every anchored one).
+    pub(crate) fn names(&self, repo: &str) -> bool {
+        let (Ref::Request(q, _) | Ref::Commit(q, _)) = self;
+        q.is_none_or(|q| {
+            let q = q.trim_end_matches(".git");
+            q.eq_ignore_ascii_case(repo)
+                || q.rsplit('/')
+                    .next()
+                    .is_some_and(|l| l.eq_ignore_ascii_case(repo))
+        })
+    }
+}
+
+fn qualifier(q: &str) -> Option<Option<&str>> {
+    let q = q.trim();
+    if q.is_empty() {
+        return Some(None);
+    }
+    q.chars()
+        .all(|c| c.is_ascii_alphanumeric() || "-_./".contains(c))
+        .then_some(Some(q))
 }
 
 pub(crate) fn reference(ev: &str) -> Option<Ref<'_>> {
     let ev = ev.trim();
-    for prefix in ["mr:!", "mr:", "pr:#", "pr:"] {
-        if let Some(n) = ev.strip_prefix(prefix) {
-            return n.trim().parse().ok().map(Ref::Request);
+    for (prefix, sep) in [("mr:", '!'), ("pr:", '#')] {
+        if let Some(rest) = ev.strip_prefix(prefix) {
+            let (q, n) = rest.rsplit_once(sep).unwrap_or(("", rest));
+            return Some(Ref::Request(qualifier(q)?, n.trim().parse().ok()?));
         }
     }
-    let sha = ev.strip_prefix("commit:")?.trim();
-    (sha.len() >= 7 && sha.chars().all(|c| c.is_ascii_hexdigit())).then_some(Ref::Commit(sha))
+    let rest = ev.strip_prefix("commit:")?.trim();
+    let (q, sha) = rest.rsplit_once('@').unwrap_or(("", rest));
+    let sha = sha.trim();
+    (sha.len() >= 7 && sha.chars().all(|c| c.is_ascii_hexdigit()))
+        .then_some(Ref::Commit(qualifier(q)?, sha))
 }
 
 struct Project {
@@ -179,8 +208,8 @@ impl Project {
     ) -> anyhow::Result<Option<(Vec<String>, i64)>> {
         let gitlab = self.provider == Provider::GitLab;
         let number = match reference(ev) {
-            Some(Ref::Request(n)) => n,
-            Some(Ref::Commit(sha)) => {
+            Some(Ref::Request(_, n)) => n,
+            Some(Ref::Commit(_, sha)) => {
                 let path = if gitlab {
                     format!("/repository/commits/{sha}/merge_requests")
                 } else {
@@ -248,14 +277,39 @@ mod tests {
 
     #[test]
     fn only_merge_requests_and_commit_shas_are_looked_up() {
-        assert!(matches!(reference("mr:!476"), Some(Ref::Request(476))));
-        assert!(matches!(reference("pr:#12"), Some(Ref::Request(12))));
+        assert!(matches!(
+            reference("mr:!476"),
+            Some(Ref::Request(None, 476))
+        ));
+        assert!(matches!(reference("pr:#12"), Some(Ref::Request(None, 12))));
+        assert!(matches!(reference("mr:476"), Some(Ref::Request(None, 476))));
         assert!(matches!(
             reference("commit:51a59d4"),
-            Some(Ref::Commit("51a59d4"))
+            Some(Ref::Commit(None, "51a59d4"))
         ));
         assert!(reference("commit:abc").is_none());
         assert!(reference("test:t::retry").is_none());
         assert!(reference("dev logs 2026-11-11").is_none());
+        assert!(reference("mr:see the thread").is_none());
+    }
+
+    #[test]
+    fn evidence_can_name_its_repository() {
+        assert!(matches!(
+            reference("mr:billing-api!472"),
+            Some(Ref::Request(Some("billing-api"), 472))
+        ));
+        assert!(matches!(
+            reference("pr:acme/web#12"),
+            Some(Ref::Request(Some("acme/web"), 12))
+        ));
+        assert!(matches!(
+            reference("commit:web@51a59d4"),
+            Some(Ref::Commit(Some("web"), "51a59d4"))
+        ));
+        let r = reference("mr:group/billing-api!472").unwrap();
+        assert!(r.names("billing-api") && !r.names("web"));
+        assert!(reference("mr:!1").unwrap().names("web"));
+        assert!(reference("mr:a b!1").is_none());
     }
 }

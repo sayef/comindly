@@ -597,7 +597,7 @@ struct RememberParam {
     /// When a future engineer would need this.
     #[serde(default)]
     trigger: Option<String>,
-    /// Evidence: `commit:<sha>`, `mr:!123` or `pr:#123`, `test:<path>::<name>`, error text… Required for `attempt`.
+    /// Evidence: `commit:<sha>`, `mr:!123` or `pr:#123` (`mr:<repo>!123` across repositories), `test:<path>::<name>`, error text… Required for `attempt`.
     #[serde(default)]
     evidence: Vec<String>,
     /// Kind-specific fields, e.g. `{"outcome": "reverted"}`, `{"alternatives": "…"}`.

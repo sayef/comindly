@@ -8,7 +8,9 @@ They follow the code and stay active until someone archives, invalidates or supe
 their code moves, is renamed or changes, a record gets a note saying so (**Code changed** in the
 app), with the commit it saw; when all of its code is gone it is **orphaned**. A change the record
 already knew about leaves no note: one committed before it was written, or one its evidence cites,
-as a commit or as a merge or pull request (`mr:!123`, `pr:#123`). With the token it clones with,
+as a commit or as a merge or pull request (`mr:!123`, `pr:#123`). On a record about several
+repositories, name the one it belongs to: `mr:billing-api!123`, `pr:acme/web#12`, `commit:web@<sha>`.
+With the token it clones with,
 comindly asks GitLab or GitHub where a cited request or branch commit landed on the default branch,
 and shows it with the evidence ("mr:!123 (landed as f16857c)"). Each anchor stores the indexed commit it was written against, and a
 record can carry up to three short snippets of the code that shaped it, so a reader can see what was
