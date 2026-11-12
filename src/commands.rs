@@ -9,7 +9,9 @@ use comindly_api::{self as api, prompts::Task};
 
 use crate::profile::{self, Profile, Profiles, LOCAL};
 use crate::{render, term};
-use crate::{Cmd, ConfigWhat, ConventionsWhat, EngineWhat, PromptsWhat, ReposWhat, TeamWhat};
+use crate::{
+    Cmd, ConfigWhat, ConventionsWhat, DiscussionWhat, EngineWhat, PromptsWhat, ReposWhat, TeamWhat,
+};
 
 /// Run a future on this command's runtime.
 pub fn block<F: std::future::Future>(f: F) -> F::Output {
@@ -229,6 +231,7 @@ fn with_engine(flag: Option<&str>, c: &Client, cmd: Cmd) -> ExitCode {
                 ExitCode::SUCCESS
             })
         }
+        Cmd::Discussion { what } => discussion(c, what),
         Cmd::Review { id, action, reason } => {
             done(c.post("/api/v1/review", &api::ReviewRequest { id, action, reason }))
         }
@@ -901,4 +904,82 @@ pub fn open_in_browser(url: &str) {
         std::process::Command::new("xdg-open")
     };
     let _ = cmd.arg(url).spawn();
+}
+
+fn discussion(c: &Client, what: DiscussionWhat) -> ExitCode {
+    use api::discussion as d;
+    match what {
+        DiscussionWhat::Open {
+            repo,
+            ticket,
+            branch,
+            title,
+            body,
+            kind,
+            evidence,
+            on,
+        } => {
+            let req = d::OpenDiscussion {
+                repo,
+                ticket,
+                branch,
+                title,
+                body,
+                kind,
+                evidence,
+                on,
+            };
+            show(c.post("/api/v1/discussion", &req), |r: d::Opened| {
+                let how = if r.existing { "already open" } else { "opened" };
+                term::ok(&format!("discussion {} ({how})", r.id));
+                ExitCode::SUCCESS
+            })
+        }
+        DiscussionWhat::Post {
+            id,
+            body,
+            kind,
+            evidence,
+            on,
+        } => {
+            let req = d::PostRequest {
+                discussion: id.clone(),
+                kind,
+                body,
+                evidence,
+                on,
+            };
+            show(c.post("/api/v1/discussion/post", &req), |_: d::Posted| {
+                term::ok(&format!("posted to discussion {id}"));
+                ExitCode::SUCCESS
+            })
+        }
+        DiscussionWhat::Read { id } => show(
+            c.get(&format!("/api/v1/discussion/{id}"), &()),
+            |t: d::Transcript| {
+                println!("{}", d::markdown(&t));
+                ExitCode::SUCCESS
+            },
+        ),
+        DiscussionWhat::List {
+            repo,
+            ticket,
+            branch,
+            query,
+        } => {
+            let q = d::DiscussionQuery {
+                repo,
+                ticket,
+                branch,
+                q: query,
+            };
+            show(
+                c.get("/api/v1/discussion", &q),
+                |all: Vec<d::Transcript>| {
+                    println!("{}", d::list_markdown(&all.iter().collect::<Vec<_>>()));
+                    ExitCode::SUCCESS
+                },
+            )
+        }
+    }
 }

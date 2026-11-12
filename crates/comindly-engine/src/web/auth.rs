@@ -152,9 +152,14 @@ fn needs(method: &Method, path: &str) -> Role {
     {
         return Role::Viewer;
     }
-    if ["/api/v1/remember", "/api/v1/review", "/api/v1/conventions"]
-        .iter()
-        .any(|p| path.starts_with(p))
+    if [
+        "/api/v1/remember",
+        "/api/v1/review",
+        "/api/v1/conventions",
+        "/api/v1/discussion",
+    ]
+    .iter()
+    .any(|p| path.starts_with(p))
     {
         return Role::Member;
     }
@@ -1016,6 +1021,14 @@ mod tests {
         assert_eq!(needs(&Method::GET, "/api/v1/view"), Role::Viewer);
         assert_eq!(needs(&Method::POST, "/api/v1/review"), Role::Member);
         assert!(!Role::Viewer.at_least(needs(&Method::POST, "/api/v1/review")));
+        // Viewers read discussions; members open them and post.
+        assert_eq!(needs(&Method::GET, "/api/v1/discussion"), Role::Viewer);
+        assert_eq!(needs(&Method::GET, "/api/v1/discussion/abc"), Role::Viewer);
+        assert_eq!(needs(&Method::POST, "/api/v1/discussion"), Role::Member);
+        assert_eq!(
+            needs(&Method::POST, "/api/v1/discussion/post"),
+            Role::Member
+        );
     }
 
     #[test]

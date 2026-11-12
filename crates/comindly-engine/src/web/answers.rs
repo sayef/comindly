@@ -87,7 +87,8 @@ pub(super) async fn search(Cur(s): Cur, Query(q): Query<api::AnswerQuery>) -> Re
 
 pub(super) async fn why(Cur(s): Cur, Query(q): Query<api::AnswerFocus>) -> Response {
     let entries = s.entries().await;
-    let w = crate::answers::why(&s.data.graph, &entries, &q.focus);
+    let discussions = super::discussions(&s).await;
+    let w = crate::answers::why(&s.data.graph, &entries, &discussions, &q.focus);
     answer(Ok(w), format!("no symbol matches `{}`", q.focus))
 }
 
@@ -220,5 +221,11 @@ pub(super) async fn preflight(
     let teams = s.teams.read().unwrap_or_else(|e| e.into_inner()).clone();
     answer.markdown +=
         &crate::preflight::teams_affected(&s.data.graph, &s.data.symbols, &q.changes, &teams);
+    answer.markdown += &crate::preflight::discussions(
+        &s.data.graph,
+        &s.data.symbols,
+        &super::discussions(&s).await,
+        &q.changes,
+    );
     Json(answer)
 }

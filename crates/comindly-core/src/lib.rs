@@ -11,6 +11,7 @@ pub mod checks;
 pub mod configvals;
 pub mod context;
 pub mod conventions;
+pub mod discussion;
 pub mod docstore;
 pub mod embed;
 pub mod eval;

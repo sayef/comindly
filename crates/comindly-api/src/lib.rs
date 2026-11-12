@@ -9,6 +9,7 @@ pub mod answers;
 pub mod client;
 pub mod conventions;
 pub mod credentials;
+pub mod discussion;
 pub mod doctor;
 pub mod events;
 pub mod graph;
