@@ -344,6 +344,9 @@ impl ComindlyServer {
         );
         rec.trigger = p.trigger;
         rec.evidence = p.evidence;
+        crate::discussion::Discussions::open(&self.ledger_root())?
+            .cite(&mut rec.evidence)
+            .await?;
         rec.fields = p
             .fields
             .into_iter()
@@ -706,7 +709,7 @@ struct RememberParam {
     /// When a future engineer would need this.
     #[serde(default)]
     trigger: Option<String>,
-    /// Evidence: `commit:<sha>`, `mr:!123` or `pr:#123` (`mr:<repo>!123` across repositories), `test:<path>::<name>`, error text… Required for `attempt`.
+    /// Evidence: `commit:<sha>`, `mr:!123` or `pr:#123` (`mr:<repo>!123` across repositories), `discussion:<id>` for the discussion where it was worked out, `test:<path>::<name>`, error text… Required for `attempt`.
     #[serde(default)]
     evidence: Vec<String>,
     /// Kind-specific fields, e.g. `{"outcome": "reverted"}`, `{"alternatives": "…"}`.

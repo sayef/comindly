@@ -1,7 +1,8 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AgentView } from "@/components/agent-view";
 import { Archive, Ban, Check, Copy, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
 import { useState } from "react";
+import { Link } from "react-router";
 import { ConfirmButton } from "@/components/confirm";
 import { RepoDot } from "@/components/symbol";
 import { Badge } from "@/components/ui/badge";
@@ -79,6 +80,16 @@ export function statusLabel(e: Entry) {
   if (e.retired === "outdated") return "archived";
   if (e.retired === "wrong") return "invalid";
   return e.status;
+}
+
+/** A cited discussion, by its title once loaded; the id while loading or when it is gone. */
+function DiscussionLink({ id }: { id: string }) {
+  const d = useQuery({ queryKey: ["discussion", id], queryFn: () => api.discussion(id), retry: false, staleTime: 60_000 });
+  return (
+    <Link to={`/discussions/${id}`} className="font-sans break-normal underline underline-offset-2 [overflow-wrap:anywhere] hover:text-foreground" title="The discussion where this was worked out">
+      {d.data ? `Discussion: ${d.data.discussion.title}` : `discussion:${id.slice(0, 13)}`}
+    </Link>
+  );
 }
 
 export function EntryCard({
@@ -219,16 +230,26 @@ export function EntryCard({
           ))}
           {r.evidence.length > 0 && (
             <div className="flex gap-2">
-              <dt className="w-24 shrink-0 text-muted-foreground" title="Commits, merge or pull requests, or tests that back it up; where a request or branch commit landed on the default branch">
+              <dt className="w-24 shrink-0 text-muted-foreground" title="Commits, merge or pull requests, tests or a discussion that back it up; where a request or branch commit landed on the default branch">
                 Evidence
               </dt>
               <dd className="font-mono break-all">
-                {r.evidence
-                  .map((ev) => {
-                    const shas = entry.landed?.[ev];
-                    return shas?.length ? `${ev} (landed as ${shas.map((s) => s.slice(0, 7)).join(", ")})` : ev;
-                  })
-                  .join(", ")}
+                {r.evidence.map((ev, i) => {
+                  const shas = entry.landed?.[ev];
+                  const discussion = ev.startsWith("discussion:") ? ev.slice("discussion:".length) : null;
+                  return (
+                    <span key={ev}>
+                      {i > 0 && ", "}
+                      {discussion ? (
+                        <DiscussionLink id={discussion} />
+                      ) : shas?.length ? (
+                        `${ev} (landed as ${shas.map((s) => s.slice(0, 7)).join(", ")})`
+                      ) : (
+                        ev
+                      )}
+                    </span>
+                  );
+                })}
               </dd>
             </div>
           )}

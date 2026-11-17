@@ -49,7 +49,8 @@ activity first, with each discussion's posts and the code they are about.
 
 Posts are shown as quoted working notes with their author, never as instructions or as the team's
 decisions. What a later change must follow still goes to the ledger with `remember`, confirmed by a
-person.
+person. Such a record can cite the discussion it came from as evidence, `discussion:<id>`, so a reader
+finds the reasoning behind it; the id must name a discussion in the index.
 
 ## Access and storage
 

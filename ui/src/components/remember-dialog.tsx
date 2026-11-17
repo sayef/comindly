@@ -202,7 +202,7 @@ export function RememberDialog({ open, onOpenChange, about = [] }: { open: boole
               spellCheck={false}
               value={evidence}
               onChange={(e) => setEvidence(e.target.value)}
-              placeholder="commit:abc123, mr:!412, test:tests/test_x.py::test_y"
+              placeholder="commit:abc123, mr:!412, discussion:<id>, test:tests/test_x.py::test_y"
             />
           </label>
           {save.error && <p role="alert" className="text-xs text-danger [overflow-wrap:anywhere]">{sentence(save.error.message)}</p>}

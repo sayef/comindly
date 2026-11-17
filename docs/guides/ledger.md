@@ -11,6 +11,8 @@ app), with the commit it saw; when all of its code is gone it is **orphaned**. A
 already knew about leaves no note: one committed before it was written, or one its evidence cites,
 as a commit or as a merge or pull request (`mr:!123`, `pr:#123`). On a record about several
 repositories, name the one it belongs to: `mr:billing-api!123`, `pr:acme/web#12`, `commit:web@<sha>`.
+A record worked out in a [discussion](discussions.md) cites it as `discussion:<id>`; the id must
+name a stored discussion, and the app links to it.
 With the token it clones with,
 comindly asks GitLab or GitHub where a cited request or branch commit landed on the default branch,
 and shows it with the evidence ("mr:!123 (landed as f16857c)"). Each anchor stores the indexed commit it was written against, and a

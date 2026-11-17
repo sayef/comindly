@@ -15,6 +15,9 @@ use crate::graph::CodeGraph;
 use crate::ledger::{sub_store, symbol_anchor, Anchor, Provenance};
 use crate::model::{Symbol, SymbolKind};
 
+/// Evidence citing a discussion: `discussion:<id>`.
+pub const CITE: &str = "discussion:";
+
 /// A stored file, parsed; `None` when it could not be read.
 #[derive(Clone)]
 enum File {
@@ -165,6 +168,35 @@ impl Discussions {
 
     pub async fn all(&self) -> Result<Vec<Transcript>> {
         self.read(&self.root).await
+    }
+
+    /// Check each `discussion:<id>` in `evidence` names a stored discussion, by its id or a unique
+    /// prefix of at least 13 characters, and write it out in full.
+    pub async fn cite(&self, evidence: &mut [String]) -> Result<()> {
+        if !evidence.iter().any(|e| e.trim().starts_with(CITE)) {
+            return Ok(());
+        }
+        let all = self.all().await?;
+        for ev in evidence.iter_mut() {
+            let Some(want) = ev.trim().strip_prefix(CITE).map(str::trim) else {
+                continue;
+            };
+            anyhow::ensure!(
+                want.len() >= 13,
+                "cite a discussion by its id (at least 13 characters): `{ev}`"
+            );
+            let found: Vec<&str> = all
+                .iter()
+                .map(|t| t.discussion.id.as_str())
+                .filter(|id| id.starts_with(want))
+                .collect();
+            match found[..] {
+                [id] => *ev = format!("{CITE}{id}"),
+                [] => anyhow::bail!("no discussion `{want}` in this index"),
+                _ => anyhow::bail!("`{want}` names several discussions: give more of its id"),
+            }
+        }
+        Ok(())
     }
 
     pub async fn get(&self, id: &str) -> Result<Option<Transcript>> {
@@ -337,6 +369,22 @@ mod tests {
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].posts, vec![first, second]);
         assert_eq!(got.as_ref(), all.first());
+    }
+
+    #[tokio::test]
+    async fn evidence_cites_stored_discussions_in_full() {
+        let dir = temp("cite");
+        let store = Discussions::open(dir.to_str().unwrap()).unwrap();
+        let d = Discussion::new("r", Some("LIN-1"), None, "t", prov(AuthorKind::Agent));
+        let (id, _) = store.start(&d).await.unwrap();
+        let mut ev = vec!["mr:!1".to_string(), format!("discussion:{}", &id[..13])];
+        store.cite(&mut ev).await.unwrap();
+        let mut short = vec!["discussion:abc".to_string()];
+        let mut unknown = vec!["discussion:00000000-0000".to_string()];
+        let (short, unknown) = (store.cite(&mut short).await, store.cite(&mut unknown).await);
+        std::fs::remove_dir_all(&dir).ok();
+        assert_eq!(ev, ["mr:!1".to_string(), format!("discussion:{id}")]);
+        assert!(short.is_err() && unknown.is_err());
     }
 
     #[tokio::test]

@@ -1648,6 +1648,9 @@ async fn remember(
             .into_iter()
             .filter(|e| !e.trim().is_empty())
             .collect();
+        crate::discussion::Discussions::open(root)?
+            .cite(&mut rec.evidence)
+            .await?;
         for (k, v) in b.fields.into_iter().filter(|(_, v)| !v.trim().is_empty()) {
             rec.fields.insert(k, Value::String(v));
         }
