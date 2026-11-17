@@ -412,11 +412,7 @@ pub fn markdown(t: &Transcript) -> String {
     for p in &t.posts {
         let kind = p.kind.map_or("note", PostKind::as_str);
         let _ = writeln!(o, "\n### {} · {kind} · {}", p.created, p.provenance.who());
-        for line in p.body.lines() {
-            o.push_str(if line.trim().is_empty() { ">" } else { "> " });
-            o.push_str(line.trim_end());
-            o.push('\n');
-        }
+        o.push_str(&crate::ledger::quote(&p.body));
         if !p.evidence.is_empty() {
             let ev: Vec<String> = p.evidence.iter().map(|e| code(e)).collect();
             let _ = writeln!(o, "Evidence: {}", ev.join(", "));

@@ -533,6 +533,16 @@ pub fn one_line(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// Text as a Markdown blockquote, so no line of it can pass for a heading or list item of its own.
+pub fn quote(s: &str) -> String {
+    s.lines()
+        .map(|l| match l.trim_end() {
+            "" => ">\n".to_string(),
+            l => format!("> {l}\n"),
+        })
+        .collect()
+}
+
 /// Instruction or payload text that would steer an agent reading the record.
 pub fn injection(text: &str) -> Option<&'static str> {
     let t = text.to_lowercase();
