@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0-beta.18](https://github.com/sayef/comindly/compare/v0.5.0-beta.17...v0.5.0-beta.18) - 2026-11-17
+
+### Added
+
+- A **Discussions** page in the app: every discussion with its repository, ticket and branch, newest activity first, and a page per discussion with its posts, their evidence and the code they are about. Posts are shown as unreviewed, quoted notes from their author.
 
 ## [0.5.0-beta.17](https://github.com/sayef/comindly/compare/v0.5.0-beta.16...v0.5.0-beta.17) - 2026-11-17
 
