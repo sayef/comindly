@@ -341,6 +341,13 @@ impl Record {
         if self.title.is_empty() || self.title.chars().count() > cap {
             bail!("{what} must be 1–{cap} characters");
         }
+        if self.kind != Kind::Relation && self.title.contains(['\n', '\r']) {
+            bail!("a title must be one line");
+        }
+        let multi = |t: &String| t.contains(['\n', '\r']);
+        if self.trigger.as_ref().is_some_and(multi) || self.evidence.iter().any(multi) {
+            bail!("the trigger and each piece of evidence must be one line");
+        }
         if self.body.chars().count() > MAX_BODY {
             bail!("the body is limited to {MAX_BODY} characters");
         }
@@ -520,6 +527,11 @@ pub const MAX_SNIPPET_CHARS: usize = 16000;
 pub const MAX_SNIPPETS: usize = 3;
 
 pub const MAX_SNIPPET_LINES: usize = 60;
+
+/// `s` on one line, with whitespace runs collapsed: stored text cannot start a heading or list item.
+pub fn one_line(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
 
 /// Instruction or payload text that would steer an agent reading the record.
 pub fn injection(text: &str) -> Option<&'static str> {

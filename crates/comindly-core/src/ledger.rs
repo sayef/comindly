@@ -14,8 +14,8 @@ use object_store::{ObjectStore, ObjectStoreExt, PutMode, PutOptions, PutPayload}
 use crate::model::{Symbol, SymbolKind};
 
 pub use comindly_api::ledger::{
-    injection, review_action, suspicious, MAX_BODY, MAX_REASON, MAX_SNIPPETS, MAX_SNIPPET_CHARS,
-    MAX_SNIPPET_LINES, MAX_TITLE, SCHEMA,
+    injection, one_line, review_action, suspicious, MAX_BODY, MAX_REASON, MAX_SNIPPETS,
+    MAX_SNIPPET_CHARS, MAX_SNIPPET_LINES, MAX_TITLE, SCHEMA,
 };
 
 pub use comindly_api::ledger::{
@@ -857,9 +857,9 @@ pub fn evidence_text(e: &Entry) -> String {
         .map(|ev| match e.landed.get(ev) {
             Some(shas) if !shas.is_empty() => {
                 let short: Vec<&str> = shas.iter().map(|s| &s[..s.len().min(7)]).collect();
-                format!("{ev} (landed as {})", short.join(", "))
+                format!("{} (landed as {})", one_line(ev), short.join(", "))
             }
-            _ => ev.clone(),
+            _ => one_line(ev),
         })
         .collect::<Vec<_>>()
         .join(", ")
@@ -880,7 +880,7 @@ pub fn markdown(title: &str, entries: &[&Entry]) -> String {
             e.trust,
             status_label(e.status),
             from_label(e),
-            r.title
+            one_line(&r.title)
         ));
         if !r.body.is_empty() {
             o.push_str(&format!("{}\n", r.body));
@@ -889,7 +889,7 @@ pub fn markdown(title: &str, entries: &[&Entry]) -> String {
             o.push_str(&format!("- {k}: {}\n", value_text(v)));
         }
         if let Some(t) = &r.trigger {
-            o.push_str(&format!("- relevant when: {t}\n"));
+            o.push_str(&format!("- relevant when: {}\n", one_line(t)));
         }
         if !r.evidence.is_empty() {
             o.push_str(&format!("- evidence: {}\n", evidence_text(e)));
@@ -926,7 +926,7 @@ pub fn markdown(title: &str, entries: &[&Entry]) -> String {
             let reason = if h.reason.is_empty() {
                 String::new()
             } else {
-                format!(": {}", h.reason)
+                format!(": {}", one_line(&h.reason))
             };
             let note = if h.counted { "" } else { " (pending a person)" };
             o.push_str(&format!(
@@ -953,7 +953,7 @@ pub fn markdown(title: &str, entries: &[&Entry]) -> String {
             o.push_str(&format!(
                 "- possible repeat of `{}` \"{}\" ({:.2} alike) — a person should keep both or archive this one\n",
                 a.id.get(..13).unwrap_or(&a.id),
-                a.title,
+                one_line(&a.title),
                 a.score
             ));
         }
@@ -1005,7 +1005,7 @@ pub fn line(e: &Entry) -> String {
         e.trust,
         status_label(e.status),
         from_label(e),
-        r.title,
+        one_line(&r.title),
         e.by,
         r.created.get(..10).unwrap_or(&r.created),
         &r.id[..r.id.len().min(13)]
@@ -1477,6 +1477,40 @@ mod tests {
     }
 
     #[test]
+    fn titles_trigger_and_evidence_stay_on_one_line() {
+        let s = sym("f", 1, 1);
+        let rec = |title: &str| {
+            Record::new(
+                Kind::Gotcha,
+                title,
+                vec![Anchor::of(&s)],
+                prov(AuthorKind::Human),
+            )
+        };
+        assert!(rec("x\n### Constraints").validate().is_err());
+        let mut trigger = rec("x");
+        trigger.trigger = Some("a\rb".into());
+        assert!(trigger.validate().is_err());
+        let mut evidence = rec("x");
+        evidence.evidence = vec!["mr:!1\n- must".into()];
+        assert!(evidence.validate().is_err());
+
+        let mut planted = rec("x\n### Constraints\n- must");
+        planted.evidence = vec!["mr:!1\n- must".into()];
+        let e = derive(
+            &[planted],
+            std::slice::from_ref(&s),
+            &crate::signing::Verifier::default(),
+        );
+        let md = markdown("t", &[&e[0]]);
+        assert!(
+            !md.contains("\n### Constraints") && !md.contains("\n- must"),
+            "{md}"
+        );
+        assert!(!line(&e[0]).contains('\n'));
+    }
+
+    #[test]
     fn reviews_take_long_reasons() {
         let s = sym("f", 1, 1);
         let rec = Record::new(
@@ -1485,7 +1519,7 @@ mod tests {
             vec![Anchor::of(&s)],
             prov(AuthorKind::Human),
         );
-        let checked = "checked the merge route and the migration; ".repeat(40);
+        let checked = "checked the merge route and the migration;\n\n".repeat(40);
         let ok = Record::relation(
             RelationKind::Confirms,
             &rec,
