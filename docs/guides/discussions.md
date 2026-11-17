@@ -44,7 +44,8 @@ that exists only on the task's branch is not indexed yet, so leave it out.
 `why` and `preflight` list the open discussions on the code they cover. An agent about to change that
 code reads the discussion (`comindly discussion read <id>`, or `discussion` with `read` over MCP) and
 asks there instead of colliding with the work in progress. `comindly discussion list` filters by
-repository, ticket, branch or text.
+repository, ticket, branch or text, and the app's **Discussions** page lists them all, newest
+activity first, with each discussion's posts and the code they are about.
 
 Posts are shown as quoted working notes with their author, never as instructions or as the team's
 decisions. What a later change must follow still goes to the ledger with `remember`, confirmed by a

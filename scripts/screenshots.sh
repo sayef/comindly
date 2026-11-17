@@ -5,6 +5,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 if [ -z "${COMINDLY_BIN:-}" ]; then
+  (cd "$ROOT/ui" && npm run build)
   cargo build --release -j 4 --manifest-path "$ROOT/Cargo.toml" -p comindly -p comindly-engine
 fi
 BIN="${COMINDLY_BIN:-$ROOT/target/release/comindly}"
@@ -78,11 +79,29 @@ remember "Platform team" decision --on Money \
   --body "Rounding differences between services caused refunds of 0.01 EUR. Convert at the edges with Money.from_decimal." >/dev/null
 remember "Checkout team" gotcha --on cancel_order \
   --title "Cancelling an order does not release its inventory reservations yet" \
+  --body "cancel_order only publishes order.cancelled; nothing calls the inventory service, so the stock stays held until someone releases it by hand." \
   --trigger "touching cancellation or stock levels" >/dev/null
 remember "Web team" question --on Cart.checkout \
-  --title "Should checkout check stock again after payment succeeds?" >/dev/null
+  --title "Should checkout check stock again after payment succeeds?" \
+  --body "Stock is reserved before the charge; if a reservation expires during a slow payment, the order may confirm items that are gone." >/dev/null
 as "Checkout team"
-"$BIN" review "$idem" confirm >/dev/null
+"$BIN" review "$idem" confirm --reason "Charge references are built from the order id in PaymentProvider.charge" >/dev/null
+# Work in progress: a discussion on fixing the cancellation gotcha.
+did=$("$BIN" discussion open --repo orders --ticket ACME-142 --branch fix/release-stock-on-cancel \
+  --title "Release inventory reservations when an order is cancelled" --kind plan \
+  --body "Call the inventory service from cancel_order to release what create_order reserved, then publish order.cancelled as before." \
+  --on cancel_order --on InventoryClient.reserve 2>&1 | grep -oE '[0-9a-f]{8}-[0-9a-f-]{27}' | head -1)
+"$BIN" discussion post "$did" --kind decision --on cancel_order \
+  --body "Release before publishing order.cancelled, so payments never refunds an order whose stock is still held. Dropped: releasing from the event consumer, which would leave stock held when the queue is slow." >/dev/null
+"$BIN" discussion post "$did" --kind change --evidence "mr:!141" --on cancel_order \
+  --body "Review asked to keep cancel_order working when the inventory service is down: a failed release is now retried by the nightly reconciliation instead of failing the cancellation." >/dev/null
+as "Web team"
+"$BIN" discussion post "$did" --kind question --on Cart.checkout \
+  --body "Does the storefront need to refresh stock levels after a cancellation, or is the next page load enough?" >/dev/null
+as "Payments team"
+"$BIN" discussion open --repo payments --ticket ACME-139 --title "Retry declined charges once with a fresh reference" --kind plan \
+  --body "Retry a declined charge once, with a reference derived from the order id and the attempt, so the idempotency constraint still holds." \
+  --on PaymentProvider.charge >/dev/null
 "$BIN" conventions add --dimension money "Amounts are acme_common.Money in integer cents; no floats for money" >/dev/null
 "$BIN" conventions add --repo payments --dimension queues "Every queue handler is idempotent per message" >/dev/null
 "$BIN" team set name=Acme >/dev/null

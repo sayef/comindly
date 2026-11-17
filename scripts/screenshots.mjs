@@ -101,7 +101,7 @@ for (const theme of mode === "server" ? [] : ["light", "dark"]) {
     await sleep(2500);
     await shot(`agent-view${suffix}`);
   }
-  for (const [page, path] of [["contracts", "contracts"], ["ledger", "ledger"], ["packages", "packages"], ["conventions", "conventions"], ["repositories", "settings/repositories"], ["models", "settings/models"], ["setup", "setup"]]) {
+  for (const [page, path] of [["contracts", "contracts"], ["ledger", "ledger"], ["discussions", "discussions"], ["packages", "packages"], ["conventions", "conventions"], ["repositories", "settings/repositories"], ["models", "settings/models"], ["setup", "setup"]]) {
     await go(`/${path}`);
     await shot(`${page}${suffix}`);
   }
@@ -109,6 +109,11 @@ for (const theme of mode === "server" ? [] : ["light", "dark"]) {
   await evaluate(`[...document.querySelectorAll("h2")].find((h) => h.textContent.includes("when to use it"))?.closest("section")?.scrollIntoView({ block: "start" }); document.querySelector("main").scrollBy(0, -28)`);
   await sleep(500);
   await shot(`setup-agents${suffix}`);
+  const talk = await evaluate(`fetch("/api/v1/discussion").then((r) => r.json()).then((l) => l.find((s) => s.posts > 1)?.discussion.id)`);
+  if (talk) {
+    await go(`/discussions/${talk}`);
+    await shot(`discussion${suffix}`);
+  }
   await go("/flows");
   await shot(`flows${suffix}`);
   const across = await evaluate(`fetch("/api/v1/flows").then((r) => r.json()).then((l) => (l.find((f) => f.repos.length > 2) ?? l[0])?.entry.id)`);

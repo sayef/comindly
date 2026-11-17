@@ -42,6 +42,10 @@ can be bookmarked or shared.
   full timeline. **Add record** writes a new one under your name; each record shows
   who wrote it and its review history; confirm, archive, invalidate or delete it. Hover a badge or
   label for what it means. The symbol view has **Add to the ledger** with that symbol filled in.
+- **Discussions**: working notes on tasks in progress, newest activity first, filtered by repository
+  and by title, ticket or branch. A discussion shows its posts (plan, decisions, changes after review,
+  questions and concerns) with who wrote them and the code they are about. Posts are unreviewed; agents
+  write them with the `discussion` tool ([Discussions](discussions.md)).
 - **Flows**: where work starts and where it travels. Each flow follows calls and then crosses
   contracts: an HTTP route to the handler that serves it in another repository, a topic to the queues
   subscribed to it, a queue to the code that polls it. The list shows the repositories each flow
@@ -125,6 +129,12 @@ Contracts: routes, topics, queues, buckets and tables with providers and consume
 ![Ledger: constraints, failed attempts and decisions, with who wrote and confirmed them](../assets/screenshots/ledger-dark.webp#only-dark)
 /// caption
 Ledger: constraints, failed attempts and decisions, with who wrote and confirmed them
+///
+
+![A discussion: an agent's plan, its choices and what changed after review](../assets/screenshots/discussion.webp#only-light)
+![A discussion: an agent's plan, its choices and what changed after review](../assets/screenshots/discussion-dark.webp#only-dark)
+/// caption
+A discussion: an agent's plan, its choices and what changed after review
 ///
 
 ![Packages: an internal package and a consumer pinned behind its publisher](../assets/screenshots/packages.webp#only-light)

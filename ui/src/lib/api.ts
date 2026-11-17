@@ -97,6 +97,50 @@ export interface LedgerRecord {
   created: string;
 }
 
+export type Provenance = LedgerRecord["provenance"];
+
+/** A discussion: working notes on one task in one repository, keyed by its ticket or branch. */
+export interface Discussion {
+  id: string;
+  repo: string;
+  ticket?: string;
+  branch?: string;
+  title: string;
+  provenance: Provenance;
+  created: string;
+}
+
+export interface DiscussionPost {
+  id: string;
+  discussion: string;
+  kind?: "plan" | "decision" | "change" | "question" | "concern";
+  body: string;
+  evidence?: string[];
+  anchors?: Anchor[];
+  provenance: Provenance;
+  created: string;
+}
+
+/** A discussion as the list shows it: its post count and latest activity. */
+export interface DiscussionSummary {
+  discussion: Discussion;
+  posts: number;
+  last: string;
+}
+
+export interface Transcript {
+  discussion: Discussion;
+  posts: DiscussionPost[];
+}
+
+/** Who wrote it, as people read it: "claude-code for Ada", "Ada", "an agent". */
+export function who(p: Provenance): string {
+  const agent = p.agent && p.agent !== "rmcp" ? p.agent : null;
+  if (p.author === "agent") return p.name ? (agent ? `${agent} for ${p.name}` : `an agent for ${p.name}`) : (agent ?? "an agent");
+  if (p.author === "human") return p.name ?? "a person";
+  return p.author === "harvested" ? "git history" : "the distiller";
+}
+
 export interface Entry {
   record: LedgerRecord;
   status: string;
@@ -611,6 +655,8 @@ export const api = {
   versions: () => get<string[]>("/api/v1/versions"),
   contracts: () => get<ContractView[]>("/api/v1/contracts"),
   ledger: () => get<Entry[]>("/api/v1/ledger"),
+  discussions: () => get<DiscussionSummary[]>("/api/v1/discussion"),
+  discussion: (id: string) => get<Transcript>(`/api/v1/discussion/${encodeURIComponent(id)}`),
   conventions: () => get<{ conventions: Convention[]; hidden: HiddenConvention[]; commit_urls: Record<string, string> }>("/api/v1/conventions"),
   changeConvention: (c: ConventionChange) => post("/api/v1/conventions", c),
   find: (q: string) => get<Node[]>(`/api/v1/find?q=${encodeURIComponent(q)}`),
