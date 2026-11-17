@@ -8,8 +8,49 @@ All notable changes to this project are documented here. The format follows
 
 ## [0.5.0-beta.16](https://github.com/sayef/comindly/compare/v0.5.0-beta.15...v0.5.0-beta.16) - 2026-11-17
 
+### Added
 
+- Discussions: shared working notes on a task, kept apart from the ledger. An agent opens one for a repository and its ticket or branch and posts its plan, each choice, what changed after review, and open questions; `why` and `preflight` list the open discussions on the code they cover. Posts are not reviewed and are always shown as quoted, attributed notes. MCP tool `discussion`, `comindly discussion open|post|read|list`, and a [guide](https://comindly.pages.dev/guides/discussions/).
+- `AGENTS.md` and `CLAUDE.md` for contributors and their agents.
 
+### Changed
+
+- `discussion list` returns a summary per discussion instead of every post, and stored discussion files are read once per process.
+- A file path that ends with several indexed paths, such as an absolute one, anchors to the longest.
+
+### Fixed
+
+- Record titles, triggers and evidence are one line: a line break is refused when writing, and records already stored are shown on one line, so their text cannot pass for another record in `why` or `preflight`.
+
+## [0.5.0-beta.15](https://github.com/sayef/comindly/compare/v0.5.0-beta.14...v0.5.0-beta.15) - 2026-11-12
+
+### Added
+
+- Evidence can name its repository: `mr:billing-api!123`, `pr:acme/web#12`, `commit:web@<sha>`. On a record about several repositories, such evidence is only followed in that repository and only explains changes there. Unqualified evidence works as before.
+
+## [0.5.0-beta.14](https://github.com/sayef/comindly/compare/v0.5.0-beta.13...v0.5.0-beta.14) - 2026-11-11
+
+### Added
+
+- The index keeps each repository's recent default-branch history. At indexing, comindly asks GitLab or GitHub where cited merge and pull requests (`mr:!N`, `pr:#N`) landed on the default branch, and `why`, the app and agents show evidence as "mr:!476 (landed as f16857c)".
+
+### Changed
+
+- A note that the code changed is dropped when every commit since was committed before the record, cited by it, or where its cited work landed.
+- `why` with a name several symbols share reads the records on all of them, and says so.
+
+## [0.5.0-beta.13](https://github.com/sayef/comindly/compare/v0.5.0-beta.12...v0.5.0-beta.13) - 2026-11-11
+
+### Changed
+
+- Records stay active when their code changes: a note says what changed (body, file move, rename, gone) with the commit it saw, and a record is orphaned only when all of its code is gone. A confirmation clears the notes.
+- Longer limits: review reasons up to 4000 characters, titles 500, bodies 20000.
+- `init-agents` and the skill write a full playbook for agents; the session guide stays short.
+- App: a "Code changed" badge and a "Since then" row on records, hover hints for status, kind and fields, and a count on Needs review.
+
+### Fixed
+
+- The ledger no longer overflows on phones.
 
 ## [0.5.0-beta.12](https://github.com/sayef/comindly/compare/v0.5.0-beta.11...v0.5.0-beta.12) - 2026-11-10
 
