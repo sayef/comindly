@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0-beta.17](https://github.com/sayef/comindly/compare/v0.5.0-beta.16...v0.5.0-beta.17) - 2026-11-17
+
 ## [0.5.0-beta.16](https://github.com/sayef/comindly/compare/v0.5.0-beta.15...v0.5.0-beta.16) - 2026-11-17
 
 ### Added
