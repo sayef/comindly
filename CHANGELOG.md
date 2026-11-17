@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [0.5.0-beta.17](https://github.com/sayef/comindly/compare/v0.5.0-beta.16...v0.5.0-beta.17) - 2026-11-17
 
+### Changed
+
+- Updated dependencies, among them the MCP library `rmcp` 3.10, `tower-http` 0.7 and `tokio` 1.54, and the web app's build and UI libraries.
+
 ## [0.5.0-beta.16](https://github.com/sayef/comindly/compare/v0.5.0-beta.15...v0.5.0-beta.16) - 2026-11-17
 
 ### Added
