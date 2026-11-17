@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0-beta.19](https://github.com/sayef/comindly/compare/v0.5.0-beta.18...v0.5.0-beta.19) - 2026-11-18
+
+### Added
+
+- A record can cite the discussion it was worked out in as evidence, `discussion:<id>`. The id must name a stored discussion (a prefix of at least 13 characters is completed to the full id), and the app links the evidence to the discussion by its title.
+
+### Changed
+
+- Record bodies shown to agents by `why`, `preflight` and hooks are quoted line by line, like discussion posts, so no line of a body can pass for a heading or rule of its own.
 
 ## [0.5.0-beta.18](https://github.com/sayef/comindly/compare/v0.5.0-beta.17...v0.5.0-beta.18) - 2026-11-17
 
