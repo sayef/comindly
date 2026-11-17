@@ -1627,15 +1627,13 @@ async fn remember(
                 .unwrap_or_default(),
             None => Default::default(),
         };
-        let mut anchors = Vec::new();
-        for focus in &b.on {
-            let id = g
-                .lookup(focus)
-                .map(|i| g.node(i).id)
-                .with_context(|| format!("no symbol matches `{focus}`"))?;
-            let sym = s.data.symbols.iter().find(|x| x.id.render() == id);
-            anchors.push(crate::ledger::Anchor::of(sym.context("symbol not loaded")?).at(&commits));
-        }
+        let anchors =
+            b.on.iter()
+                .map(|focus| {
+                    let sym = |id: &str| s.data.symbols.iter().find(|x| x.id.render() == id);
+                    crate::ledger::symbol_anchor(g, sym, focus, &commits)
+                })
+                .collect::<Result<Vec<_>>>()?;
         let commit = anchors.first().and_then(|a| a.commit.clone());
         let mut rec = Record::new(kind, &b.title, anchors, provenance(who.as_deref(), &s));
         let repos: Vec<&str> = rec.anchors.iter().map(|a| a.repo.as_str()).collect();
@@ -1689,7 +1687,7 @@ async fn discussions(s: &Session) -> Vec<crate::discussion::Transcript> {
 async fn discussion_list(
     Cur(s): Cur,
     Query(q): Query<api::discussion::DiscussionQuery>,
-) -> Reply<Vec<api::discussion::Transcript>> {
+) -> Reply<Vec<api::discussion::Summary>> {
     let run = async {
         let Some(root) = s.data.root.as_deref() else {
             return anyhow::Ok(Vec::new());
@@ -1697,7 +1695,7 @@ async fn discussion_list(
         let all = crate::discussion::Discussions::open(root)?.all().await?;
         Ok(crate::discussion::search(&all, &q)
             .into_iter()
-            .cloned()
+            .map(api::discussion::Summary::of)
             .collect())
     };
     run.await.map(Json).map_err(bad)

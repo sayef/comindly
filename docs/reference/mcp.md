@@ -9,8 +9,8 @@ attached (the team setting `format=json` for JSON only). How to register the ser
 [Using comindly with agents](../guides/agents.md).
 
 Over HTTP, an agent works with the role of the person whose token it uses. A viewer's agent can call
-every reading tool, but `remember`, `review` and posting to a `discussion` are refused; a member's or an admin's agent can also
-record and review.
+every reading tool, but `remember`, `review` and opening or posting to a `discussion` are refused; a
+member's or an admin's agent can also record, review and post.
 
 Wherever a tool takes `focus`, it accepts a symbol name (`place_order`), a qualified method
 (`OrderService.place_order`), a file path, or an id returned by `find` or `search`.
@@ -59,4 +59,4 @@ MCP.
 
 Discussion posts are not reviewed. Whoever reads them, they are shown as quoted, attributed working
 notes, never as the team's decisions; what later changes must follow still goes to the ledger with
-`remember`.
+`remember`. See [Discussions](../guides/discussions.md).

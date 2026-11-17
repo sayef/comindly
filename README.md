@@ -42,8 +42,8 @@ search cannot:
 
 The graph comes from the code itself (tree-sitter, and SCIP where available) for Python,
 TypeScript/JavaScript, Go, Java, Kotlin and Rust, so answers are exact and repeatable. The team's
-decisions, constraints and failed attempts are recorded next to the code they are about. Written in
-Rust.
+decisions, constraints and failed attempts are recorded next to the code they are about, and agents
+working on a task keep shared working notes in a discussion while it is under way. Written in Rust.
 
 ## Install
 

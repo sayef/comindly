@@ -38,3 +38,8 @@ anchored to symbols with a fingerprint of the code they describe:
 | T0 | untrusted (failed signature, unsafe content) |
 
 Hooks and context packs only use T2 and above.
+
+**Discussions.** Working notes on a task while it is happening, one discussion per repository and
+ticket or branch: the plan, each choice, what changed after review, open questions. Posts are not
+reviewed and never become records on their own; `why` and `preflight` list the open discussions on
+the code they cover. See [Discussions](guides/discussions.md).

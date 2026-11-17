@@ -23,6 +23,21 @@ pub use comindly_api::ledger::{
     RelationKind, Snippet, Status, Trust,
 };
 
+/// The anchor for the symbol `focus` names, at its repository's indexed commit.
+pub fn symbol_anchor<'a>(
+    g: &crate::graph::CodeGraph,
+    symbol: impl FnOnce(&str) -> Option<&'a Symbol>,
+    focus: &str,
+    commits: &HashMap<String, String>,
+) -> Result<Anchor> {
+    let id = g
+        .lookup(focus)
+        .map(|i| g.node(i).id)
+        .with_context(|| format!("no symbol matches `{focus}`; use `find` first"))?;
+    let s = symbol(&id).with_context(|| format!("symbol `{id}` not loaded"))?;
+    Ok(Anchor::of(s).at(commits))
+}
+
 /// An object store rooted at `<index_root>/<sub>` (local directory or remote prefix).
 pub(crate) fn sub_store(index_root: &str, sub: &str) -> Result<(Arc<dyn ObjectStore>, ObjPath)> {
     let root = index_root.trim_end_matches('/');

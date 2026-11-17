@@ -979,13 +979,10 @@ fn discussion(c: &Client, what: DiscussionWhat) -> ExitCode {
                 branch,
                 q: query,
             };
-            show(
-                c.get("/api/v1/discussion", &q),
-                |all: Vec<d::Transcript>| {
-                    println!("{}", d::list_markdown(&all.iter().collect::<Vec<_>>()));
-                    ExitCode::SUCCESS
-                },
-            )
+            show(c.get("/api/v1/discussion", &q), |all: Vec<d::Summary>| {
+                println!("{}", d::list_markdown(&all));
+                ExitCode::SUCCESS
+            })
         }
     }
 }

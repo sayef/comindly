@@ -2,29 +2,47 @@
 //! written create-only like the ledger: a discussion grows by new posts, never by edits.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Mutex};
 
 use anyhow::{Context, Result};
-use futures::TryStreamExt;
+use futures::{StreamExt, TryStreamExt};
 use object_store::path::Path as ObjPath;
 use object_store::{ObjectStore, ObjectStoreExt, PutMode, PutOptions, PutPayload};
 
 pub use comindly_api::discussion::*;
 
 use crate::graph::CodeGraph;
-use crate::ledger::{sub_store, Anchor, Provenance};
+use crate::ledger::{sub_store, symbol_anchor, Anchor, Provenance};
 use crate::model::{Symbol, SymbolKind};
+
+/// A stored file, parsed; `None` when it could not be read.
+#[derive(Clone)]
+enum File {
+    Discussion(Discussion),
+    Post(Post),
+}
+
+/// Files already read, per index root: they are written once and never edited.
+type Seen = Arc<Mutex<HashMap<String, Option<File>>>>;
+static SEEN: LazyLock<Mutex<HashMap<String, Seen>>> = LazyLock::new(Default::default);
 
 /// The discussions under an index root (local directory or a bucket prefix).
 pub struct Discussions {
     store: Arc<dyn ObjectStore>,
     root: ObjPath,
+    seen: Seen,
 }
 
 impl Discussions {
     pub fn open(index_root: &str) -> Result<Discussions> {
         let (store, root) = sub_store(index_root, "_discussions")?;
-        Ok(Discussions { store, root })
+        let seen = SEEN
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(index_root.trim_end_matches('/').to_string())
+            .or_default()
+            .clone();
+        Ok(Discussions { store, root, seen })
     }
 
     /// Write `json` at `key`, create-only: an existing key is an error, never an overwrite.
@@ -80,28 +98,41 @@ impl Discussions {
 
     /// The discussions under `prefix` with their posts, latest activity first.
     async fn read(&self, prefix: &ObjPath) -> Result<Vec<Transcript>> {
+        let metas: Vec<_> = self.store.list(Some(prefix)).try_collect().await?;
+        let keys: Vec<ObjPath> = metas
+            .into_iter()
+            .map(|m| m.location)
+            .filter(|k| k.as_ref().ends_with(".json"))
+            .collect();
+        let new: Vec<ObjPath> = {
+            let seen = self.seen.lock().unwrap_or_else(|e| e.into_inner());
+            keys.iter()
+                .filter(|k| !seen.contains_key(k.as_ref()))
+                .cloned()
+                .collect()
+        };
+        let fetched: Vec<(ObjPath, Option<File>)> = futures::stream::iter(new)
+            .map(|key| async move {
+                let bytes = self.store.get(&key).await?.bytes().await?;
+                anyhow::Ok((key.clone(), parse(&key, &bytes)))
+            })
+            .buffer_unordered(16)
+            .try_collect()
+            .await?;
+        let mut seen = self.seen.lock().unwrap_or_else(|e| e.into_inner());
+        for (key, file) in fetched {
+            seen.insert(key.to_string(), file);
+        }
         let mut found: Vec<Discussion> = Vec::new();
         let mut posts: HashMap<String, Vec<Post>> = HashMap::new();
-        let metas: Vec<_> = self.store.list(Some(prefix)).try_collect().await?;
-        for meta in metas {
-            let key = meta.location;
-            if !key.as_ref().ends_with(".json") {
-                continue;
-            }
-            let bytes = self.store.get(&key).await?.bytes().await?;
-            // Like the ledger: a malformed file is skipped with a warning, so it cannot hide the rest.
-            if key.as_ref().ends_with("/discussion.json") {
-                match serde_json::from_slice::<Discussion>(&bytes) {
-                    Ok(d) => found.push(d),
-                    Err(e) => eprintln!("comindly: skipping unreadable discussion file {key}: {e}"),
-                }
-            } else {
-                match serde_json::from_slice::<Post>(&bytes) {
-                    Ok(p) => posts.entry(p.discussion.clone()).or_default().push(p),
-                    Err(e) => eprintln!("comindly: skipping unreadable discussion file {key}: {e}"),
-                }
+        for key in &keys {
+            match seen.get(key.as_ref()).cloned().flatten() {
+                Some(File::Discussion(d)) => found.push(d),
+                Some(File::Post(p)) => posts.entry(p.discussion.clone()).or_default().push(p),
+                None => {}
             }
         }
+        drop(seen);
         let mut out: Vec<Transcript> = found
             .into_iter()
             .map(|discussion| {
@@ -150,6 +181,17 @@ impl Discussions {
     }
 }
 
+/// A stored file by its name; a malformed one is skipped with a warning, so it cannot hide the rest.
+fn parse(key: &ObjPath, bytes: &[u8]) -> Option<File> {
+    let file = if key.as_ref().ends_with("/discussion.json") {
+        serde_json::from_slice(bytes).map(File::Discussion)
+    } else {
+        serde_json::from_slice(bytes).map(File::Post)
+    };
+    file.map_err(|e| eprintln!("comindly: skipping unreadable discussion file {key}: {e}"))
+        .ok()
+}
+
 /// What `on` names, as anchors: a file of `repo` by its path, else the symbol `lookup` finds.
 pub fn anchors<'a>(
     g: &CodeGraph,
@@ -163,31 +205,25 @@ pub fn anchors<'a>(
         let files = symbols
             .clone()
             .filter(|s| s.kind == SymbolKind::File && s.repo.0.eq_ignore_ascii_case(repo));
-        let exact: Vec<&Symbol> = files.clone().filter(|s| s.file_path == focus).collect();
-        let found = if exact.is_empty() {
-            files
-                .filter(|s| focus.ends_with(&format!("/{}", s.file_path)))
-                .collect()
-        } else {
-            exact
-        };
-        anyhow::ensure!(
-            found.len() < 2,
-            "`{focus}` matches more than one file in `{repo}`; give the full path"
-        );
-        let s = match found.first().copied() {
-            Some(s) => s,
-            None => {
-                let id = g.lookup(focus).map(|i| g.node(i).id).with_context(|| {
-                    format!("no symbol or file matches `{focus}`; use `find` first")
-                })?;
-                symbols
-                    .clone()
-                    .find(|s| s.id.render() == id)
-                    .with_context(|| format!("symbol `{id}` not loaded"))?
-            }
-        };
-        out.push(Anchor::of(s).at(commits));
+        // The exact path, else the longest indexed path the given one ends with (an absolute path).
+        let file = files
+            .filter(|s| s.file_path == focus || focus.ends_with(&format!("/{}", s.file_path)))
+            .max_by(|a, b| {
+                (a.file_path == focus, a.file_path.len(), &b.file_path).cmp(&(
+                    b.file_path == focus,
+                    b.file_path.len(),
+                    &a.file_path,
+                ))
+            });
+        out.push(match file {
+            Some(s) => Anchor::of(s).at(commits),
+            None => symbol_anchor(
+                g,
+                |id| symbols.clone().find(|s| s.id.render() == id),
+                focus,
+                commits,
+            )?,
+        });
     }
     Ok(out)
 }
@@ -279,6 +315,7 @@ mod tests {
         )
         .unwrap();
         store.post(&first).await.unwrap();
+        assert_eq!(store.all().await.unwrap()[0].posts.len(), 1);
         let second = new_post(
             &d.id,
             Some("change"),
@@ -289,7 +326,12 @@ mod tests {
         )
         .unwrap();
         store.post(&second).await.unwrap();
-        let all = store.all().await.unwrap();
+        // A second handle shares what was already read and still sees the new post.
+        let all = Discussions::open(dir.to_str().unwrap())
+            .unwrap()
+            .all()
+            .await
+            .unwrap();
         let got = store.get(&d.id).await.unwrap();
         std::fs::remove_dir_all(&dir).ok();
         assert_eq!(all.len(), 1);
@@ -376,8 +418,12 @@ mod tests {
             assert_eq!(got[0].repo, repo);
         }
         assert_eq!(on("web", "a/src/main.rs").unwrap()[0].path, "a/src/main.rs");
-        let err = on("web", "x/a/src/main.rs").unwrap_err().to_string();
-        assert!(err.contains("more than one file"), "{err}");
+        let longest = on("web", "/home/ada/web/a/src/main.rs").unwrap();
+        assert_eq!(longest[0].path, "a/src/main.rs");
+        assert_eq!(
+            on("web", "/home/ada/web/src/main.rs").unwrap()[0].path,
+            "src/main.rs"
+        );
     }
 
     #[test]

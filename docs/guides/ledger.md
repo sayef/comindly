@@ -1,6 +1,7 @@
 # The ledger
 
-What the code does not say.
+What the code does not say. For notes on a task while it is still in progress, see
+[Discussions](discussions.md).
 
 Records are short, typed facts anchored to symbols: an `attempt` that failed or was reverted, a
 `decision` with its rejected alternatives, a `constraint`, a `gotcha`, an `intent`, a `question`.

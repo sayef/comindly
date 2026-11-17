@@ -122,7 +122,11 @@ impl ComindlyServer {
                     branch: p.branch,
                     q: p.query,
                 };
-                Ok(d::list_markdown(&d::search(&all, &q)))
+                let found: Vec<d::Summary> = d::search(&all, &q)
+                    .into_iter()
+                    .map(d::Summary::of)
+                    .collect();
+                Ok(d::list_markdown(&found))
             }
             "open" | "post" => {
                 Self::may_write(ctx, "write to discussions")?;
@@ -307,19 +311,17 @@ impl ComindlyServer {
         let commits = crate::index::read_repo_commits(&self.uri)
             .await
             .unwrap_or_default();
-        let mut anchors = Vec::new();
-        for focus in &p.on {
-            let idx = self
-                .graph
-                .lookup(focus)
-                .ok_or_else(|| anyhow::anyhow!("no symbol matches `{focus}` — use `find` first"))?;
-            let id = self.graph.node(idx).id;
-            let s = self
-                .symbols
-                .get(&id)
-                .ok_or_else(|| anyhow::anyhow!("symbol `{id}` not loaded"))?;
-            anchors.push(crate::ledger::Anchor::of(s).at(&commits));
-        }
+        let anchors =
+            p.on.iter()
+                .map(|focus| {
+                    crate::ledger::symbol_anchor(
+                        &self.graph,
+                        |id| self.symbols.get(id),
+                        focus,
+                        &commits,
+                    )
+                })
+                .collect::<anyhow::Result<Vec<_>>>()?;
         let repos: Vec<&str> = anchors.iter().map(|a| a.repo.as_str()).collect();
         let teams = self.team_settings();
         teams.accepts(&by.teams, &repos)?;

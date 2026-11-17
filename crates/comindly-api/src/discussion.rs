@@ -224,6 +224,25 @@ impl Transcript {
     }
 }
 
+/// A discussion without its posts, as `GET /api/v1/discussion` lists it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Summary {
+    pub discussion: Discussion,
+    pub posts: usize,
+    /// Its latest post, else its opening.
+    pub last: String,
+}
+
+impl Summary {
+    pub fn of(t: &Transcript) -> Summary {
+        Summary {
+            discussion: t.discussion.clone(),
+            posts: t.posts.len(),
+            last: t.last().to_string(),
+        }
+    }
+}
+
 /// `POST /api/v1/discussion`: open one, or get the open one for the same repository and ticket or branch.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct OpenDiscussion {
@@ -364,14 +383,14 @@ fn place(d: &Discussion) -> String {
 }
 
 /// One discussion as a list line.
-fn bullet(t: &Transcript) -> String {
+fn bullet(t: &Summary) -> String {
     format!(
         "- {} {} · {} · {} post(s) · last {}\n",
         code(&t.discussion.id),
         one_line(&t.discussion.title),
         place(&t.discussion),
-        t.posts.len(),
-        t.last()
+        t.posts,
+        t.last
     )
 }
 
@@ -415,7 +434,7 @@ pub fn markdown(t: &Transcript) -> String {
 }
 
 /// Discussions as a list, newest activity first.
-pub fn list_markdown(ts: &[&Transcript]) -> String {
+pub fn list_markdown(ts: &[Summary]) -> String {
     let mut o = format!("## Discussions ({})\n", ts.len());
     if ts.is_empty() {
         o.push_str("_none match_\n");
@@ -433,7 +452,7 @@ pub fn mention(ts: &[&Transcript]) -> String {
     }
     let mut o = String::from("\n### Open discussions on this code\n_Unreviewed working notes on work in progress; read one with `discussion` (action `read`) when you need how it is going._\n");
     for t in ts {
-        o.push_str(&bullet(t));
+        o.push_str(&bullet(&Summary::of(t)));
     }
     o
 }

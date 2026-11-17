@@ -111,6 +111,7 @@ nav:
       - Using comindly as a library: guides/library.md
       - Service contracts: guides/contracts.md
       - The ledger: guides/ledger.md
+      - Discussions: guides/discussions.md
       - Preflight and checks: guides/preflight.md
       - The app: guides/ui.md
       - CI and merge requests: guides/ci.md
