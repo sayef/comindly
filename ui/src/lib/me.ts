@@ -5,5 +5,5 @@ import { api } from "@/lib/api";
 export function useAccess() {
   const me = useQuery({ queryKey: ["me"], queryFn: api.me, staleTime: Infinity });
   const server = me.data?.mode === "server";
-  return { me: me.data, server, admin: !server || me.data?.role === "admin" };
+  return { me: me.data, server, admin: !server || me.data?.role === "admin", member: !server || me.data?.role === "admin" || me.data?.role === "member" };
 }

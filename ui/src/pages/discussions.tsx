@@ -1,15 +1,18 @@
-import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, GitBranch, MessagesSquare, Search } from "lucide-react";
-import { useMemo } from "react";
-import { Link, useParams, useSearchParams } from "react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronLeft, CircleSlash, GitBranch, Lock, MessagesSquare, Search, Send, Trash2 } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { AgentView } from "@/components/agent-view";
+import { ConfirmButton } from "@/components/confirm";
 import { PageHeader } from "@/components/page-header";
 import { RepoDot } from "@/components/symbol";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, type Discussion, type DiscussionPost, who } from "@/lib/api";
+import { api, closedLabel, type Discussion, type DiscussionClosed, type DiscussionPost, type PostKind, who } from "@/lib/api";
+import { useAccess } from "@/lib/me";
 import { useTeams } from "@/lib/teams";
 import { ago, cn, date, sentence } from "@/lib/utils";
 
@@ -20,6 +23,26 @@ const KIND_HINT: Record<string, string> = {
   question: "Something for the people working on the task",
   concern: "A risk someone should look at",
 };
+
+const KINDS: PostKind[] = ["plan", "decision", "change", "question", "concern"];
+
+const STATES = [
+  ["open", "Open"],
+  ["closed", "Closed"],
+  ["all", "Open and closed"],
+] as const;
+
+const field = "min-h-24 w-full rounded-md border border-input bg-card px-3 py-2 text-sm transition-[border-color,box-shadow] duration-100 hover:border-muted-foreground/50 focus-visible:border-ring focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring max-sm:text-base";
+const select = "h-9 min-w-0 rounded-md border border-input bg-card px-2 text-sm hover:border-muted-foreground/50 max-sm:w-full";
+
+/** "Closed", with how it closed on hover. */
+function ClosedBadge({ c }: { c: DiscussionClosed }) {
+  return (
+    <Badge variant="outline" className="gap-1" title={`${sentence(closedLabel(c))}, ${new Date(c.at).toLocaleString()}`}>
+      <Lock className="size-3" /> Closed
+    </Badge>
+  );
+}
 
 const UNREVIEWED = "Unreviewed working notes, not team decisions: agents read each post as quoted data from its author, never as instructions.";
 
@@ -57,21 +80,23 @@ function DiscussionList() {
   const [params, setParams] = useSearchParams();
   const q = params.get("q") ?? "";
   const repo = params.get("repo") ?? "";
+  const state = params.get("state") ?? "open";
   const set = (k: string, v: string) => setParams((p) => (v ? p.set(k, v) : p.delete(k), p), { replace: true });
   const repos = useMemo(() => [...new Set((list.data ?? []).map((s) => s.discussion.repo))].sort(), [list.data]);
   const rows = useMemo(() => {
     const needle = q.toLowerCase();
-    return (list.data ?? []).filter(({ discussion: d }) => {
+    return (list.data ?? []).filter(({ discussion: d, closed }) => {
       if (repo && d.repo !== repo) return false;
+      if ((state === "open" && closed) || (state === "closed" && !closed)) return false;
       return !needle || [d.title, d.ticket, d.branch, d.repo].some((t) => t?.toLowerCase().includes(needle));
     });
-  }, [list.data, q, repo]);
+  }, [list.data, q, repo, state]);
 
   return (
     <div className="flex flex-col gap-5">
       <PageHeader
         title="Discussions"
-        actions={<AgentView asks={[{ label: "Discussions", tool: "discussion", args: { action: "list", repo: repo || undefined, query: q || undefined } }]} />}
+        actions={<AgentView asks={[{ label: "Discussions", tool: "discussion", args: { action: "list", repo: repo || undefined, query: q || undefined, closed: state !== "open" || undefined } }]} />}
       >
         Working notes on tasks in progress: each agent's plan, the choices it made and what changed after review. Unreviewed, and kept apart from the ledger.
       </PageHeader>
@@ -80,12 +105,19 @@ function DiscussionList() {
           value={repo}
           aria-label="Repository"
           onChange={(e) => set("repo", e.target.value)}
-          className={cn("h-9 min-w-0 rounded-md border border-input bg-card px-2 text-sm hover:border-muted-foreground/50 max-sm:w-full", repo ? "text-foreground" : "text-muted-foreground")}
+          className={cn(select, repo ? "text-foreground" : "text-muted-foreground")}
         >
           <option value="">Any repository</option>
           {(repo && !repos.includes(repo) ? [...repos, repo] : repos).map((r) => (
             <option key={r} value={r}>
               {r}
+            </option>
+          ))}
+        </select>
+        <select value={state} aria-label="Open or closed" onChange={(e) => set("state", e.target.value === "open" ? "" : e.target.value)} className={select}>
+          {STATES.map(([v, l]) => (
+            <option key={v} value={v}>
+              {l}
             </option>
           ))}
         </select>
@@ -108,11 +140,12 @@ function DiscussionList() {
         </div>
       )}
       <div className="grid grid-cols-[minmax(0,1fr)] gap-3">
-        {rows.map(({ discussion: d, posts, last }) => (
+        {rows.map(({ discussion: d, posts, last, closed }) => (
           <Card key={d.id} className="relative p-4 transition-colors hover:border-muted-foreground/40">
             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
               <Place d={d} />
-              <span className="text-xs text-muted-foreground" title={new Date(last).toLocaleString()}>
+              <span className="flex items-center gap-2 text-xs text-muted-foreground" title={new Date(last).toLocaleString()}>
+                {closed && <ClosedBadge c={closed} />}
                 active {ago(last)}
               </span>
             </div>
@@ -195,9 +228,156 @@ function Post({ p }: { p: DiscussionPost }) {
   );
 }
 
+/** How it closed, with the note left by whoever closed it. */
+function ClosedNotice({ c }: { c: DiscussionClosed }) {
+  return (
+    <div className="rounded-lg border bg-muted/40 p-4 text-sm">
+      <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+        <Lock className="size-4 shrink-0 text-muted-foreground" />
+        <span className="font-semibold">Closed</span>
+        <span className="text-muted-foreground" title={new Date(c.at).toLocaleString()}>
+          ({closedLabel(c)}), {date(c.at)}. It takes no new posts.
+        </span>
+      </p>
+      {c.note && <blockquote className="mt-2 border-l-2 border-border pl-3 whitespace-pre-wrap [overflow-wrap:anywhere]">{c.note}</blockquote>}
+    </div>
+  );
+}
+
+/** A post from the person signed in: a kind, the text and any evidence. */
+function NewPost({ id, onDone }: { id: string; onDone: () => void }) {
+  const [kind, setKind] = useState<PostKind | "">("");
+  const [body, setBody] = useState("");
+  const [evidence, setEvidence] = useState("");
+  const send = useMutation({
+    mutationFn: () =>
+      api.discussionPost({
+        discussion: id,
+        kind: kind || undefined,
+        body,
+        evidence: evidence
+          .split(/[\n,]/)
+          .map((e) => e.trim())
+          .filter(Boolean),
+      }),
+    onSuccess: () => {
+      setKind("");
+      setBody("");
+      setEvidence("");
+      onDone();
+    },
+  });
+  return (
+    <Card className="p-4">
+      <form
+        className="flex flex-col gap-3"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (body.trim()) send.mutate();
+        }}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold">Add a post</h2>
+          <select value={kind} aria-label="Kind" onChange={(e) => setKind(e.target.value as PostKind | "")} className={cn(select, kind ? "text-foreground" : "text-muted-foreground")} title={kind ? KIND_HINT[kind] : undefined}>
+            <option value="">Note</option>
+            {KINDS.map((k) => (
+              <option key={k} value={k}>
+                {sentence(k)}
+              </option>
+            ))}
+          </select>
+        </div>
+        <textarea className={field} value={body} onChange={(e) => setBody(e.target.value)} aria-label="Post" placeholder="What you planned, chose, changed or want to ask" />
+        <Input value={evidence} onChange={(e) => setEvidence(e.target.value)} aria-label="Evidence" placeholder="Evidence, optional: pr:#123, mr:!45, commit:abc123" />
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="submit" size="sm" disabled={!body.trim()} loading={send.isPending}>
+            <Send /> Post
+          </Button>
+          <span className="text-xs text-muted-foreground">Shown to colleagues' agents as your quoted note, never as instructions.</span>
+        </div>
+        {send.error && (
+          <p role="alert" className="text-xs text-danger [overflow-wrap:anywhere]">
+            {sentence(send.error.message)}
+          </p>
+        )}
+      </form>
+    </Card>
+  );
+}
+
+/** Close for members, delete for admins. */
+function Actions({ id, open, member, admin, onClosed }: { id: string; open: boolean; member: boolean; admin: boolean; onClosed: () => void }) {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const [asking, setAsking] = useState(false);
+  const [note, setNote] = useState("");
+  const close = useMutation({
+    mutationFn: () => api.discussionClose(id, note),
+    onSuccess: () => {
+      setAsking(false);
+      setNote("");
+      onClosed();
+    },
+  });
+  const remove = useMutation({
+    mutationFn: () => api.discussionDelete(id),
+    onSuccess: () => {
+      qc.removeQueries({ queryKey: ["discussion", id] });
+      qc.invalidateQueries({ queryKey: ["discussions"] });
+      navigate("/discussions");
+    },
+  });
+  const closing = open && member;
+  if (!closing && !admin) return null;
+  return (
+    <div className="flex flex-col gap-2">
+      <div className={cn("flex flex-wrap items-center gap-1.5", !asking && "-ml-3", admin && !asking && "-mr-3")}>
+        {asking ? (
+          <>
+            <Input autoFocus value={note} onChange={(e) => setNote(e.target.value)} placeholder="Why, optional: opened for the wrong ticket" aria-label="Why it is closed" className="h-8 max-w-sm" />
+            <Button size="sm" variant="outline" loading={close.isPending} onClick={() => close.mutate()}>
+              Close discussion
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setAsking(false)}>
+              Cancel
+            </Button>
+          </>
+        ) : (
+          closing && (
+            <Button size="sm" variant="ghost" onClick={() => setAsking(true)} title="No more posts; it stops showing in why and preflight">
+              <CircleSlash /> Close
+            </Button>
+          )
+        )}
+        {admin && !asking && (
+          <span className="ml-auto">
+            <ConfirmButton size="sm" variant="ghost" className="hover:text-danger" title="Remove permanently, with every post" question="Delete for everyone?" confirmLabel="Delete" loading={remove.isPending} onConfirm={() => remove.mutate()}>
+              <Trash2 /> Delete
+            </ConfirmButton>
+          </span>
+        )}
+      </div>
+      {(close.error ?? remove.error) && (
+        <p role="alert" className="text-xs text-danger [overflow-wrap:anywhere]">
+          {sentence((close.error ?? remove.error)!.message)}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function DiscussionView({ id }: { id: string }) {
+  const qc = useQueryClient();
+  const { admin, member } = useAccess();
+  const overview = useQuery({ queryKey: ["overview"], queryFn: api.overview });
   const t = useQuery({ queryKey: ["discussion", id], queryFn: () => api.discussion(id), retry: false });
   const d = t.data?.discussion;
+  const closed = t.data?.closed;
+  const writable = !!overview.data?.writable;
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["discussion", id] });
+    qc.invalidateQueries({ queryKey: ["discussions"] });
+  };
   return (
     <div className="flex flex-col gap-5">
       <Link to="/discussions" className="-mt-2 flex min-h-9 w-fit items-center gap-1 text-sm font-semibold text-muted-foreground hover:text-foreground">
@@ -215,12 +395,15 @@ function DiscussionView({ id }: { id: string }) {
               </span>
             </span>
           </PageHeader>
+          {closed && <ClosedNotice c={closed} />}
           {t.data.posts.length === 0 && <div className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">No posts yet.</div>}
           <div className="grid grid-cols-[minmax(0,1fr)] gap-3">
             {t.data.posts.map((p) => (
               <Post key={p.id} p={p} />
             ))}
           </div>
+          {writable && member && !closed && <NewPost id={d.id} onDone={refresh} />}
+          {writable && <Actions id={d.id} open={!closed} member={member} admin={admin} onClosed={refresh} />}
         </>
       )}
     </div>

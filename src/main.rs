@@ -314,6 +314,13 @@ pub enum DiscussionWhat {
         #[arg(long)]
         note: Option<String>,
     },
+    /// Delete a discussion with its posts for good (admins)
+    Delete {
+        id: String,
+        /// Delete it; without it, only says what would go
+        #[arg(long)]
+        yes: bool,
+    },
     /// List discussions
     List {
         #[arg(long)]

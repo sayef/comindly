@@ -182,6 +182,35 @@ impl Discussions {
         self.put_new(key, serde_json::to_vec_pretty(c)?).await
     }
 
+    /// Remove discussion `id` with its posts and close for good; the number of files removed.
+    pub async fn delete(&self, id: &str) -> Result<usize> {
+        let id = id.trim();
+        anyhow::ensure!(self.exists(id).await?, "no discussion `{id}`");
+        let prefix = self.root.clone().join(id);
+        let keys: Vec<ObjPath> = self
+            .store
+            .list(Some(&prefix))
+            .map_ok(|m| m.location)
+            .try_collect()
+            .await?;
+        // The opening goes last, so a delete cut short still finds the discussion and can run again.
+        let (head, rest): (Vec<_>, Vec<_>) = keys
+            .into_iter()
+            .partition(|k| k.as_ref().ends_with("/discussion.json"));
+        for key in rest.iter().chain(&head) {
+            self.store
+                .delete(key)
+                .await
+                .with_context(|| format!("delete {key}"))?;
+        }
+        let gone = format!("{prefix}/");
+        self.seen
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|k, _| !k.starts_with(&gone));
+        Ok(rest.len() + head.len())
+    }
+
     /// How discussion `id` closed; `None` while it is open.
     async fn closed(&self, id: &str) -> Result<Option<Closed>> {
         let key = self.root.clone().join(id.trim()).join("closed.json");
@@ -568,6 +597,43 @@ mod tests {
             "the ticket starts a new discussion"
         );
         assert_eq!((open_only, both), (1, 2));
+    }
+
+    #[tokio::test]
+    async fn a_deleted_discussion_is_gone_with_its_posts() {
+        let dir = temp("delete");
+        let store = Discussions::open(dir.to_str().unwrap()).unwrap();
+        let by = || prov(AuthorKind::Agent);
+        let (gone, _) = store
+            .start(&Discussion::new("r", Some("LIN-3"), None, "t", by()))
+            .await
+            .unwrap();
+        let (kept, _) = store
+            .start(&Discussion::new("r", Some("LIN-4"), None, "t", by()))
+            .await
+            .unwrap();
+        let p = new_post(&gone, None, "b", vec![], vec![], by()).unwrap();
+        store.post(&p).await.unwrap();
+        store
+            .close(&gone, &Closed::manual(by(), None))
+            .await
+            .unwrap();
+        assert_eq!(store.all().await.unwrap().len(), 2, "read once, so cached");
+        let removed = store.delete(&gone).await.unwrap();
+        let left: Vec<String> = store
+            .all()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|t| t.discussion.id)
+            .collect();
+        let again = store.delete(&gone).await.is_err();
+        let post_after = store.post(&p).await.is_err();
+        std::fs::remove_dir_all(&dir).ok();
+        assert_eq!(removed, 3, "opening, post and close");
+        assert_eq!(left, vec![kept]);
+        assert!(again, "nothing left to delete");
+        assert!(post_after, "no posts to a deleted discussion");
     }
 
     #[tokio::test]

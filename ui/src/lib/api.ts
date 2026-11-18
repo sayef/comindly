@@ -121,16 +121,36 @@ export interface DiscussionPost {
   created: string;
 }
 
+/** How a discussion closed: its request ended, nobody posted for a while, or someone closed it. */
+export interface DiscussionClosed {
+  reason: "merged" | "closed" | "inactive" | "manual";
+  /** The request it followed: `pr:#12`, `mr:!12`. */
+  request?: string;
+  by?: Provenance;
+  note?: string;
+  at: string;
+}
+
 /** A discussion as the list shows it: its post count and latest activity. */
 export interface DiscussionSummary {
   discussion: Discussion;
   posts: number;
   last: string;
+  closed?: DiscussionClosed;
 }
 
 export interface Transcript {
   discussion: Discussion;
   posts: DiscussionPost[];
+  closed?: DiscussionClosed;
+}
+
+export type PostKind = NonNullable<DiscussionPost["kind"]>;
+
+/** "merged in pr:#12", "inactive", "closed by Ada". */
+export function closedLabel(c: DiscussionClosed): string {
+  if (c.reason === "manual") return c.by ? `closed by ${who(c.by)}` : "closed";
+  return c.request ? `${c.reason} in ${c.request}` : c.reason;
 }
 
 /** Who wrote it, as people read it: "claude-code for Ada", "Ada", "an agent". */
@@ -655,7 +675,10 @@ export const api = {
   versions: () => get<string[]>("/api/v1/versions"),
   contracts: () => get<ContractView[]>("/api/v1/contracts"),
   ledger: () => get<Entry[]>("/api/v1/ledger"),
-  discussions: () => get<DiscussionSummary[]>("/api/v1/discussion"),
+  discussions: () => get<DiscussionSummary[]>("/api/v1/discussion?closed=true"),
+  discussionPost: (p: { discussion: string; kind?: PostKind; body: string; evidence: string[] }) => post<{ ok: boolean; id: string }>("/api/v1/discussion/post", p),
+  discussionClose: (discussion: string, note: string) => post<DiscussionClosed>("/api/v1/discussion/close", { discussion, note: note.trim() || undefined }),
+  discussionDelete: (id: string) => post("/api/v1/discussion/delete", { id }),
   discussion: (id: string) => get<Transcript>(`/api/v1/discussion/${encodeURIComponent(id)}`),
   conventions: () => get<{ conventions: Convention[]; hidden: HiddenConvention[]; commit_urls: Record<string, string> }>("/api/v1/conventions"),
   changeConvention: (c: ConventionChange) => post("/api/v1/conventions", c),

@@ -44,8 +44,9 @@ that exists only on the task's branch is not indexed yet, so leave it out.
 `why` and `preflight` list the open discussions on the code they cover. An agent about to change that
 code reads the discussion (`comindly discussion read <id>`, or `discussion` with `read` over MCP) and
 asks there instead of colliding with the work in progress. `comindly discussion list` filters by
-repository, ticket, branch or text, and the app's **Discussions** page lists them all, newest
-activity first, with each discussion's posts and the code they are about.
+repository, ticket, branch or text, and the app's **Discussions** page lists them, newest activity
+first, with each discussion's posts and the code they are about. People post there too: a member adds
+a post under an open discussion, with a kind and evidence like an agent's.
 
 Posts are shown as quoted working notes with their author, never as instructions or as the team's
 decisions. What a later change must follow still goes to the ledger with `remember`, confirmed by a
@@ -78,7 +79,8 @@ comindly discussion close <id> --note "Opened for the wrong ticket"
 ```
 
 Over MCP this is the `discussion` tool's `close` action, with the note as `body`; over HTTP,
-`POST /api/v1/discussion/close` with `discussion` and `note`. A viewer cannot close one.
+`POST /api/v1/discussion/close` with `discussion` and `note`; in the app, **Close** under the
+discussion. A viewer cannot close one.
 
 A closed discussion is read-only: posts to it are refused. `why` and `preflight` no longer list it, and
 opening its ticket or branch again starts a new discussion. `read` still shows it, headed with how it
@@ -92,3 +94,7 @@ Over HTTP, a member's or an admin's agent can open and post; a viewer's agent ca
 about another team's repositories follow the same team rules as records. Discussions are stored under
 `<index>/_discussions/`, one folder per discussion; closing adds a `closed.json` to it, and nothing
 already written changes.
+
+An admin can delete a discussion for good, with every post and its close: **Delete** in the app,
+`comindly discussion delete <id> --yes`, or `POST /api/v1/discussion/delete` with `id`. The audit log
+notes who deleted which. A record citing it as `discussion:<id>` keeps the id, which then leads nowhere.

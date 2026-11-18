@@ -483,6 +483,7 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
         )
         .route("/api/v1/discussion/post", post(discussion_post))
         .route("/api/v1/discussion/close", post(discussion_close))
+        .route("/api/v1/discussion/delete", post(discussion_delete))
         .route("/api/v1/discussion/{id}", get(discussion_get))
         .route("/api/v1/settings", get(settings::get).post(settings::save))
         .route("/api/v1/settings/test", post(settings::test))
@@ -1847,6 +1848,32 @@ async fn discussion_close(
     };
     match run.await {
         Ok(c) => Ok(Json(c)),
+        Err(e) => Err(bad(e)),
+    }
+}
+
+/// Permanently delete a discussion with its posts; admins only, and noted in the audit log.
+async fn discussion_delete(
+    State(app): State<Shared>,
+    who: Member,
+    Cur(s): Cur,
+    Json(b): Json<api::IdRequest>,
+) -> Reply<api::Done> {
+    let run = async {
+        let root = s.data.root.as_deref().context("read-only UI")?;
+        crate::discussion::Discussions::open(root)?
+            .delete(&b.id)
+            .await
+    };
+    match run.await {
+        Ok(_) => {
+            if let (Some(server), Some(w)) = (app.server.as_ref(), who.as_deref()) {
+                server
+                    .audit
+                    .record(&w.email, "delete-discussion", b.id.trim());
+            }
+            Ok(Json(api::Done::new("deleted the discussion".to_string())))
+        }
         Err(e) => Err(bad(e)),
     }
 }

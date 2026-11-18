@@ -42,10 +42,11 @@ can be bookmarked or shared.
   full timeline. **Add record** writes a new one under your name; each record shows
   who wrote it and its review history; confirm, archive, invalidate or delete it. Hover a badge or
   label for what it means. The symbol view has **Add to the ledger** with that symbol filled in.
-- **Discussions**: working notes on tasks in progress, newest activity first, filtered by repository
-  and by title, ticket or branch. A discussion shows its posts (plan, decisions, changes after review,
-  questions and concerns) with who wrote them and the code they are about. Posts are unreviewed; agents
-  write them with the `discussion` tool ([Discussions](discussions.md)).
+- **Discussions**: working notes on tasks in progress, newest activity first, filtered by repository,
+  by title, ticket or branch, and by open or closed. A discussion shows its posts (plan, decisions,
+  changes after review, questions and concerns) with who wrote them and the code they are about, and
+  how it closed. Members add a post or close an open discussion there; admins can delete one. Posts are
+  unreviewed; agents write them with the `discussion` tool ([Discussions](discussions.md)).
 - **Flows**: where work starts and where it travels. Each flow follows calls and then crosses
   contracts: an HTTP route to the handler that serves it in another repository, a topic to the queues
   subscribed to it, a queue to the code that polls it. The list shows the repositories each flow

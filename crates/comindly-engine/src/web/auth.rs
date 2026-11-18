@@ -138,9 +138,14 @@ fn account_only(path: &str) -> bool {
 /// The least role a request needs: viewers read, members also write to the ledger and
 /// conventions, admins manage people, secrets, repositories, settings and indexing.
 fn needs(method: &Method, path: &str) -> Role {
-    if ["/api/v1/members", "/api/v1/secrets", "/api/v1/audit"]
-        .iter()
-        .any(|p| path.starts_with(p))
+    if [
+        "/api/v1/members",
+        "/api/v1/secrets",
+        "/api/v1/audit",
+        "/api/v1/discussion/delete",
+    ]
+    .iter()
+    .any(|p| path.starts_with(p))
     {
         return Role::Admin;
     }
@@ -1032,6 +1037,10 @@ mod tests {
         assert_eq!(
             needs(&Method::POST, "/api/v1/discussion/close"),
             Role::Member
+        );
+        assert_eq!(
+            needs(&Method::POST, "/api/v1/discussion/delete"),
+            Role::Admin
         );
     }
 

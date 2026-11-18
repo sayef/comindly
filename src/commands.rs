@@ -977,6 +977,15 @@ fn discussion(c: &Client, what: DiscussionWhat) -> ExitCode {
                 ExitCode::SUCCESS
             })
         }
+        DiscussionWhat::Delete { id, yes } => {
+            if !yes {
+                term::note(&format!(
+                    "would delete discussion {id} with its posts; add --yes to delete it"
+                ));
+                return ExitCode::SUCCESS;
+            }
+            done(c.post("/api/v1/discussion/delete", &api::IdRequest { id }))
+        }
         DiscussionWhat::List {
             repo,
             ticket,
