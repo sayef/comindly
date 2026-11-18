@@ -8,6 +8,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [0.5.0-beta.20](https://github.com/sayef/comindly/compare/v0.5.0-beta.19...v0.5.0-beta.20) - 2026-11-18
 
+### Added
+
+- Discussions close when their work is done. Each indexing run checks the pull or merge request a post cited last, or else the newest one from the discussion's branch, and closes the discussion when it merged or was closed; a discussion nobody posted to for `discussion_inactive_days` (30 by default, 0 never) closes as inactive. A person or an agent can also close one by hand with a note (`comindly discussion close`, the `discussion` tool's `close`, the app). A closed discussion takes no posts, leaves `why` and `preflight`, and opening its ticket again starts a new one; `list` shows closed ones with `--closed` or `closed: true`.
+- In the app, members post to an open discussion and close it; the Discussions page filters open and closed discussions, and a closed one shows how it closed. Admins delete a discussion with its posts (also `comindly discussion delete`), noted in the audit log.
+
+### Fixed
+
+- **View as agent** on the Discussions pages shows what the `discussion` tool answers instead of an error.
+
 ## [0.5.0-beta.19](https://github.com/sayef/comindly/compare/v0.5.0-beta.18...v0.5.0-beta.19) - 2026-11-18
 
 ### Added
