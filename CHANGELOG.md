@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0-beta.21](https://github.com/sayef/comindly/compare/v0.5.0-beta.20...v0.5.0-beta.21) - 2026-11-18
+
+### Changed
+
+- Discussion cards on the app's Discussions page have **Close** (members and admins) and **Delete** (admins), so a discussion no longer has to be opened to close or delete it.
 
 ## [0.5.0-beta.20](https://github.com/sayef/comindly/compare/v0.5.0-beta.19...v0.5.0-beta.20) - 2026-11-18
 
