@@ -75,6 +75,10 @@ export function DiscussionsPage() {
 }
 
 function DiscussionList() {
+  const qc = useQueryClient();
+  const { admin, member } = useAccess();
+  const overview = useQuery({ queryKey: ["overview"], queryFn: api.overview });
+  const writable = !!overview.data?.writable;
   const teams = useTeams();
   const list = useQuery({ queryKey: ["discussions"], queryFn: api.discussions, select: (d) => d.filter((s) => teams.inView(s.discussion.repo)) });
   const [params, setParams] = useSearchParams();
@@ -164,6 +168,11 @@ function DiscussionList() {
                 opened by <span className="font-semibold text-foreground">{who(d.provenance)}</span>, {date(d.created)}
               </span>
             </p>
+            {writable && (admin || (member && !closed)) && (
+              <div className="relative z-10 mt-2 -mb-2">
+                <Actions id={d.id} open={!closed} member={member} admin={admin} onClosed={() => qc.invalidateQueries({ queryKey: ["discussions"] })} />
+              </div>
+            )}
           </Card>
         ))}
       </div>
@@ -306,9 +315,8 @@ function NewPost({ id, onDone }: { id: string; onDone: () => void }) {
 }
 
 /** Close for members, delete for admins. */
-function Actions({ id, open, member, admin, onClosed }: { id: string; open: boolean; member: boolean; admin: boolean; onClosed: () => void }) {
+function Actions({ id, open, member, admin, onClosed, onDeleted }: { id: string; open: boolean; member: boolean; admin: boolean; onClosed: () => void; onDeleted?: () => void }) {
   const qc = useQueryClient();
-  const navigate = useNavigate();
   const [asking, setAsking] = useState(false);
   const [note, setNote] = useState("");
   const close = useMutation({
@@ -324,7 +332,7 @@ function Actions({ id, open, member, admin, onClosed }: { id: string; open: bool
     onSuccess: () => {
       qc.removeQueries({ queryKey: ["discussion", id] });
       qc.invalidateQueries({ queryKey: ["discussions"] });
-      navigate("/discussions");
+      onDeleted?.();
     },
   });
   const closing = open && member;
@@ -368,6 +376,7 @@ function Actions({ id, open, member, admin, onClosed }: { id: string; open: bool
 
 function DiscussionView({ id }: { id: string }) {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const { admin, member } = useAccess();
   const overview = useQuery({ queryKey: ["overview"], queryFn: api.overview });
   const t = useQuery({ queryKey: ["discussion", id], queryFn: () => api.discussion(id), retry: false });
@@ -403,7 +412,7 @@ function DiscussionView({ id }: { id: string }) {
             ))}
           </div>
           {writable && member && !closed && <NewPost id={d.id} onDone={refresh} />}
-          {writable && <Actions id={d.id} open={!closed} member={member} admin={admin} onClosed={refresh} />}
+          {writable && <Actions id={d.id} open={!closed} member={member} admin={admin} onClosed={refresh} onDeleted={() => navigate("/discussions")} />}
         </>
       )}
     </div>
