@@ -1,5 +1,5 @@
-//! Discussions store: `<index-dir>/_discussions/<id>/discussion.json` and `<id>/posts/<post-id>.json`,
-//! written create-only like the ledger: a discussion grows by new posts, never by edits.
+//! Discussions store: `<index-dir>/_discussions/<id>/discussion.json`, `<id>/posts/<post-id>.json`
+//! and, once it closed, `<id>/closed.json`; written create-only like the ledger, never edited.
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
@@ -23,6 +23,8 @@ pub const CITE: &str = "discussion:";
 enum File {
     Discussion(Discussion),
     Post(Post),
+    /// The discussion's id, from the file's folder.
+    Closed(String, Closed),
 }
 
 /// Files already read, per index root: they are written once and never edited.
@@ -90,6 +92,14 @@ impl Discussions {
             "no discussion `{}`",
             p.discussion
         );
+        // shortcut: a post racing the indexer's close can still land after it; the store has no cross-file lock, as in `start`.
+        if let Some(c) = self.closed(&p.discussion).await? {
+            anyhow::bail!(
+                "discussion `{}` is closed ({}); open a new one for further work",
+                p.discussion,
+                c.label()
+            );
+        }
         let key = self
             .root
             .clone()
@@ -128,10 +138,14 @@ impl Discussions {
         }
         let mut found: Vec<Discussion> = Vec::new();
         let mut posts: HashMap<String, Vec<Post>> = HashMap::new();
+        let mut closed: HashMap<String, Closed> = HashMap::new();
         for key in &keys {
             match seen.get(key.as_ref()).cloned().flatten() {
                 Some(File::Discussion(d)) => found.push(d),
                 Some(File::Post(p)) => posts.entry(p.discussion.clone()).or_default().push(p),
+                Some(File::Closed(id, c)) => {
+                    closed.insert(id, c);
+                }
                 None => {}
             }
         }
@@ -141,7 +155,12 @@ impl Discussions {
             .map(|discussion| {
                 let mut posts = posts.remove(&discussion.id).unwrap_or_default();
                 posts.sort_by(|a, b| a.created.cmp(&b.created).then_with(|| a.id.cmp(&b.id)));
-                Transcript { discussion, posts }
+                let closed = closed.remove(&discussion.id);
+                Transcript {
+                    discussion,
+                    posts,
+                    closed,
+                }
             })
             .collect();
         out.sort_by(|a, b| {
@@ -150,6 +169,23 @@ impl Discussions {
                 .then_with(|| a.discussion.id.cmp(&b.discussion.id))
         });
         Ok(out)
+    }
+
+    /// Close discussion `id`, once: a second close is an error, never an overwrite.
+    pub async fn close(&self, id: &str, c: &Closed) -> Result<()> {
+        anyhow::ensure!(self.exists(id).await?, "no discussion `{id}`");
+        let key = self.root.clone().join(id.trim()).join("closed.json");
+        self.put_new(key, serde_json::to_vec_pretty(c)?).await
+    }
+
+    /// How discussion `id` closed; `None` while it is open.
+    async fn closed(&self, id: &str) -> Result<Option<Closed>> {
+        let key = self.root.clone().join(id.trim()).join("closed.json");
+        match self.store.get(&key).await {
+            Ok(got) => Ok(Some(serde_json::from_slice(&got.bytes().await?)?)),
+            Err(object_store::Error::NotFound { .. }) => Ok(None),
+            Err(e) => Err(e).with_context(|| format!("read {key}")),
+        }
     }
 
     /// Whether `id` names a discussion: one lookup of its `discussion.json`.
@@ -217,6 +253,9 @@ impl Discussions {
 fn parse(key: &ObjPath, bytes: &[u8]) -> Option<File> {
     let file = if key.as_ref().ends_with("/discussion.json") {
         serde_json::from_slice(bytes).map(File::Discussion)
+    } else if key.as_ref().ends_with("/closed.json") {
+        let id = key.parts().rev().nth(1).map(|p| p.as_ref().to_string());
+        serde_json::from_slice(bytes).map(|c| File::Closed(id.unwrap_or_default(), c))
     } else {
         serde_json::from_slice(bytes).map(File::Post)
     };
@@ -474,6 +513,57 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn a_closed_discussion_is_read_only_and_out_of_the_way() {
+        let dir = temp("closed");
+        let store = Discussions::open(dir.to_str().unwrap()).unwrap();
+        let d = Discussion::new("r", Some("LIN-1"), None, "t", prov(AuthorKind::Agent));
+        let (id, _) = store.start(&d).await.unwrap();
+        let mut p = new_post(
+            &id,
+            None,
+            "b",
+            vec![],
+            vec![anchor("s1")],
+            prov(AuthorKind::Agent),
+        )
+        .unwrap();
+        store.post(&p).await.unwrap();
+        let c = Closed {
+            reason: CloseReason::Merged,
+            request: Some("pr:#12".into()),
+            at: "2026-11-17T10:44:01Z".into(),
+        };
+        store.close(&id, &c).await.unwrap();
+        let twice = store.close(&id, &c).await.is_err();
+        p.id = "another".into();
+        let refused = store.post(&p).await.unwrap_err().to_string();
+        let all = store.all().await.unwrap();
+        let again = Discussion::new("r", Some("lin-1"), None, "t", prov(AuthorKind::Agent));
+        let (reopened, existed) = store.start(&again).await.unwrap();
+        let open_only = search(&store.all().await.unwrap(), &DiscussionQuery::default()).len();
+        let with_closed = DiscussionQuery {
+            closed: true,
+            ..Default::default()
+        };
+        let both = search(&store.all().await.unwrap(), &with_closed).len();
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(twice, "a discussion closes once");
+        assert!(refused.contains("closed (merged in pr:#12)"), "{refused}");
+        assert_eq!(all[0].closed.as_ref(), Some(&c));
+        assert!(markdown(&all[0]).contains("Closed (merged in pr:#12)"));
+        assert_eq!(Summary::of(&all[0]).closed.as_ref(), Some(&c));
+        assert!(
+            touching(&all, &["s1".into()]).is_empty(),
+            "why and preflight skip it"
+        );
+        assert!(
+            !existed && reopened != id,
+            "the ticket starts a new discussion"
+        );
+        assert_eq!((open_only, both), (1, 2));
+    }
+
     #[test]
     fn a_post_kind_must_be_known() {
         let by = prov(AuthorKind::Agent);
@@ -489,6 +579,7 @@ mod tests {
         let all = vec![Transcript {
             discussion: d,
             posts: vec![p],
+            closed: None,
         }];
         assert_eq!(touching(&all, &["s1".into()]).len(), 1);
         assert!(touching(&all, &["s2".into()]).is_empty());
@@ -510,6 +601,7 @@ mod tests {
         let md = markdown(&Transcript {
             discussion: d,
             posts: vec![p],
+            closed: None,
         });
         assert!(md.contains("_Unreviewed working notes"));
         assert!(md.contains("> one\n> two\n"));

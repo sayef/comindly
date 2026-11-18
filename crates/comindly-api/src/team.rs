@@ -58,6 +58,9 @@ pub struct TeamSettings {
     /// Minutes between checks whether a default branch moved (default 5).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_index_minutes: Option<usize>,
+    /// Days without a post after which indexing closes a discussion (default 30, 0 never).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discussion_inactive_days: Option<usize>,
     /// Clone URLs of the team's repositories, so everyone can get the same set.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub repos: Vec<String>,

@@ -121,6 +121,7 @@ impl ComindlyServer {
                     ticket: p.ticket,
                     branch: p.branch,
                     q: p.query,
+                    closed: p.closed.unwrap_or(false),
                 };
                 let found: Vec<d::Summary> = d::search(&all, &q)
                     .into_iter()
@@ -777,6 +778,9 @@ struct DiscussionParam {
     /// `list`: text to find in titles and posts.
     #[serde(default)]
     query: Option<String>,
+    /// `list`: include closed discussions too.
+    #[serde(default)]
+    closed: Option<bool>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema, Default)]

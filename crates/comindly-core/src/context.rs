@@ -35,6 +35,8 @@ pub struct Settings {
     pub auto_index_llm: bool,
     /// Time between checks whether a default branch moved.
     pub auto_index_every: std::time::Duration,
+    /// Days without a post after which indexing closes a discussion; 0 never.
+    pub discussion_inactive_days: usize,
     /// LLM tasks this run writes again from scratch instead of reusing what is stored.
     pub rewrite: std::collections::BTreeSet<crate::prompts::Task>,
 }
@@ -42,6 +44,9 @@ pub struct Settings {
 /// Default and largest minutes between automatic re-index checks.
 pub const AUTO_INDEX_MINUTES: usize = 5;
 pub const MAX_AUTO_INDEX_MINUTES: usize = 1440;
+/// Default days without a post before a discussion closes as inactive.
+pub const DISCUSSION_INACTIVE_DAYS: usize = 30;
+pub const MAX_DISCUSSION_INACTIVE_DAYS: usize = 3650;
 
 impl Settings {
     /// `env` looks up overrides such as `COMINDLY_LLM_MODEL`.
@@ -98,6 +103,10 @@ impl Settings {
                     .unwrap_or(AUTO_INDEX_MINUTES)
                     .clamp(1, MAX_AUTO_INDEX_MINUTES) as u64,
             ),
+            discussion_inactive_days: team
+                .discussion_inactive_days
+                .unwrap_or(DISCUSSION_INACTIVE_DAYS)
+                .min(MAX_DISCUSSION_INACTIVE_DAYS),
             rewrite: Default::default(),
         }
     }

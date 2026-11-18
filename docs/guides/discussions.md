@@ -52,8 +52,26 @@ decisions. What a later change must follow still goes to the ledger with `rememb
 person. Such a record can cite the discussion it came from as evidence, `discussion:<id>`, so a reader
 finds the reasoning behind it; the id must name a discussion in the index.
 
+## Closing
+
+Each indexing run closes the discussions whose work is done:
+
+- **Merged or closed:** the pull or merge request a post cited last (`pr:#123`, `mr:!123`), or else
+  the latest one from the discussion's branch, merged or was closed after the discussion opened. The
+  branch lookup finds requests from branches in the same repository, not from forks, so cite the
+  request in a post when it comes from a fork. These lookups need the hosting token used for cloning,
+  and share the run's limit on lookups with evidence on records; the rest wait for the next run.
+- **Inactive:** nobody posted for `discussion_inactive_days` days (30 by default; 0 turns this off).
+  Set it with `comindly team set discussion_inactive_days=14`.
+
+A closed discussion is read-only: posts to it are refused. `why` and `preflight` no longer list it, and
+opening its ticket or branch again starts a new discussion. `read` still shows it, headed with how it
+closed (for example "Closed (merged in pr:#123)"). `list` shows open discussions; `--closed` (CLI) or
+`closed: true` (MCP, HTTP) includes closed ones.
+
 ## Access and storage
 
 Over HTTP, a member's or an admin's agent can open and post; a viewer's agent can only read. Posts
 about another team's repositories follow the same team rules as records. Discussions are stored under
-`<index>/_discussions/`, one folder per discussion.
+`<index>/_discussions/`, one folder per discussion; closing adds a `closed.json` to it, and nothing
+already written changes.

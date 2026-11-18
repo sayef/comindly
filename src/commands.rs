@@ -972,12 +972,14 @@ fn discussion(c: &Client, what: DiscussionWhat) -> ExitCode {
             ticket,
             branch,
             query,
+            closed,
         } => {
             let q = d::DiscussionQuery {
                 repo,
                 ticket,
                 branch,
                 q: query,
+                closed,
             };
             show(c.get("/api/v1/discussion", &q), |all: Vec<d::Summary>| {
                 println!("{}", d::list_markdown(&all));

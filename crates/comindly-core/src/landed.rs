@@ -83,9 +83,127 @@ pub async fn resolve(ctx: &IndexContext, heads: &[IndexedRepo], logs: &mut RepoL
             "evidence: {found} merge request(s) or branch commit(s) followed to the default branch"
         ));
     }
+    let closed = close_discussions(ctx, &remotes, &client, &mut asked, &mut failed).await;
+    if closed > 0 {
+        ctx.report.note(format!("discussions: {closed} closed"));
+    }
     if let Some(e) = failed {
         ctx.report.warn(format!("evidence lookup: {e}"));
     }
+}
+
+/// Close each open discussion whose request merged or was closed after it opened, or that had no
+/// post for `discussion_inactive_days`; the number closed.
+async fn close_discussions(
+    ctx: &IndexContext,
+    remotes: &HashMap<&str, &str>,
+    client: &reqwest::Client,
+    asked: &mut usize,
+    failed: &mut Option<String>,
+) -> usize {
+    use crate::discussion::{Closed, Discussions};
+    let Ok(store) = Discussions::open(&ctx.root) else {
+        return 0;
+    };
+    let all = match store.all().await {
+        Ok(all) => all,
+        Err(e) => {
+            *failed = Some(format!("{e:#}"));
+            return 0;
+        }
+    };
+    let now = chrono::Utc::now();
+    let quiet = ctx.settings.discussion_inactive_days as i64;
+    let mut closed = 0;
+    for t in all.iter().filter(|t| t.closed.is_none()) {
+        let d = &t.discussion;
+        let opened = time(&d.created).unwrap_or(i64::MAX);
+        let mut ended = None;
+        let project = remotes.get(d.repo.as_str()).and_then(|r| project(r, ctx));
+        if let Some(project) = project.filter(|_| *asked < BUDGET) {
+            // The request a post cited last, else the latest one from the discussion's branch.
+            let cited = t.posts.iter().rev().find_map(|p| {
+                p.evidence.iter().rev().find_map(|e| match reference(e) {
+                    Some(r @ Ref::Request(_, n)) if r.names(&d.repo) => Some(n),
+                    _ => None,
+                })
+            });
+            let found = match (cited, &d.branch) {
+                (Some(n), _) => Some(project.request(client, n).await),
+                (None, Some(b)) => Some(project.on_branch(client, b).await),
+                (None, None) => None,
+            };
+            if found.is_some() {
+                *asked += 1;
+            }
+            match found {
+                Some(Ok(Some((n, reason, at)))) if at >= opened => {
+                    let request = match project.provider {
+                        Provider::GitLab => format!("mr:!{n}"),
+                        Provider::GitHub => format!("pr:#{n}"),
+                    };
+                    ended = Some(Closed {
+                        reason,
+                        request: Some(request),
+                        at: rfc3339(at),
+                    });
+                }
+                Some(Err(e)) => *failed = Some(format!("{e:#}")),
+                _ => {}
+            }
+        }
+        if let Some(c) = ended.or_else(|| inactive(t, now.timestamp(), quiet)) {
+            match store.close(&d.id, &c).await {
+                Ok(()) => closed += 1,
+                Err(e) => *failed = Some(format!("{e:#}")),
+            }
+        }
+    }
+    closed
+}
+
+/// How `t` closes as inactive at `now` when nobody posted for `days` days (0 never).
+fn inactive(
+    t: &crate::discussion::Transcript,
+    now: i64,
+    days: i64,
+) -> Option<crate::discussion::Closed> {
+    let last = time(t.last())?;
+    (days > 0 && now - last > days * 86_400).then(|| crate::discussion::Closed {
+        reason: crate::discussion::CloseReason::Inactive,
+        request: None,
+        at: rfc3339(now),
+    })
+}
+
+/// Seconds since the epoch of an RFC 3339 time.
+fn time(t: &str) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc3339(t)
+        .ok()
+        .map(|t| t.timestamp())
+}
+
+fn rfc3339(secs: i64) -> String {
+    chrono::DateTime::from_timestamp(secs, 0)
+        .unwrap_or_default()
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+}
+
+/// Whether a request merged or was closed, and when; `None` while it is open.
+fn ended(
+    provider: Provider,
+    req: &serde_json::Value,
+) -> Option<(crate::discussion::CloseReason, i64)> {
+    use crate::discussion::CloseReason;
+    let at = |k: &str| req[k].as_str().and_then(time);
+    let merged = match provider {
+        Provider::GitLab => req["state"] == "merged",
+        Provider::GitHub => !req["merged_at"].is_null(),
+    };
+    if merged {
+        return Some((CloseReason::Merged, at("merged_at")?));
+    }
+    (req["state"] == "closed").then(|| Some((CloseReason::Closed, at("closed_at")?)))?
 }
 
 /// A merge or pull request (`mr:!N`, `pr:#N`) or commit, optionally naming its repository:
@@ -138,6 +256,7 @@ struct Project {
     provider: Provider,
     api: String,
     token: String,
+    owner: String,
 }
 
 fn project(remote: &str, ctx: &IndexContext) -> Option<Project> {
@@ -159,6 +278,7 @@ fn project(remote: &str, ctx: &IndexContext) -> Option<Project> {
         provider: src.provider,
         api,
         token,
+        owner: src.owner,
     })
 }
 
@@ -168,7 +288,16 @@ impl Project {
         client: &reqwest::Client,
         path: &str,
     ) -> anyhow::Result<Option<serde_json::Value>> {
-        let req = client.get(format!("{}{path}", self.api));
+        self.get_query(client, path, &[]).await
+    }
+
+    async fn get_query(
+        &self,
+        client: &reqwest::Client,
+        path: &str,
+        query: &[(&str, &str)],
+    ) -> anyhow::Result<Option<serde_json::Value>> {
+        let req = client.get(format!("{}{path}", self.api)).query(query);
         let req = match self.provider {
             Provider::GitLab => req.header("PRIVATE-TOKEN", &self.token),
             Provider::GitHub => req
@@ -197,6 +326,59 @@ impl Project {
             Some(serde_json::Value::Array(v)) => v,
             _ => Vec::new(),
         })
+    }
+
+    /// Request `n`, if it merged or was closed: its number, how it ended and when.
+    async fn request(
+        &self,
+        client: &reqwest::Client,
+        n: u64,
+    ) -> anyhow::Result<Option<(u64, crate::discussion::CloseReason, i64)>> {
+        let path = match self.provider {
+            Provider::GitLab => format!("/merge_requests/{n}"),
+            Provider::GitHub => format!("/pulls/{n}"),
+        };
+        Ok(self
+            .get(client, &path)
+            .await?
+            .and_then(|r| ended(self.provider, &r))
+            .map(|(reason, at)| (n, reason, at)))
+    }
+
+    /// The latest request from `branch` in this repository, if it merged or was closed; an open
+    /// newer one means the work goes on, so the discussion stays open.
+    async fn on_branch(
+        &self,
+        client: &reqwest::Client,
+        branch: &str,
+    ) -> anyhow::Result<Option<(u64, crate::discussion::CloseReason, i64)>> {
+        let (path, head, number) = match self.provider {
+            Provider::GitLab => ("/merge_requests", branch.to_string(), "iid"),
+            Provider::GitHub => ("/pulls", format!("{}:{branch}", self.owner), "number"),
+        };
+        let query: &[(&str, &str)] = match self.provider {
+            Provider::GitLab => &[
+                ("source_branch", &head),
+                ("state", "all"),
+                ("order_by", "updated_at"),
+                ("per_page", "1"),
+            ],
+            Provider::GitHub => &[
+                ("head", &head),
+                ("state", "all"),
+                ("sort", "updated"),
+                ("direction", "desc"),
+                ("per_page", "1"),
+            ],
+        };
+        let latest = match self.get_query(client, path, query).await? {
+            Some(serde_json::Value::Array(v)) => v.into_iter().next(),
+            _ => None,
+        };
+        Ok(latest.and_then(|r| {
+            let (reason, at) = ended(self.provider, &r)?;
+            Some((r[number].as_u64()?, reason, at))
+        }))
     }
 
     /// The default-branch commits a merged request, or the request a branch commit belongs to, became,
@@ -291,6 +473,69 @@ mod tests {
         assert!(reference("test:t::retry").is_none());
         assert!(reference("dev logs 2026-11-11").is_none());
         assert!(reference("mr:see the thread").is_none());
+    }
+
+    #[test]
+    fn a_request_ends_merged_or_closed() {
+        use crate::discussion::CloseReason;
+        use serde_json::json;
+        let gh_merged = json!({"state": "closed", "merged_at": "2026-11-17T10:44:01Z", "closed_at": "2026-11-17T10:44:01Z"});
+        let gh_closed =
+            json!({"state": "closed", "merged_at": null, "closed_at": "2026-11-17T11:00:00Z"});
+        let gh_open = json!({"state": "open", "merged_at": null, "closed_at": null});
+        let gl_merged = json!({"state": "merged", "merged_at": "2026-11-17T10:44:01Z"});
+        let gl_closed = json!({"state": "closed", "closed_at": "2026-11-17T11:00:00Z"});
+        let gl_open = json!({"state": "opened"});
+        let at = time("2026-11-17T10:44:01Z").unwrap();
+        assert_eq!(
+            ended(Provider::GitHub, &gh_merged),
+            Some((CloseReason::Merged, at))
+        );
+        assert_eq!(
+            ended(Provider::GitHub, &gh_closed).map(|e| e.0),
+            Some(CloseReason::Closed)
+        );
+        assert_eq!(ended(Provider::GitHub, &gh_open), None);
+        assert_eq!(
+            ended(Provider::GitLab, &gl_merged),
+            Some((CloseReason::Merged, at))
+        );
+        assert_eq!(
+            ended(Provider::GitLab, &gl_closed).map(|e| e.0),
+            Some(CloseReason::Closed)
+        );
+        assert_eq!(ended(Provider::GitLab, &gl_open), None);
+    }
+
+    #[test]
+    fn a_quiet_discussion_closes_as_inactive() {
+        use crate::discussion::{CloseReason, Discussion, Transcript};
+        use crate::ledger::Provenance;
+        let mut d = Discussion::new(
+            "r",
+            Some("LIN-1"),
+            None,
+            "t",
+            Provenance::agent("t", None, &Default::default()),
+        );
+        d.created = "2026-10-01T00:00:00Z".into();
+        let t = Transcript {
+            discussion: d,
+            posts: vec![],
+            closed: None,
+        };
+        let day = 86_400;
+        let opened = time("2026-10-01T00:00:00Z").unwrap();
+        assert!(
+            inactive(&t, opened + 30 * day, 30).is_none(),
+            "not before the period ends"
+        );
+        let c = inactive(&t, opened + 31 * day, 30).unwrap();
+        assert_eq!((c.reason, c.request), (CloseReason::Inactive, None));
+        assert!(
+            inactive(&t, opened + 400 * day, 0).is_none(),
+            "0 never closes"
+        );
     }
 
     #[test]

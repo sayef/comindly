@@ -66,7 +66,8 @@ comindly team set llm_base_url=                  # an empty value removes a sett
 Keys: `name`, `llm_model`, `llm_model_summary`, `llm_model_guide`, `llm_model_flow` (a model for
 one task in place of `llm_model`), `llm_base_url`, `embed_model`, `embed`, `enrich`, `flows`, `guide`,
 `max_enrich`, `max_flows`, `llm_concurrency`, `llm_price_in`, `llm_price_out`, `format` (`md` or `json`),
-`scip` (`auto`, `require` or `off`), `auto_index`, `auto_index_llm` and `auto_index_minutes`. Where one is unset, comindly's default applies.
+`scip` (`auto`, `require` or `off`), `auto_index`, `auto_index_llm`, `auto_index_minutes` and
+`discussion_inactive_days`. Where one is unset, comindly's default applies.
 See [Team setup](team-setup.md#team-settings).
 
 ## Models and prompts

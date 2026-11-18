@@ -318,6 +318,9 @@ pub enum DiscussionWhat {
         /// Text in titles and posts
         #[arg(long)]
         query: Option<String>,
+        /// Include closed discussions
+        #[arg(long)]
+        closed: bool,
     },
 }
 
