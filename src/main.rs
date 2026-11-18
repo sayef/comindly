@@ -307,6 +307,13 @@ pub enum DiscussionWhat {
     },
     /// Show a discussion with its posts
     Read { id: String },
+    /// Close a discussion by hand, for example one opened by mistake; it then takes no posts
+    Close {
+        id: String,
+        /// Why it is closed
+        #[arg(long)]
+        note: Option<String>,
+    },
     /// List discussions
     List {
         #[arg(long)]

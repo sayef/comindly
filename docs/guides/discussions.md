@@ -57,16 +57,33 @@ finds the reasoning behind it; the id must name a discussion in the index.
 Each indexing run closes the discussions whose work is done:
 
 - **Merged or closed:** the pull or merge request a post cited last (`pr:#123`, `mr:!123`), or else
-  the latest one from the discussion's branch, merged or was closed after the discussion opened. The
-  branch lookup finds requests from branches in the same repository, not from forks, so cite the
-  request in a post when it comes from a fork. These lookups need the hosting token used for cloning,
+  the newest one opened from the discussion's branch, merged or was closed after the discussion
+  opened. The branch lookup finds requests from branches in the same repository, not from forks, so
+  cite the request in a post when it comes from a fork. These lookups need the hosting token used for cloning,
   and share the run's limit on lookups with evidence on records; the rest wait for the next run.
 - **Inactive:** nobody posted for `discussion_inactive_days` days (30 by default; 0 turns this off).
   Set it with `comindly team set discussion_inactive_days=14`.
 
+The check runs at the end of an indexing run. With `auto_index` on, a merge moves the default branch
+and starts a run, so a merged request closes its discussion within minutes. A request closed without
+merging, or a quiet discussion, waits for the next run, and with `auto_index` off for the next
+`comindly index`. Lookups for record evidence go first in a run's limit, so with much evidence waiting
+some discussions are checked a run or two later; inactivity closes them regardless.
+
+A person or an agent can also close a discussion by hand, for example one opened by mistake or for work
+that stopped, with a note saying why:
+
+```sh
+comindly discussion close <id> --note "Opened for the wrong ticket"
+```
+
+Over MCP this is the `discussion` tool's `close` action, with the note as `body`; over HTTP,
+`POST /api/v1/discussion/close` with `discussion` and `note`. A viewer cannot close one.
+
 A closed discussion is read-only: posts to it are refused. `why` and `preflight` no longer list it, and
 opening its ticket or branch again starts a new discussion. `read` still shows it, headed with how it
-closed (for example "Closed (merged in pr:#123)"). `list` shows open discussions; `--closed` (CLI) or
+closed (for example "Closed (merged in pr:#123)" or "Closed (closed by alice@example.com)", followed by
+the note). `list` shows open discussions; `--closed` (CLI) or
 `closed: true` (MCP, HTTP) includes closed ones.
 
 ## Access and storage

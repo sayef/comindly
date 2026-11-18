@@ -145,6 +145,8 @@ async fn close_discussions(
                     ended = Some(Closed {
                         reason,
                         request: Some(request),
+                        by: None,
+                        note: None,
                         at: rfc3339(at),
                     });
                 }
@@ -172,6 +174,8 @@ fn inactive(
     (days > 0 && now - last > days * 86_400).then(|| crate::discussion::Closed {
         reason: crate::discussion::CloseReason::Inactive,
         request: None,
+        by: None,
+        note: None,
         at: rfc3339(now),
     })
 }
@@ -345,8 +349,9 @@ impl Project {
             .map(|(reason, at)| (n, reason, at)))
     }
 
-    /// The latest request from `branch` in this repository, if it merged or was closed; an open
-    /// newer one means the work goes on, so the discussion stays open.
+    /// The newest request from `branch` in this repository, if it merged or was closed; an open
+    /// newer one means the work goes on, so the discussion stays open. Newest by creation, so a
+    /// comment on an old request does not make it the latest.
     async fn on_branch(
         &self,
         client: &reqwest::Client,
@@ -360,13 +365,13 @@ impl Project {
             Provider::GitLab => &[
                 ("source_branch", &head),
                 ("state", "all"),
-                ("order_by", "updated_at"),
+                ("order_by", "created_at"),
                 ("per_page", "1"),
             ],
             Provider::GitHub => &[
                 ("head", &head),
                 ("state", "all"),
-                ("sort", "updated"),
+                ("sort", "created"),
                 ("direction", "desc"),
                 ("per_page", "1"),
             ],

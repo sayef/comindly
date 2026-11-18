@@ -482,6 +482,7 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
             get(discussion_list).post(discussion_open),
         )
         .route("/api/v1/discussion/post", post(discussion_post))
+        .route("/api/v1/discussion/close", post(discussion_close))
         .route("/api/v1/discussion/{id}", get(discussion_get))
         .route("/api/v1/settings", get(settings::get).post(settings::save))
         .route("/api/v1/settings/test", post(settings::test))
@@ -1818,6 +1819,34 @@ async fn discussion_post(
     };
     match run.await {
         Ok(id) => Ok(Json(api::discussion::Posted { ok: true, id })),
+        Err(e) => Err(bad(e)),
+    }
+}
+
+/// Close a discussion by hand, once, with who closed it and an optional note.
+async fn discussion_close(
+    who: Member,
+    Cur(s): Cur,
+    Json(b): Json<api::discussion::CloseRequest>,
+) -> Reply<api::discussion::Closed> {
+    let run = async {
+        let root = s.data.root.as_deref().context("read-only UI")?;
+        let by = provenance(who.as_deref(), &s);
+        let store = crate::discussion::Discussions::open(root)?;
+        let t = store
+            .get(&b.discussion)
+            .await?
+            .with_context(|| format!("no discussion `{}`", b.discussion))?;
+        s.teams
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .accepts(&by.teams, &[t.discussion.repo.as_str()])?;
+        let closed = api::discussion::Closed::manual(by, b.note.as_deref());
+        store.close(&t.discussion.id, &closed).await?;
+        anyhow::Ok(closed)
+    };
+    match run.await {
+        Ok(c) => Ok(Json(c)),
         Err(e) => Err(bad(e)),
     }
 }

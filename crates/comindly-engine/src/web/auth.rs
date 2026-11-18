@@ -1029,6 +1029,10 @@ mod tests {
             needs(&Method::POST, "/api/v1/discussion/post"),
             Role::Member
         );
+        assert_eq!(
+            needs(&Method::POST, "/api/v1/discussion/close"),
+            Role::Member
+        );
     }
 
     #[test]
