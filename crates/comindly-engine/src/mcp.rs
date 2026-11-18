@@ -95,6 +95,11 @@ impl ComindlyServer {
         }
     }
 
+    /// `discussion` `read` and `list`: what an agent reads, without writing anything.
+    async fn read_discussions(&self, p: DiscussionParam) -> anyhow::Result<String> {
+        read_discussions(&self.ledger_root(), p).await
+    }
+
     /// `discussion`: open, post to, read or list discussions.
     async fn discuss(
         &self,
@@ -104,31 +109,9 @@ impl ComindlyServer {
         use crate::discussion as d;
         use anyhow::Context as _;
         let store = d::Discussions::open(&self.ledger_root())?;
-        let action = p.action.trim();
-        match action {
-            "read" => {
-                let id = p.id.context("`read` needs the discussion's `id`")?;
-                let t = store
-                    .get(&id)
-                    .await?
-                    .with_context(|| format!("no discussion `{id}`"))?;
-                Ok(d::markdown(&t))
-            }
-            "list" => {
-                let all = store.all().await?;
-                let q = d::DiscussionQuery {
-                    repo: p.repo,
-                    ticket: p.ticket,
-                    branch: p.branch,
-                    q: p.query,
-                    closed: p.closed.unwrap_or(false),
-                };
-                let found: Vec<d::Summary> = d::search(&all, &q)
-                    .into_iter()
-                    .map(d::Summary::of)
-                    .collect();
-                Ok(d::list_markdown(&found))
-            }
+        let action = p.action.trim().to_string();
+        match action.as_str() {
+            "read" | "list" => self.read_discussions(p).await,
             "open" | "post" => {
                 Self::may_write(ctx, "write to discussions")?;
                 let by = self.agent(ctx);
@@ -186,7 +169,7 @@ impl ComindlyServer {
                     post.discussion = id.clone();
                     store.post(post).await?;
                 }
-                Ok(match (action, existing) {
+                Ok(match (action.as_str(), existing) {
                     ("post", _) => format!("posted to discussion `{id}`"),
                     (_, true) => format!("an open discussion already covers this: `{id}`"),
                     _ => format!("opened discussion `{id}`"),
@@ -1569,6 +1552,7 @@ impl ComindlyServer {
             "zoom" => me.zoom(args!()).await,
             "why" => me.why(args!()).await,
             "context_pack" => me.context_pack(args!()).await,
+            "discussion" => return me.read_discussions(serde_json::from_value(args)?).await,
             _ => anyhow::bail!("`{tool}` is not a read-only tool"),
         };
         Ok(r.content
@@ -2064,6 +2048,39 @@ pub async fn serve_stdio(uri: &str, markdown: bool) -> Result<()> {
 }
 
 /// Load the graph, enrichment, conventions and search model for `uri` into a server.
+/// `discussion` `read` and `list` on the discussions under `root`; any other action is refused.
+async fn read_discussions(root: &str, p: DiscussionParam) -> anyhow::Result<String> {
+    use crate::discussion as d;
+    use anyhow::Context as _;
+    let store = d::Discussions::open(root)?;
+    match p.action.trim() {
+        "read" => {
+            let id = p.id.context("`read` needs the discussion's `id`")?;
+            let t = store
+                .get(&id)
+                .await?
+                .with_context(|| format!("no discussion `{id}`"))?;
+            Ok(d::markdown(&t))
+        }
+        "list" => {
+            let all = store.all().await?;
+            let q = d::DiscussionQuery {
+                repo: p.repo,
+                ticket: p.ticket,
+                branch: p.branch,
+                q: p.query,
+                closed: p.closed.unwrap_or(false),
+            };
+            let found: Vec<d::Summary> = d::search(&all, &q)
+                .into_iter()
+                .map(d::Summary::of)
+                .collect();
+            Ok(d::list_markdown(&found))
+        }
+        other => anyhow::bail!("`{other}` is not a read-only discussion action"),
+    }
+}
+
 pub async fn load(uri: &str, markdown: bool, fresh: std::time::Duration) -> Result<ComindlyServer> {
     let (symbols, edges) = crate::index::read_graph(uri).await?;
     let mut conventions = match crate::index::read_facts(uri).await {
@@ -2185,6 +2202,30 @@ pub fn tools() -> Vec<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn the_agent_view_reads_discussions_but_never_writes() {
+        use crate::discussion::{Discussion, Discussions};
+        let root = std::env::temp_dir().join(format!("comindly-mcp-read-{}", std::process::id()));
+        let root = root.to_str().unwrap();
+        let by = crate::ledger::Provenance::agent("test", None, &Default::default());
+        let d = Discussion::new("billing-api", Some("LIN-1"), None, "Retry exports", by);
+        let (id, _) = Discussions::open(root).unwrap().start(&d).await.unwrap();
+        let ask = |action: &str| DiscussionParam {
+            action: action.into(),
+            id: Some(id.clone()),
+            ..Default::default()
+        };
+        let read = read_discussions(root, ask("read")).await.unwrap();
+        let list = read_discussions(root, ask("list")).await.unwrap();
+        let post = read_discussions(root, ask("post")).await;
+        let close = read_discussions(root, ask("close")).await;
+        std::fs::remove_dir_all(root).ok();
+        assert!(read.contains("Retry exports"), "{read}");
+        assert!(list.contains(&id), "{list}");
+        assert!(post.is_err(), "posting is not a read");
+        assert!(close.is_err(), "closing is not a read");
+    }
 
     #[test]
     fn a_contract_lists_each_symbol_once_with_its_id() {
