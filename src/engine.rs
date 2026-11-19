@@ -7,7 +7,7 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 
-const REPO: &str = "sayef/comindly";
+pub const REPO: &str = "sayef/comindly";
 
 /// What a running local engine wrote down about itself.
 #[derive(Debug, Deserialize)]
@@ -128,7 +128,7 @@ pub fn stop() -> Result<bool> {
     Ok(true)
 }
 
-fn target() -> Result<String> {
+pub fn target() -> Result<String> {
     let arch = match std::env::consts::ARCH {
         "x86_64" => "x86_64",
         "aarch64" => "aarch64",
@@ -145,8 +145,17 @@ fn target() -> Result<String> {
 /// Download the engine of this version from the GitHub release, check it, and put it beside
 /// `comindly`.
 pub async fn install() -> Result<PathBuf> {
-    let version = env!("CARGO_PKG_VERSION");
-    let asset = format!("comindly-engine-{}.tar.gz", target()?);
+    let into = std::env::current_exe()?
+        .parent()
+        .context("no folder for comindly")?
+        .join(exe_name());
+    fetch("comindly-engine", env!("CARGO_PKG_VERSION"), &into).await?;
+    Ok(into)
+}
+
+/// Download `bin` of `version` from the GitHub release, check its checksum, and put it at `into`.
+pub async fn fetch(bin: &str, version: &str, into: &std::path::Path) -> Result<()> {
+    let asset = format!("{bin}-{}.tar.gz", target()?);
     let url = format!("https://github.com/{REPO}/releases/download/v{version}/{asset}");
     crate::term::note(&format!("downloading {url}"));
     let http = reqwest::Client::new();
@@ -166,7 +175,7 @@ pub async fn install() -> Result<PathBuf> {
         .next()
         .unwrap_or_default()
         .to_string();
-    let dir = std::env::temp_dir().join(format!("comindly-engine-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("{bin}-{}", std::process::id()));
     std::fs::create_dir_all(&dir)?;
     let file = dir.join(&asset);
     std::fs::write(&file, &archive)?;
@@ -180,22 +189,22 @@ pub async fn install() -> Result<PathBuf> {
         .status()?
         .success();
     anyhow::ensure!(ok, "could not unpack {asset}");
-    let into = std::env::current_exe()?
-        .parent()
-        .context("no folder for comindly")?
-        .join(exe_name());
+    let name = if cfg!(windows) {
+        format!("{bin}.exe")
+    } else {
+        bin.to_string()
+    };
     // A new file renamed into place: macOS kills a binary overwritten where it lies.
     let tmp = into.with_extension("new");
-    std::fs::copy(dir.join(exe_name()), &tmp)
-        .with_context(|| format!("write {}", tmp.display()))?;
+    std::fs::copy(dir.join(&name), &tmp).with_context(|| format!("write {}", tmp.display()))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?;
     }
-    std::fs::rename(&tmp, &into).with_context(|| format!("write {}", into.display()))?;
+    std::fs::rename(&tmp, into).with_context(|| format!("write {}", into.display()))?;
     let _ = std::fs::remove_dir_all(&dir);
-    Ok(into)
+    Ok(())
 }
 
 fn sha256(file: &std::path::Path) -> Result<String> {

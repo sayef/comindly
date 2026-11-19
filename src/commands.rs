@@ -54,6 +54,7 @@ pub fn run(flag: Option<&str>, cmd: Cmd) -> ExitCode {
             device_code,
         } => to_code(use_profile(target, name, device_code)),
         Cmd::Engine { what } => to_code(engine(what)),
+        Cmd::Update { version, check } => crate::update::update(version, check),
         Cmd::Login { device_code } => to_code(login(flag, device_code)),
         Cmd::Logout => to_code(logout(flag)),
         Cmd::Doctor => crate::doctor::run(flag),

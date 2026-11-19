@@ -11,6 +11,7 @@ one on this machine (`local`) or a team server, chosen with profiles.
 | `comindly use local` | Use the engine on this machine. It starts in the background when a command needs it, and is installed on first use when missing |
 | `comindly use <https-url> <name> [--device-code]` | Add a team server under a name, switch to it and sign in (approve in the browser; with `--device-code`, or over SSH, approve with the printed code at the server's `/device` on any device) |
 | `comindly use <name>` | Switch to a profile |
+| `comindly update [--check] [--version <v>]` | Replace comindly, and the local engine when it is installed beside it, with the newest release, checked against its checksum; betas move to the newest beta. `--check` only says whether one is out; `--version` installs that one |
 | `comindly login [--device-code]` / `comindly logout` | Sign the current profile in again, or sign it out: revoke the token on the server and forget the sign-in. `--device-code` (the default over SSH or without a display) opens no browser: approve with the printed code at the server's `/device` on any device |
 | `comindly engine start\|stop\|status\|install` | The local engine: start it in the background, stop it, show whether it runs and where, or download `comindly-engine` of this version from the GitHub release and put it beside `comindly` |
 

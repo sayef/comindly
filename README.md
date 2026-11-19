@@ -53,7 +53,7 @@ curl -LsSf https://raw.githubusercontent.com/sayef/comindly/main/scripts/install
 
 Prebuilt for macOS and Linux. This installs the `comindly` command line; it fetches the engine
 (`comindly-engine`) the first time a command needs it. `COMINDLY_ENGINE=1` installs both at once, for
-offline machines and CI. Or `cargo install comindly comindly-engine` (Rust 1.95+, `protoc` and `cmake`).
+offline machines and CI. `comindly update` moves to the newest release later. Or `cargo install comindly comindly-engine` (Rust 1.95+, `protoc` and `cmake`).
 
 ## Try it
 
