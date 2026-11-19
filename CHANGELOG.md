@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0-beta.23](https://github.com/sayef/comindly/compare/v0.5.0-beta.22...v0.5.0-beta.23) - 2026-11-19
+
+### Added
+
+- Sign in without a browser: `comindly use <url> <name> --device-code` and `comindly login --device-code` print a short code to enter at the server's `/device` page on any device, and open nothing. Over SSH, or on Linux without a display, this is the default. The `/device` page asks for the code when opened without one.
+
+### Changed
+
+- On a machine without a browser, `comindly init-agents --install` keeps `comindly serve` for a team server instead of its gateway, so agents use the command line's sign-in.
+
 ## [0.5.0-beta.22](https://github.com/sayef/comindly/compare/v0.5.0-beta.21...v0.5.0-beta.22) - 2026-11-19
 
 ### Added
