@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0-beta.24](https://github.com/sayef/comindly/compare/v0.5.0-beta.23...v0.5.0-beta.24) - 2026-11-19
+
+### Added
+
+- `comindly update` moves to the newest release, and updates the local engine beside it when installed; a beta moves to the newest beta. Downloads are checked against the release's checksum. `--check` only says whether a newer version is out, `--version <v>` installs that one.
+
 ## [0.5.0-beta.23](https://github.com/sayef/comindly/compare/v0.5.0-beta.22...v0.5.0-beta.23) - 2026-11-19
 
 ### Added
