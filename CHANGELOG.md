@@ -8,6 +8,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [0.5.0-beta.22](https://github.com/sayef/comindly/compare/v0.5.0-beta.21...v0.5.0-beta.22) - 2026-11-19
 
+### Added
+
+- `comindly init-agents --install` installs comindly as a plugin into each agent on the machine: Claude Code and Gemini CLI get the MCP server, the skill and the hooks, Codex the MCP server and the skill, Cursor the MCP server, the skill and an always-on rule. The plugins name no server: they follow the profile in use, and on a team server with a gateway they connect there so people sign in with the organisation's account. A comindly server or hooks added by hand earlier are replaced. `--plugin <agent> --out <dir>` writes one agent's plugin to a folder.
+
+### Fixed
+
+- Gemini CLI hooks return their context as JSON, as Gemini requires.
+
 ## [0.5.0-beta.21](https://github.com/sayef/comindly/compare/v0.5.0-beta.20...v0.5.0-beta.21) - 2026-11-18
 
 ### Changed
