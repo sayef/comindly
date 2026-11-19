@@ -108,6 +108,15 @@ comindly serves MCP over stdio: the agent starts `comindly serve` and calls its 
 needs them. `comindly serve` forwards to the engine of the profile in use, so the same setup works
 with the local engine and with a team server.
 
+The quickest way installs comindly as a plugin into every agent found on this machine, with the skill
+and the hooks as well ([Install as a plugin](guides/agents.md#install-as-a-plugin)):
+
+```sh
+comindly init-agents --install --yes
+```
+
+Or connect one agent by hand:
+
 === "Claude Code"
 
     ```sh

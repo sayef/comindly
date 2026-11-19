@@ -59,7 +59,7 @@ offline machines and CI. Or `cargo install comindly comindly-engine` (Rust 1.95+
 
 ```sh
 comindly link ../orders ../payments ../shared-lib      # index your repositories
-claude mcp add --scope user comindly -- comindly serve  # connect Claude Code
+comindly init-agents --install --yes                   # connect Claude Code, Gemini CLI, Cursor, Codex
 comindly app                                            # or look around in the app
 ```
 

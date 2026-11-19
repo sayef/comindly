@@ -55,7 +55,13 @@ pub fn run(flag: Option<&str>, cmd: Cmd) -> ExitCode {
         Cmd::Doctor => crate::doctor::run(flag),
         Cmd::Hook { agent, event } => crate::hooks::hook(flag, &agent, &event),
         Cmd::InitHooks { agent } => crate::hooks::init_hooks(&agent),
-        Cmd::InitAgents { skill } => crate::hooks::init_agents(skill),
+        Cmd::InitAgents {
+            skill,
+            plugin,
+            out,
+            install,
+            yes,
+        } => crate::hooks::init_agents(skill, plugin.as_deref(), out.as_deref(), install, yes),
         Cmd::Serve => crate::mcp::serve(flag),
         Cmd::Changed { repo, since } => to_code(changed(&repo, since.as_deref())),
         cmd => match profile::client(flag) {

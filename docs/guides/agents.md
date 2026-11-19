@@ -48,6 +48,42 @@ Names in answers are the ones you see in the UI: methods as `Class.method`, cont
 To nudge an agent that does not reach for comindly, name it: "use comindly to check what depends on
 this first".
 
+## Install as a plugin
+
+One command sets up comindly in every agent on this machine that takes plugins: the MCP server, the
+skill with the full playbook and, where the agent supports them, the [hooks](#hooks).
+
+```sh
+comindly init-agents --install          # shows what it would do
+comindly init-agents --install --yes    # does it
+```
+
+| Agent | What it gets | How |
+|---|---|---|
+| Claude Code | MCP server, skill, hooks | a local plugin marketplace, then `claude plugin install comindly@comindly` |
+| Gemini CLI | MCP server, skill, hooks | `gemini extensions link` |
+| Cursor | MCP server, skill, an always-on rule | copied to `~/.cursor/plugins/local/comindly`; reload the window |
+| Codex | MCP server, skill | a local plugin marketplace, then `codex plugin add comindly@comindly` |
+
+The plugins never name a server. They start `comindly serve` and `comindly hook`, which answer from the
+[profile](../reference/cli.md) in use: the local engine, or a team server after `comindly use`. Switch
+with `comindly use`, and every agent follows without reinstalling; the session-start hook says which
+one answers. When the team server takes agents through a [gateway](self-hosting.md#agents-through-a-gateway),
+`--install` asks the server for the gateway's address and points the plugins there instead, so each
+person signs in with the organisation's account. Run `--install --yes` again after upgrading comindly,
+or after switching between a local engine and a team server with a gateway. The plugins
+need the `comindly` command on this machine; for an agent with no local install, connect it through
+the team server's Your access page instead. They start it as `comindly`, so its folder must be on
+`PATH`; `--install` says so when it is not.
+
+A comindly server or hooks added by hand earlier (`claude mcp add`, `init-hooks`, an `mcp.json` entry)
+would run next to the plugin's, so `--install` lists them and, with `--yes`, takes them out: through
+`claude mcp remove` for Claude Code, and for the others by editing the settings file, keeping the
+previous one as `<file>.json.bak`.
+
+To install by hand, or to check a plugin in, `comindly init-agents --plugin <agent> --out <dir>`
+writes one agent's plugin to a folder.
+
 ## Telling agents when to use it
 
 comindly sends agents short guidance on when to reach for each tool: as the MCP server's instructions

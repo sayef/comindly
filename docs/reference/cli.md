@@ -50,7 +50,7 @@ you. A sign-in from an earlier version becomes a profile called `default`.
 | `comindly app` | The current profile's web app: its own window on macOS, the browser on Linux and Windows |
 | `comindly serve` | MCP over stdio for agents, forwarded to the current profile's `/mcp` |
 | `comindly hook <agent> <event>` / `comindly init-hooks <claude\|cursor\|gemini\|codex\|generic>` | Agent hook adapter / config snippet |
-| `comindly init-agents [--skill]` | When to use comindly's tools, for a repository's AGENTS.md or a Claude Code skill |
+| `comindly init-agents [--skill] \| --plugin <agent> [--out <dir>] \| --install [--yes]` | When to use comindly's tools, for a repository's AGENTS.md or a Claude Code skill; a plugin for Claude Code, Gemini CLI, Codex or Cursor; or the plugin installed into each of them found here ([Install as a plugin](../guides/agents.md#install-as-a-plugin)) |
 | `comindly doctor` | Check this machine's setup: the profile, the local engine (installed, running, same version), the sign-in, the index, whether an agent has comindly's tools, and Claude Code hooks |
 
 ## Against a server
