@@ -1,13 +1,16 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Terminal } from "lucide-react";
+import { useState } from "react";
 import { Notice, Outcome } from "@/components/notice";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 import { Shell } from "@/pages/signin";
 
-/** Approve or deny a command line's sign-in, opened from the address `comindly login` prints. */
+/** Approve or deny a command line's sign-in, opened from the address `comindly login` prints, or by typing its code. */
 export function DevicePage() {
-  const code = new URLSearchParams(window.location.search).get("code") ?? "";
+  const [code, setCode] = useState(() => new URLSearchParams(window.location.search).get("code") ?? "");
+  const [typed, setTyped] = useState("");
   const me = useQuery({ queryKey: ["me"], queryFn: api.me });
   const info = useQuery({ queryKey: ["device", code], queryFn: () => api.deviceInfo(code), enabled: !!code, retry: false });
   const answer = useMutation({ mutationFn: (approve: boolean) => api.deviceApprove(code, approve), meta: { inline: true, quiet: true } });
@@ -21,9 +24,29 @@ export function DevicePage() {
         <div className="mt-4">
           <Notice ok message={answer.variables ? "Approved. You can go back to the terminal." : "Denied. The command line was not signed in."} />
         </div>
-      ) : info.isError || !code ? (
+      ) : !code ? (
+        <form
+          className="mt-3 flex flex-col gap-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const c = typed.trim().toUpperCase();
+            if (!c) return;
+            window.history.replaceState(null, "", `?code=${encodeURIComponent(c)}`);
+            setCode(c);
+          }}
+        >
+          <p className="text-sm text-muted-foreground">Enter the code the terminal shows.</p>
+          <Input autoFocus value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="ABCD-EFGH" aria-label="Code" className="font-mono uppercase" autoComplete="off" />
+          <Button type="submit" variant="brand" disabled={!typed.trim()}>
+            Continue
+          </Button>
+        </form>
+      ) : info.isError ? (
         <div className="mt-4">
-          <Outcome error={info.error ?? new Error("No code in this address; run `comindly login` again.")} />
+          <Outcome error={info.error} />
+          <Button variant="outline" className="mt-3 w-full" onClick={() => (setCode(""), setTyped(""), window.history.replaceState(null, "", window.location.pathname))}>
+            Enter another code
+          </Button>
         </div>
       ) : (
         <>

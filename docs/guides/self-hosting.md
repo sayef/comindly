@@ -163,7 +163,9 @@ comindly use https://comindly.example.com acme
 ```
 
 It prints an address and a short code and opens the browser; once signed in there, the member checks
-the code and approves. The command line then has its own personal access token, named after the
+the code and approves. On a machine without a browser (over SSH, or with `--device-code` on `use` and
+`login`) it opens nothing: the member opens `/device` on any device signed in to the server, types the
+code, and approves. The command line then has its own personal access token, named after the
 machine, and every command asks the server ([Command line](../reference/cli.md#against-a-server)),
 including `comindly serve` for agents and the agent hooks. Admins can start indexing with
 `comindly link` and follow it in the terminal. `comindly use local` switches back to the engine on

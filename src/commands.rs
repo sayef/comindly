@@ -48,9 +48,13 @@ fn done(answer: impl std::future::Future<Output = Result<api::Done>>) -> ExitCod
 
 pub fn run(flag: Option<&str>, cmd: Cmd) -> ExitCode {
     match cmd {
-        Cmd::Use { target, name } => to_code(use_profile(target, name)),
+        Cmd::Use {
+            target,
+            name,
+            device_code,
+        } => to_code(use_profile(target, name, device_code)),
         Cmd::Engine { what } => to_code(engine(what)),
-        Cmd::Login => to_code(login(flag)),
+        Cmd::Login { device_code } => to_code(login(flag, device_code)),
         Cmd::Logout => to_code(logout(flag)),
         Cmd::Doctor => crate::doctor::run(flag),
         Cmd::Hook { agent, event } => crate::hooks::hook(flag, &agent, &event),
@@ -475,7 +479,7 @@ fn changed(repo: &str, since: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-fn use_profile(target: Option<String>, name: Option<String>) -> Result<()> {
+fn use_profile(target: Option<String>, name: Option<String>, device_code: bool) -> Result<()> {
     let mut all = Profiles::load();
     let Some(target) = target else {
         let active = all.active.clone().unwrap_or_else(|| LOCAL.into());
@@ -513,7 +517,7 @@ fn use_profile(target: Option<String>, name: Option<String>) -> Result<()> {
         all.save()?;
         term::ok(&format!("using {name}"));
         if all.profiles[&name].token.is_none() {
-            return login(Some(&name));
+            return login(Some(&name), device_code);
         }
         return Ok(());
     }
@@ -559,7 +563,16 @@ fn engine(what: EngineWhat) -> Result<()> {
     Ok(())
 }
 
-fn login(flag: Option<&str>) -> Result<()> {
+/// Whether no browser can open here: an SSH session, or Linux without a display.
+fn no_browser() -> bool {
+    let set = |k: &str| std::env::var_os(k).is_some_and(|v| !v.is_empty());
+    set("SSH_CONNECTION")
+        || set("SSH_TTY")
+        || (cfg!(target_os = "linux") && !set("DISPLAY") && !set("WAYLAND_DISPLAY"))
+        || !std::io::IsTerminal::is_terminal(&std::io::stderr())
+}
+
+fn login(flag: Option<&str>, device_code: bool) -> Result<()> {
     let name = profile::chosen(flag);
     anyhow::ensure!(
         name != LOCAL,
@@ -577,21 +590,31 @@ fn login(flag: Option<&str>) -> Result<()> {
         .filter(|h| !h.is_empty())
         .unwrap_or_else(|| "this machine".into());
     let client = format!("comindly CLI on {host}");
+    let here = !(device_code || no_browser());
     let a = block(comindly_api::client::login(&url, &client, |link, code| {
-        term::ok(&format!("approve this sign-in in your browser: {link}"));
-        term::field("code", code);
-        term::note(
-            "check that the page shows the same code; waiting for approval (Ctrl-C to stop)",
-        );
-        if std::io::IsTerminal::is_terminal(&std::io::stderr()) {
+        if here {
+            term::ok(&format!("approve this sign-in in your browser: {link}"));
+            term::field("code", code);
+            term::note(
+                "check that the page shows the same code; waiting for approval (Ctrl-C to stop)",
+            );
             open_in_browser(link);
+        } else {
+            let short = link.split('?').next().unwrap_or(link);
+            term::ok(&format!(
+                "on any device signed in to {url}, open {short} and enter this code:"
+            ));
+            term::field("code", code);
+            term::note(&format!(
+                "or open {link}; waiting for approval (Ctrl-C to stop)"
+            ));
         }
     }))?;
     profile::set_sign_in(&name, Some(a.token), Some(a.email.clone()))?;
     term::ok(&format!("signed in to {url} as {}", a.email));
     if let Some(day) = a.expires.as_deref().and_then(|e| e.get(..10)) {
         term::note(&format!(
-            "this sign-in lasts until {day}; then run `comindly login` again"
+            "this sign-in lasts until {day}; then run `comindly login` again (`--device-code` on a machine without a browser)"
         ));
     }
     Ok(())

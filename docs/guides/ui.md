@@ -95,7 +95,8 @@ can be bookmarked or shared.
   the text to copy into an issue; the request id finds the run in the server's logs. Admins can cancel a
   run or remove it from the queue. The server keeps the last 50 runs.
 - **Approving a command line**: `comindly use <url> <name>` and `comindly login` open `/device?code=…`; the page shows which machine
-  asks to act as you and the code its terminal shows, with **Approve** and **Deny**.
+  asks to act as you and the code its terminal shows, with **Approve** and **Deny**. Opened as `/device` without a code, for a
+  terminal on a machine without a browser, it asks for the code first.
 - **Get started**: checks of this setup (as `comindly doctor`), how to register the MCP server with
   Claude Code, Cursor, Codex or VS Code, hooks, and every MCP tool
   with a question that uses it.
