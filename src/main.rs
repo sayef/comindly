@@ -37,6 +37,9 @@ pub enum Cmd {
         target: Option<String>,
         /// The name for a server added by address
         name: Option<String>,
+        /// Sign in with a code on another device, without opening a browser here
+        #[arg(long)]
+        device_code: bool,
     },
     /// The engine on this machine: start, stop, status, install
     Engine {
@@ -44,7 +47,12 @@ pub enum Cmd {
         what: EngineWhat,
     },
     /// Sign in to the current profile's server by approving this command line in your browser
-    Login,
+    Login {
+        /// Sign in with a code on another device, without opening a browser here (the default
+        /// over SSH and without a display)
+        #[arg(long)]
+        device_code: bool,
+    },
     /// Forget the current profile's sign-in
     Logout,
     /// Index one folder as it is, on the local engine
