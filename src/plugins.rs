@@ -211,8 +211,9 @@ pub fn engine_in_use() -> String {
 }
 
 /// The gateway of the team server in use, which agents connect through instead of `serve`.
+/// None on a machine without a browser, whose agents could not sign in there: they use `serve`.
 fn gateway() -> Option<String> {
-    if crate::profile::chosen(None) == crate::profile::LOCAL {
+    if crate::profile::chosen(None) == crate::profile::LOCAL || crate::commands::no_browser() {
         return None;
     }
     let c = crate::profile::client(None).ok()?;

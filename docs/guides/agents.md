@@ -70,7 +70,10 @@ The plugins never name a server. They start `comindly serve` and `comindly hook`
 with `comindly use`, and every agent follows without reinstalling; the session-start hook says which
 one answers. When the team server takes agents through a [gateway](self-hosting.md#agents-through-a-gateway),
 `--install` asks the server for the gateway's address and points the plugins there instead, so each
-person signs in with the organisation's account. Run `--install --yes` again after upgrading comindly,
+person signs in with the organisation's account. On a machine without a browser (over SSH, or Linux
+without a display) it keeps `comindly serve`, which uses the command line's own sign-in: approve it
+once with `comindly use <url> <name>`, which prints a code to enter at the server's `/device` page on
+any device. Run `--install --yes` again after upgrading comindly,
 or after switching between a local engine and a team server with a gateway. The plugins
 need the `comindly` command on this machine; for an agent with no local install, connect it through
 the team server's Your access page instead. They start it as `comindly`, so its folder must be on

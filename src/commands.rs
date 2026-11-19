@@ -564,7 +564,7 @@ fn engine(what: EngineWhat) -> Result<()> {
 }
 
 /// Whether no browser can open here: an SSH session, or Linux without a display.
-fn no_browser() -> bool {
+pub fn no_browser() -> bool {
     let set = |k: &str| std::env::var_os(k).is_some_and(|v| !v.is_empty());
     set("SSH_CONNECTION")
         || set("SSH_TTY")
