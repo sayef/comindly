@@ -1,0 +1,88 @@
+# A test image from the `dev` branch: arm64 only, tagged `dev-<commit>` and `dev`, without a
+# version, changelog or publishing. Releases still come from `main` through release-plz.
+name: Dev image
+
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dev-image
+  cancel-in-progress: true
+
+jobs:
+  ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: npm ci && npm run build
+        working-directory: ui
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ui-dist
+          path: ui/dist
+
+  build:
+    needs: ui
+    runs-on: ubuntu-24.04-arm
+    container: rust:1.97-bullseye # glibc 2.31, as the released Linux builds
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: ui-dist
+          path: ui/dist
+      # Debian 11's security archive is retired; the build tools come from the main archive.
+      - run: |
+          sed -i '/bullseye-security/d' /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null || true
+          apt-get update && apt-get install -y protobuf-compiler cmake perl
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked -p comindly-engine --features comindly-engine/otel
+      - uses: actions/upload-artifact@v7
+        with:
+          name: engine-arm64
+          path: target/release/comindly-engine
+
+  image:
+    needs: build
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: engine-arm64
+          path: dist/linux/arm64
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: tag
+        run: echo "short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: local
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:dev-${{ steps.tag.outputs.short }}
+            ghcr.io/${{ github.repository }}:dev
+      - run: docker run --rm "ghcr.io/${{ github.repository }}:dev-${{ steps.tag.outputs.short }}" --version
