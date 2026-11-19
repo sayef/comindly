@@ -125,18 +125,29 @@ pub fn write(agent: &str, exe: &str, gateway: Option<&str>, dir: &Path) -> Resul
         std::fs::create_dir_all(p.parent().context("plugin path")?)?;
         std::fs::write(&p, text).with_context(|| format!("write {}", p.display()))?;
     }
-    if agent == "claude" {
-        // A local marketplace holding the one plugin, so `claude plugin install` can find it.
-        let m = json!({ "name": "comindly", "owner": { "name": "comindly" },
-            "plugins": [{ "name": "comindly", "source": "./comindly", "description": DESCRIPTION }] });
-        let root = dir.parent().context("plugin dir")?;
-        std::fs::create_dir_all(root.join(".claude-plugin"))?;
-        std::fs::write(
-            root.join(".claude-plugin/marketplace.json"),
-            serde_json::to_string_pretty(&m)? + "\n",
-        )?;
-    }
     Ok(())
+}
+
+/// A local marketplace next to `dir` holding the one plugin, which Claude Code and Codex install from.
+fn market(agent: &str, dir: &Path) -> Result<()> {
+    let root = dir.parent().context("plugin dir")?;
+    let (file, m) = match agent {
+        "claude" => (
+            root.join(".claude-plugin/marketplace.json"),
+            json!({ "name": "comindly", "owner": { "name": "comindly" },
+                "plugins": [{ "name": "comindly", "source": "./comindly", "description": DESCRIPTION }] }),
+        ),
+        "codex" => (
+            root.join(".agents/plugins/marketplace.json"),
+            json!({ "name": "comindly", "plugins": [{ "name": "comindly",
+                "source": { "source": "local", "path": "./comindly" },
+                "policy": { "installation": "AVAILABLE" }, "category": "Coding" }] }),
+        ),
+        _ => return Ok(()),
+    };
+    std::fs::create_dir_all(file.parent().context("marketplace dir")?)?;
+    std::fs::write(&file, serde_json::to_string_pretty(&m)? + "\n")
+        .with_context(|| format!("write {}", file.display()))
 }
 
 /// Where `--install` keeps the plugins it registers.
@@ -151,7 +162,7 @@ fn home_dir(agent: &str) -> PathBuf {
                 .join(".local/share")
         });
     match agent {
-        "claude" => data.join("comindly/plugins/claude/comindly"),
+        "claude" | "codex" => data.join("comindly/plugins").join(agent).join("comindly"),
         // Cursor loads plugins it finds here; a window reload picks them up.
         "cursor" => std::env::var_os("HOME")
             .map(PathBuf::from)
@@ -302,7 +313,8 @@ fn remove(m: &Manual) -> Result<()> {
         .with_context(|| format!("write {}", m.file.display()))
 }
 
-/// Each step `--install` takes for `agent`, as commands to run (empty: nothing to run).
+/// Each step `--install` takes for `agent`, as commands to run (empty: nothing to run). A step
+/// that may fail (adding what is already there, removing what is not) starts with `-`.
 fn steps(agent: &str, dir: &Path) -> Vec<Vec<String>> {
     let d = dir.display().to_string();
     let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
@@ -313,24 +325,40 @@ fn steps(agent: &str, dir: &Path) -> Vec<Vec<String>> {
                 .map(|p| p.display().to_string())
                 .unwrap_or_default();
             vec![
-                s(&["claude", "plugin", "marketplace", "add", &market]),
+                s(&["-claude", "plugin", "marketplace", "add", &market]),
                 s(&["claude", "plugin", "marketplace", "update", "comindly"]),
                 s(&["claude", "plugin", "install", "comindly@comindly"]),
             ]
         }
-        "gemini" => vec![s(&["gemini", "extensions", "link", &d])],
+        // Codex keeps a copy of the plugin, so a new version goes in by removing the old one.
+        "codex" => {
+            let market = dir
+                .parent()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default();
+            vec![
+                s(&["-codex", "plugin", "marketplace", "add", &market]),
+                s(&["-codex", "plugin", "remove", "comindly@comindly"]),
+                s(&["codex", "plugin", "add", "comindly@comindly"]),
+            ]
+        }
+        // `--yes` to `--install` is the person's consent; Gemini asks for it again otherwise.
+        "gemini" => vec![
+            s(&["-gemini", "extensions", "uninstall", "comindly"]),
+            s(&["gemini", "extensions", "link", &d, "--consent"]),
+        ],
         _ => Vec::new(),
     }
 }
 
 /// `comindly init-agents --plugin <agent> --out <dir>`.
 pub fn print_plugin(agent: &str, out: &Path) -> ExitCode {
-    let dir = if agent == "claude" {
+    let dir = if agent == "claude" || agent == "codex" {
         out.join("comindly")
     } else {
         out.to_path_buf()
     };
-    match write(agent, "comindly", None, &dir) {
+    match write(agent, "comindly", None, &dir).and_then(|()| market(agent, &dir)) {
         Ok(()) => {
             crate::term::ok(&format!(
                 "wrote comindly's {agent} plugin to {}",
@@ -358,10 +386,13 @@ pub fn install(yes: bool) -> ExitCode {
             "the team server takes agents through its gateway, {url}: they sign in there"
         ));
     }
-    let exe = std::env::current_exe()
-        .ok()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "comindly".into());
+    // Plugins start `comindly` by name: Codex refuses a path, and an upgrade needs no reinstall.
+    let exe = "comindly";
+    if !on_path(exe) {
+        crate::term::note(
+            "`comindly` is not on PATH, so the agents cannot start it: add its folder to PATH",
+        );
+    }
     let mut failed = false;
     for agent in agents {
         let dir = home_dir(agent);
@@ -379,10 +410,11 @@ pub fn install(yes: bool) -> ExitCode {
                 dir.display()
             ));
             for cmd in &run {
-                println!("  {}", cmd.join(" "));
+                println!("  {}", cmd.join(" ").trim_start_matches('-'));
             }
             continue;
         }
+        let was = failed;
         for m in &old {
             match remove(m) {
                 Ok(()) => crate::term::ok(&format!("{agent}: removed {}", m.what)),
@@ -392,27 +424,34 @@ pub fn install(yes: bool) -> ExitCode {
                 }
             }
         }
-        if let Err(e) = write(agent, &exe, gateway.as_deref(), &dir) {
+        if let Err(e) =
+            write(agent, exe, gateway.as_deref(), &dir).and_then(|()| market(agent, &dir))
+        {
             crate::term::err(&format!("{agent}: {e:#}"));
             failed = true;
             continue;
         }
         for cmd in &run {
-            let ok = Command::new(&cmd[0])
+            let (may_fail, prog) = match cmd[0].strip_prefix('-') {
+                Some(p) => (true, p),
+                None => (false, cmd[0].as_str()),
+            };
+            let ok = Command::new(prog)
                 .args(&cmd[1..])
+                .stdin(std::process::Stdio::null())
                 .output()
                 .is_ok_and(|o| o.status.success());
-            // Adding a marketplace that is already there fails; the update after it covers that.
-            if !ok && !(agent == "claude" && cmd.get(3).is_some_and(|c| c == "add")) {
-                crate::term::err(&format!("{agent}: `{}` failed", cmd.join(" ")));
+            if !ok && !may_fail {
+                crate::term::err(&format!(
+                    "{agent}: `{} {}` failed",
+                    prog,
+                    cmd[1..].join(" ")
+                ));
                 failed = true;
             }
         }
         match agent {
-            "codex" => crate::term::note(&format!(
-                "codex: plugin written to {}; add it in Codex with /plugins",
-                dir.display()
-            )),
+            _ if failed != was => {}
             "cursor" => crate::term::ok("cursor: plugin installed; reload the Cursor window"),
             a => crate::term::ok(&format!("{a}: plugin installed; start a new session")),
         }
@@ -521,6 +560,7 @@ mod tests {
         std::fs::create_dir_all(&plugin).unwrap();
         std::fs::write(plugin.join("stale.txt"), "old").unwrap();
         write("claude", "/usr/local/bin/comindly", None, &plugin).unwrap();
+        market("claude", &plugin).unwrap();
         let mcp = std::fs::read_to_string(plugin.join(".mcp.json")).unwrap();
         let market = dir.join(".claude-plugin/marketplace.json").exists();
         let stale = plugin.join("stale.txt").exists();

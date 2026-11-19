@@ -63,7 +63,7 @@ comindly init-agents --install --yes    # does it
 | Claude Code | MCP server, skill, hooks | a local plugin marketplace, then `claude plugin install comindly@comindly` |
 | Gemini CLI | MCP server, skill, hooks | `gemini extensions link` |
 | Cursor | MCP server, skill, an always-on rule | copied to `~/.cursor/plugins/local/comindly`; reload the window |
-| Codex | MCP server, skill | written to comindly's data folder; add it from `/plugins` |
+| Codex | MCP server, skill | a local plugin marketplace, then `codex plugin add comindly@comindly` |
 
 The plugins never name a server. They start `comindly serve` and `comindly hook`, which answer from the
 [profile](../reference/cli.md) in use: the local engine, or a team server after `comindly use`. Switch
@@ -73,7 +73,8 @@ one answers. When the team server takes agents through a [gateway](self-hosting.
 person signs in with the organisation's account. Run `--install --yes` again after upgrading comindly,
 or after switching between a local engine and a team server with a gateway. The plugins
 need the `comindly` command on this machine; for an agent with no local install, connect it through
-the team server's Your access page instead.
+the team server's Your access page instead. They start it as `comindly`, so its folder must be on
+`PATH`; `--install` says so when it is not.
 
 A comindly server or hooks added by hand earlier (`claude mcp add`, `init-hooks`, an `mcp.json` entry)
 would run next to the plugin's, so `--install` lists them and, with `--yes`, takes them out: through
