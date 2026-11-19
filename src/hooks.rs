@@ -92,17 +92,27 @@ pub fn hook(flag: Option<&str>, agent: &str, event: &str) -> ExitCode {
     let mut lines: Vec<String> = seen.into_iter().collect();
     lines.extend(h.ids);
     let _ = std::fs::write(&seen_file, lines.join("\n"));
-    if agent != "claude" {
-        println!("{}", h.text);
-        return ExitCode::SUCCESS;
-    }
-    let name = if event == "session-start" {
-        "SessionStart"
+    let text = if event == "session-start" {
+        format!(
+            "comindly answers from {}.\n\n{}",
+            crate::plugins::engine_in_use(),
+            h.text
+        )
     } else {
-        "PreToolUse"
+        h.text
+    };
+    // Claude Code and Gemini CLI take the context as JSON; the other agents print it as it is.
+    let name = match (agent, event) {
+        ("claude" | "gemini", "session-start") => "SessionStart",
+        ("claude", _) => "PreToolUse",
+        ("gemini", _) => "BeforeTool",
+        _ => {
+            println!("{text}");
+            return ExitCode::SUCCESS;
+        }
     };
     let out = serde_json::json!({
-        "hookSpecificOutput": { "hookEventName": name, "additionalContext": h.text }
+        "hookSpecificOutput": { "hookEventName": name, "additionalContext": text }
     });
     println!("{out}");
     ExitCode::SUCCESS
@@ -140,7 +150,20 @@ pub fn init_hooks(agent: &str) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-pub fn init_agents(skill: bool) -> ExitCode {
+pub fn init_agents(
+    skill: bool,
+    plugin: Option<&str>,
+    out: Option<&std::path::Path>,
+    install: bool,
+    yes: bool,
+) -> ExitCode {
+    if install {
+        return crate::plugins::install(yes);
+    }
+    if let Some(agent) = plugin {
+        let here = std::path::PathBuf::from(format!("comindly-{agent}-plugin"));
+        return crate::plugins::print_plugin(agent, out.unwrap_or(&here));
+    }
     if skill {
         eprintln!("save as .claude/skills/comindly/SKILL.md in a repository, or in ~/.claude/skills/comindly/ for all:");
         print!("{}", api::agents::skill());

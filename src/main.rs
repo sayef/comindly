@@ -10,6 +10,7 @@ mod engine;
 mod git;
 mod hooks;
 mod mcp;
+mod plugins;
 mod profile;
 mod render;
 mod term;
@@ -233,6 +234,19 @@ pub enum Cmd {
         /// As a Claude Code skill instead
         #[arg(long)]
         skill: bool,
+        /// Write a plugin for this agent (claude, gemini, codex or cursor), with the MCP server,
+        /// the skill and the hooks
+        #[arg(long, value_name = "AGENT", conflicts_with = "install")]
+        plugin: Option<String>,
+        /// Where `--plugin` writes it (default: ./comindly-<agent>-plugin)
+        #[arg(long, requires = "plugin")]
+        out: Option<std::path::PathBuf>,
+        /// Install the plugin into each agent found on this machine
+        #[arg(long)]
+        install: bool,
+        /// With --install: do it; without, only show what would happen
+        #[arg(long, requires = "install")]
+        yes: bool,
     },
     /// Check this machine's setup and the current profile's engine
     Doctor,
