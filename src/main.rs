@@ -14,6 +14,7 @@ mod plugins;
 mod profile;
 mod render;
 mod term;
+mod update;
 
 /// Your team's engineering memory for coding agents: a cross-repo code graph and reasoning ledger.
 ///
@@ -45,6 +46,15 @@ pub enum Cmd {
     Engine {
         #[command(subcommand)]
         what: EngineWhat,
+    },
+    /// Replace comindly (and the local engine, when installed) with the newest release
+    Update {
+        /// Install this version instead, e.g. 0.5.0-beta.23
+        #[arg(long)]
+        version: Option<String>,
+        /// Only say whether a newer version is out
+        #[arg(long)]
+        check: bool,
     },
     /// Sign in to the current profile's server by approving this command line in your browser
     Login {
