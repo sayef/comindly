@@ -211,6 +211,97 @@ fn gateway() -> Option<String> {
     }
 }
 
+/// Takes comindly's part out of a settings file; whether it was there.
+type Drop = fn(&mut serde_json::Value) -> bool;
+
+/// A comindly setup made by hand that a plugin would duplicate: what it is, and how to remove it.
+struct Manual {
+    what: String,
+    file: PathBuf,
+    drop: Drop,
+}
+
+/// Remove `mcpServers.comindly`; whether there was one.
+fn drop_server(v: &mut serde_json::Value) -> bool {
+    v.get_mut("mcpServers")
+        .and_then(|m| m.as_object_mut())
+        .is_some_and(|m| m.remove("comindly").is_some())
+}
+
+/// Remove every hook entry that runs `comindly hook`; whether there was one.
+fn drop_hooks(v: &mut serde_json::Value) -> bool {
+    let Some(events) = v.get_mut("hooks").and_then(|h| h.as_object_mut()) else {
+        return false;
+    };
+    let mut gone = false;
+    for list in events.values_mut().filter_map(|l| l.as_array_mut()) {
+        let before = list.len();
+        list.retain(|m| !m.to_string().contains("comindly hook"));
+        gone |= list.len() != before;
+    }
+    events.retain(|_, l| l.as_array().is_none_or(|a| !a.is_empty()));
+    gone
+}
+
+/// The hand-made setups of `agent` in its user settings.
+fn manual(agent: &str) -> Vec<Manual> {
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default();
+    let files: &[(&str, &str, Drop)] = match agent {
+        "claude" => &[
+            (
+                ".claude.json",
+                "an MCP server added with `claude mcp add`",
+                drop_server,
+            ),
+            (
+                ".claude/settings.json",
+                "hooks from `comindly init-hooks claude`",
+                drop_hooks,
+            ),
+        ],
+        "gemini" => &[
+            (".gemini/settings.json", "an MCP server", drop_server),
+            (".gemini/settings.json", "hooks", drop_hooks),
+        ],
+        "cursor" => &[(".cursor/mcp.json", "an MCP server", drop_server)],
+        _ => &[],
+    };
+    files
+        .iter()
+        .filter_map(|(rel, what, drop)| {
+            let file = home.join(rel);
+            let mut v: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&file).ok()?).ok()?;
+            drop(&mut v).then(|| Manual {
+                what: format!("{what} in {}", file.display()),
+                file,
+                drop: *drop,
+            })
+        })
+        .collect()
+}
+
+/// Remove a hand-made setup, keeping the settings file as it was in `<file>.bak`.
+fn remove(m: &Manual) -> Result<()> {
+    // Claude Code rewrites this file itself; its own command takes the server out.
+    if m.file.ends_with(".claude.json") {
+        let ok = Command::new("claude")
+            .args(["mcp", "remove", "comindly", "--scope", "user"])
+            .output()
+            .is_ok_and(|o| o.status.success());
+        anyhow::ensure!(ok, "`claude mcp remove comindly --scope user` failed");
+        return Ok(());
+    }
+    let text = std::fs::read_to_string(&m.file)?;
+    let mut v: serde_json::Value = serde_json::from_str(&text)?;
+    (m.drop)(&mut v);
+    std::fs::write(m.file.with_extension("json.bak"), &text)?;
+    std::fs::write(&m.file, serde_json::to_string_pretty(&v)? + "\n")
+        .with_context(|| format!("write {}", m.file.display()))
+}
+
 /// Each step `--install` takes for `agent`, as commands to run (empty: nothing to run).
 fn steps(agent: &str, dir: &Path) -> Vec<Vec<String>> {
     let d = dir.display().to_string();
@@ -275,7 +366,14 @@ pub fn install(yes: bool) -> ExitCode {
     for agent in agents {
         let dir = home_dir(agent);
         let run = steps(agent, &dir);
+        let old = manual(agent);
         if !yes {
+            for m in &old {
+                crate::term::note(&format!(
+                    "{agent}: would remove {}, which the plugin replaces",
+                    m.what
+                ));
+            }
             crate::term::note(&format!(
                 "{agent}: would write its plugin to {}",
                 dir.display()
@@ -284,6 +382,15 @@ pub fn install(yes: bool) -> ExitCode {
                 println!("  {}", cmd.join(" "));
             }
             continue;
+        }
+        for m in &old {
+            match remove(m) {
+                Ok(()) => crate::term::ok(&format!("{agent}: removed {}", m.what)),
+                Err(e) => {
+                    crate::term::err(&format!("{agent}: {e:#}"));
+                    failed = true;
+                }
+            }
         }
         if let Err(e) = write(agent, &exe, gateway.as_deref(), &dir) {
             crate::term::err(&format!("{agent}: {e:#}"));
@@ -382,6 +489,29 @@ mod tests {
             assert!(all.contains("https://mcp.example.com/mcp"), "{agent}");
             assert!(!all.contains("\"serve\""), "{agent}: no local serve");
         }
+    }
+
+    #[test]
+    fn hand_made_servers_and_hooks_come_out_and_nothing_else() {
+        let mut v = json!({
+            "mcpServers": { "comindly": { "url": "https://x" }, "other": { "command": "o" } },
+            "hooks": {
+                "SessionStart": [{ "hooks": [{ "type": "command", "command": "comindly hook claude session-start" }] }],
+                "PreToolUse": [
+                    { "matcher": "Edit", "hooks": [{ "type": "command", "command": "comindly hook claude pre-edit" }] },
+                    { "matcher": "Bash", "hooks": [{ "type": "command", "command": "lint" }] }
+                ]
+            },
+            "theme": "dark"
+        });
+        assert!(drop_server(&mut v) && drop_hooks(&mut v));
+        assert_eq!(v["mcpServers"], json!({ "other": { "command": "o" } }));
+        assert_eq!(
+            v["hooks"],
+            json!({ "PreToolUse": [{ "matcher": "Bash", "hooks": [{ "type": "command", "command": "lint" }] }] })
+        );
+        assert_eq!(v["theme"], "dark");
+        assert!(!drop_server(&mut v) && !drop_hooks(&mut v));
     }
 
     #[test]

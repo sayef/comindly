@@ -75,6 +75,11 @@ or after switching between a local engine and a team server with a gateway. The 
 need the `comindly` command on this machine; for an agent with no local install, connect it through
 the team server's Your access page instead.
 
+A comindly server or hooks added by hand earlier (`claude mcp add`, `init-hooks`, an `mcp.json` entry)
+would run next to the plugin's, so `--install` lists them and, with `--yes`, takes them out: through
+`claude mcp remove` for Claude Code, and for the others by editing the settings file, keeping the
+previous one as `<file>.json.bak`.
+
 To install by hand, or to check a plugin in, `comindly init-agents --plugin <agent> --out <dir>`
 writes one agent's plugin to a folder.
 
