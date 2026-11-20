@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0-beta.25](https://github.com/sayef/comindly/compare/v0.5.0-beta.24...v0.5.0-beta.25) - 2026-11-20
+
+### Added
+
+- Service accounts for tools and shared machines: admins create them under Settings → Members with a role (viewer or member) and their tokens. They never sign in, what they write counts as an agent's and is labelled as the service account's, and they cannot confirm a record for a person.
+- A service account token can be limited to the addresses or ranges it is used from.
+- Admins revoke a member's or a service account's tokens, for a token that leaked.
 
 ## [0.5.0-beta.24](https://github.com/sayef/comindly/compare/v0.5.0-beta.23...v0.5.0-beta.24) - 2026-11-19
 
