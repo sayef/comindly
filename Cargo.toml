@@ -35,7 +35,7 @@ git2 = { version = "0.21.0", default-features = false, features = ["vendored-lib
 tree-sitter = "0.27"
 tree-sitter-python = "0.25"
 tree-sitter-typescript = "0.23"
-model2vec-rs = "0.3"
+model2vec-rs = "0.4"
 # Arrow types come from lancedb's re-exports (lancedb::arrow::*) to match its exact arrow line.
 lancedb = { version = "0.37.1", default-features = false, features = ["aws", "gcs", "azure"] }
 lance-index = "=10.0.0" # for FullTextSearchQuery (BM25/FTS); pinned to lancedb's version
