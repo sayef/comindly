@@ -269,7 +269,7 @@ impl ComindlyServer {
         let identity = match who {
             Some(w) => crate::ledger::Identity {
                 actor: format!("actor-{}", &blake3::hash(w.email.as_bytes()).to_hex()[..10]),
-                name: Some(crate::web::display_name(&w.email)),
+                name: Some(w.display()),
             },
             None => self.identity.clone(),
         };

@@ -64,6 +64,9 @@ pub struct Member {
     /// A service account: no person, no sign-in, only tokens an admin creates.
     #[serde(default)]
     pub service: bool,
+    /// A service account's display name; its handle is in `email`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 /// Service accounts are members at this reserved domain, which no mailbox or identity provider has.
@@ -79,6 +82,24 @@ pub fn service_email(name: &str) -> Option<String> {
         && !name.starts_with('-')
         && !name.ends_with('-');
     ok.then(|| format!("{name}@{SERVICE_DOMAIN}"))
+}
+
+/// The handle a display name gives: "Build Bot 2" → `build-bot-2`.
+pub fn service_handle(display: &str) -> String {
+    let mut out = String::new();
+    for c in display.trim().chars().flat_map(char::to_lowercase) {
+        if c.is_ascii_alphanumeric() {
+            out.push(c);
+        } else if !out.ends_with('-') && !out.is_empty() {
+            out.push('-');
+        }
+    }
+    out.trim_end_matches('-')
+        .chars()
+        .take(40)
+        .collect::<String>()
+        .trim_end_matches('-')
+        .to_string()
 }
 
 /// The service account's name, when `email` is one.
@@ -196,3 +217,21 @@ pub enum DevicePoll {
 
 /// How long a token lasts unless chosen otherwise, and a command-line sign-in's always.
 pub const TOKEN_DAYS: u32 = 90;
+
+#[cfg(test)]
+mod service_tests {
+    use super::*;
+
+    #[test]
+    fn handles_come_from_display_names() {
+        assert_eq!(service_handle("Build Bot 2"), "build-bot-2");
+        assert_eq!(service_handle("  CI / nightly!! "), "ci-nightly");
+        assert_eq!(service_handle("!!!"), "");
+        assert_eq!(
+            service_email("build-bot").as_deref(),
+            Some("build-bot@service.invalid")
+        );
+        assert_eq!(service_name("build-bot@service.invalid"), Some("build-bot"));
+        assert_eq!(service_name("ada@example.com"), None);
+    }
+}

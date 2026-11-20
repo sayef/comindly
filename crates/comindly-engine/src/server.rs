@@ -274,6 +274,22 @@ pub fn normalize(email: &str) -> String {
 pub struct Who {
     pub email: String,
     pub role: Role,
+    /// A service account's display name ("Build Bot"); people are named by their email.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+impl Who {
+    /// How they are named where people read it: the email, or "Build Bot (service account)".
+    pub fn display(&self) -> String {
+        match comindly_api::server::service_name(&self.email) {
+            Some(handle) => format!(
+                "{} (service account)",
+                self.name.as_deref().unwrap_or(handle)
+            ),
+            None => self.email.clone(),
+        }
+    }
 }
 
 /// The app a gateway request came from, as the gateway names its OAuth client ("Claude Code").
@@ -385,6 +401,9 @@ struct User {
     role: Role,
     created: String,
     last_seen: Option<String>,
+    /// A service account's display name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -1141,10 +1160,15 @@ impl crate::backends::AccountStore for Store {
             return Ok(Some(Who {
                 email,
                 role: Role::Admin,
+                name: None,
             }));
         }
-        let role = self.state().users.get(&email).map(|u| u.role);
-        Ok(role.map(|role| Who { email, role }))
+        let user = self
+            .state()
+            .users
+            .get(&email)
+            .map(|u| (u.role, u.name.clone()));
+        Ok(user.map(|(role, name)| Who { email, role, name }))
     }
 
     fn members(&self) -> Result<Vec<Member>> {
@@ -1160,6 +1184,7 @@ impl crate::backends::AccountStore for Store {
                 created: u.created.clone(),
                 last_seen: u.last_seen.clone(),
                 service: comindly_api::server::service_name(email).is_some(),
+                name: u.name.clone(),
             })
             .collect();
         for m in &mut out {
@@ -1177,6 +1202,7 @@ impl crate::backends::AccountStore for Store {
                     fixed: true,
                     created: String::new(),
                     service: false,
+                    name: None,
                 });
             }
         }
@@ -1204,26 +1230,37 @@ impl crate::backends::AccountStore for Store {
 
     fn create_service(&self, by: &str, name: &str, role: Role) -> Result<Who> {
         self.may_manage(by)?;
-        let email = comindly_api::server::service_email(name)
-            .context("a service account's name is 1-40 lowercase letters, digits and dashes")?;
+        let display = name.trim();
+        anyhow::ensure!(
+            (1..=60).contains(&display.chars().count()) && !display.contains(['\n', '\r']),
+            "a service account's name is one line of 1-60 characters"
+        );
+        let handle = comindly_api::server::service_handle(display);
+        let email = comindly_api::server::service_email(&handle)
+            .context("the name needs a letter or digit")?;
         anyhow::ensure!(role != Role::Admin, "a service account cannot be an admin");
         let _w = self.write_lock();
         anyhow::ensure!(
             !self.state().users.contains_key(&email),
-            "there is a service account `{name}` already"
+            "there is a service account `{handle}` already"
         );
         let user = User {
             role,
             created: now(),
             last_seen: None,
+            name: Some(display.to_string()),
         };
         self.commit(vec![put("user", &email, &user)])?;
         self.audit(
             by,
             "service-account",
-            &format!("{} {}", name.trim(), role.as_str()),
+            &format!("{display} ({handle}) {}", role.as_str()),
         );
-        Ok(Who { email, role })
+        Ok(Who {
+            email,
+            role,
+            name: Some(display.to_string()),
+        })
     }
 
     fn create_service_token(
@@ -1236,10 +1273,12 @@ impl crate::backends::AccountStore for Store {
     ) -> Result<String> {
         self.may_manage(by)?;
         let email = comindly_api::server::service_email(name).context("no such service account")?;
-        anyhow::ensure!(
-            self.state().users.contains_key(&email),
-            "no service account `{name}`"
-        );
+        let display = self
+            .state()
+            .users
+            .get(&email)
+            .map(|u| u.name.clone().unwrap_or_else(|| name.to_string()))
+            .with_context(|| format!("no service account `{name}`"))?;
         let token_name = token_name.trim();
         anyhow::ensure!(!token_name.is_empty(), "give the token a name");
         if let Some(d) = expires_in_days {
@@ -1268,7 +1307,7 @@ impl crate::backends::AccountStore for Store {
         self.audit(
             by,
             "service-token",
-            &format!("{} {token_name} ({lasts}, from {from})", name.trim()),
+            &format!("{display} {token_name} ({lasts}, from {from})"),
         );
         Ok(token)
     }
@@ -1509,6 +1548,7 @@ impl crate::backends::AccountStore for Store {
                         role: inv.role,
                         created: t,
                         last_seen: None,
+                        name: None,
                     },
                 ));
             }
@@ -1570,6 +1610,7 @@ impl crate::backends::AccountStore for Store {
                         role: inv.role,
                         created: t,
                         last_seen: None,
+                        name: None,
                     },
                 ));
             }
@@ -1641,12 +1682,17 @@ impl crate::backends::AccountStore for Store {
                 role,
                 created: t,
                 last_seen: None,
+                name: None,
             },
         ));
         self.commit(changes)?;
         drop(_w);
         self.audit(&email, "join", role.as_str());
-        Ok(Who { email, role })
+        Ok(Who {
+            email,
+            role,
+            name: None,
+        })
     }
 
     /// Give `email` a new sign-in code; their sessions end, except `keep` (the caller's own).
@@ -2150,27 +2196,32 @@ mod tests {
         use crate::backends::Authenticator;
         let (_d, s) = temp_store();
         let who = s
-            .create_service("admin@x.org", "build-bot", Role::Member)
+            .create_service("admin@x.org", "Build Bot", Role::Member)
             .unwrap();
         assert_eq!(who.email, "build-bot@service.invalid");
+        assert_eq!(who.display(), "Build Bot (service account)");
         assert!(
-            s.create_service("admin@x.org", "build-bot", Role::Member)
+            s.create_service("admin@x.org", "build bot", Role::Member)
                 .is_err(),
-            "names are unique"
+            "the same handle"
         );
         assert!(
-            s.create_service("admin@x.org", "ops", Role::Admin).is_err(),
+            s.create_service("admin@x.org", "Ops", Role::Admin).is_err(),
             "never an admin"
         );
         assert!(s
-            .create_service("admin@x.org", "Bad Name", Role::Viewer)
+            .create_service("admin@x.org", "!!!", Role::Viewer)
             .is_err());
         assert!(s.set_role("admin@x.org", &who.email, Role::Admin).is_err());
         assert!(s
             .members()
             .unwrap()
             .iter()
-            .any(|m| m.email == who.email && m.service));
+            .any(|m| m.email == who.email && m.service && m.name.as_deref() == Some("Build Bot")));
+        assert_eq!(
+            s.member(&who.email).unwrap().unwrap().display(),
+            "Build Bot (service account)"
+        );
         // Every way a person signs in is closed to it.
         assert!(s.sign_in_verified(&who.email, "oidc", false).is_err());
         assert!(s.admit(&who.email, false).is_err());
@@ -2491,6 +2542,7 @@ mod tests {
                 role: Role::Admin,
                 created: now(),
                 last_seen: None,
+                name: None,
             },
         )];
         run(write(

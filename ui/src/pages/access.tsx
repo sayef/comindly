@@ -46,6 +46,17 @@ function RoleSelect({ email, role, pending, onChange }: { email: string; role: R
 }
 
 const SERVICE_DOMAIN = "@service.invalid";
+
+/** The handle a display name gives, as the server derives it: "Build Bot 2" → build-bot-2. */
+function handleOf(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40)
+    .replace(/-+$/, "");
+}
 const DAYS: [string, number | null][] = [
   ["30 days", 30],
   ["90 days", 90],
@@ -57,6 +68,7 @@ const DAYS: [string, number | null][] = [
 function ServiceAccount({ m, onChanged }: { m: Member; onChanged: () => void }) {
   const qc = useQueryClient();
   const name = m.email.slice(0, -SERVICE_DOMAIN.length);
+  const label = m.name ?? name;
   const tokens = useQuery({ queryKey: ["member-tokens", m.email], queryFn: () => api.memberTokens(m.email) });
   const [tokenName, setTokenName] = useState("");
   const [days, setDays] = useState<number | null>(90);
@@ -82,8 +94,11 @@ function ServiceAccount({ m, onChanged }: { m: Member; onChanged: () => void }) 
   return (
     <div className="flex flex-col gap-3 rounded-lg border p-4">
       <div className="flex flex-wrap items-center gap-3">
-        <span className="font-semibold">{name}</span>
-        <select className={select} value={m.role} aria-label={`Role of ${name}`} onChange={(e) => role.mutate(e.target.value as Role)}>
+        <span className="font-semibold">{label}</span>
+        <span className="font-mono text-xs text-muted-foreground" title="Its handle: fixed, used in the API and the audit log">
+          {name}
+        </span>
+        <select className={select} value={m.role} aria-label={`Role of ${label}`} onChange={(e) => role.mutate(e.target.value as Role)}>
           <option value="viewer">Viewer</option>
           <option value="member">Member</option>
         </select>
@@ -92,7 +107,7 @@ function ServiceAccount({ m, onChanged }: { m: Member; onChanged: () => void }) 
           <ConfirmButton
             variant="ghost"
             size="sm"
-            question={`Remove ${name}? Its tokens stop working at once.`}
+            question={`Remove ${label}? Its tokens stop working at once.`}
             confirmLabel="Remove"
             loading={remove.isPending}
             onConfirm={() => remove.mutate()}
@@ -137,7 +152,7 @@ function ServiceAccount({ m, onChanged }: { m: Member; onChanged: () => void }) 
           if (tokenName.trim()) create.mutate();
         }}
       >
-        <Input value={tokenName} onChange={(e) => setTokenName(e.target.value)} placeholder="New token, e.g. build machine" aria-label={`New token for ${name}`} className="min-w-44 flex-1" autoComplete="off" />
+        <Input value={tokenName} onChange={(e) => setTokenName(e.target.value)} placeholder="New token, e.g. build machine" aria-label={`New token for ${label}`} className="min-w-44 flex-1" autoComplete="off" />
         <Input value={allowed} onChange={(e) => setAllowed(e.target.value)} placeholder="Works from (empty: anywhere)" aria-label="Addresses it works from" className="min-w-56 flex-1 font-mono text-xs" autoComplete="off" spellCheck={false} />
         <select className={select} value={days ?? ""} aria-label="Expires after" onChange={(e) => setDays(e.target.value ? Number(e.target.value) : null)}>
           {DAYS.map(([l, d]) => (
@@ -152,7 +167,7 @@ function ServiceAccount({ m, onChanged }: { m: Member; onChanged: () => void }) 
       </form>
       <Outcome error={create.error ?? revoke.error ?? role.error ?? remove.error} />
       {create.data?.token && (
-        <Reveal label={`Token for ${name}`} value={create.data.token} hint="Copy it now; it is not shown again. Agents send it as Authorization: Bearer <token>." />
+        <Reveal label={`Token for ${label}`} value={create.data.token} hint="Copy it now; it is not shown again. Agents send it as Authorization: Bearer <token>." />
       )}
     </div>
   );
@@ -179,7 +194,7 @@ function ServiceAccounts({ members, onChanged }: { members: Member[]; onChanged:
           if (name.trim()) create.mutate();
         }}
       >
-        <Input value={name} onChange={(e) => setName(e.target.value.toLowerCase())} placeholder="name, e.g. build-bot" aria-label="Service account name" className="min-w-44 flex-1" autoComplete="off" spellCheck={false} />
+        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name, e.g. Build Bot" aria-label="Service account name" className="min-w-44 flex-1" autoComplete="off" maxLength={60} />
         <select className={select} value={role} aria-label="Role of the service account" onChange={(e) => setRole(e.target.value as Role)}>
           <option value="viewer">Viewer</option>
           <option value="member">Member</option>
@@ -188,6 +203,15 @@ function ServiceAccounts({ members, onChanged }: { members: Member[]; onChanged:
           Create
         </Button>
       </form>
+      <p className="text-xs text-muted-foreground">
+        {handleOf(name) ? (
+          <>
+            Its handle will be <span className="font-mono text-foreground">{handleOf(name)}</span>: lowercase letters, digits and dashes from the name, fixed once created and used in the API.
+          </>
+        ) : (
+          "The name is shown on what it writes and in the audit log; its handle is made from it in lowercase letters, digits and dashes."
+        )}
+      </p>
       <Outcome error={create.error} />
       {members.map((m) => (
         <ServiceAccount key={m.email} m={m} onChanged={onChanged} />

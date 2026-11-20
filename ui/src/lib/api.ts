@@ -562,6 +562,8 @@ export interface Member {
   last_seen: string | null;
   /** A service account: no person, no sign-in, only tokens an admin creates. */
   service?: boolean;
+  /** A service account's display name; its handle is in `email`. */
+  name?: string;
 }
 
 export interface Invite {
