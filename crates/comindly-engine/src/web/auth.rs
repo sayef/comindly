@@ -259,6 +259,23 @@ pub(super) async fn guard(
         }
         return fail(StatusCode::UNAUTHORIZED, "Sign in to continue").into_response();
     };
+    if via == Via::Token {
+        let from = req
+            .extensions()
+            .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+            .map(|c| client(&server.config, c.0, req.headers()))
+            .unwrap_or_default();
+        let allowed = token
+            .as_deref()
+            .is_none_or(|t| server.accounts.token_allows(t, &from));
+        if !allowed {
+            return fail(
+                StatusCode::FORBIDDEN,
+                format!("This access token is not allowed from {from}"),
+            )
+            .into_response();
+        }
+    }
     if via == Via::Token && account_only(&path) && path != SELF_REVOKE {
         return fail(
             StatusCode::FORBIDDEN,
@@ -730,6 +747,73 @@ pub(super) async fn remove(
         server.accounts.remove(&who.email, &q.email),
         "Member removed",
     )
+}
+
+/// A service account: a member without a person or sign-in, which works with tokens only.
+pub(super) async fn create_service(
+    On(server): On,
+    Extension(who): Extension<Who>,
+    Json(q): Json<api::NewService>,
+) -> Reply<Done> {
+    done(
+        server
+            .accounts
+            .create_service(&who.email, &q.name, q.role)
+            .map(|_| ()),
+        "Service account created",
+    )
+}
+
+/// A member's or service account's tokens, for admins.
+pub(super) async fn member_tokens(
+    On(server): On,
+    axum::extract::Query(q): axum::extract::Query<api::EmailRequest>,
+) -> Reply<api::Tokens> {
+    let who = Who {
+        email: server::normalize(&q.email),
+        role: Role::Viewer,
+    };
+    let tokens = server.accounts.tokens(&who).map_err(bad)?;
+    Ok(Json(api::Tokens { tokens }))
+}
+
+/// A token for a service account; shown once.
+pub(super) async fn create_service_token(
+    On(server): On,
+    Extension(who): Extension<Who>,
+    Json(q): Json<api::ServiceTokenRequest>,
+) -> Reply<api::TokenCreated> {
+    let token = server
+        .accounts
+        .create_service_token(
+            &who.email,
+            &q.name,
+            &q.token_name,
+            q.expires_in_days,
+            &q.allowed,
+        )
+        .map_err(bad)?;
+    Ok(Json(api::TokenCreated {
+        ok: true,
+        message: "Token created; copy it now, it is shown once".into(),
+        token,
+    }))
+}
+
+/// An admin revokes one of a member's tokens, or all of them: for a token that leaked.
+pub(super) async fn revoke_member_tokens(
+    On(server): On,
+    Extension(who): Extension<Who>,
+    Json(q): Json<api::MemberTokenRevoke>,
+) -> Reply<Done> {
+    let n = server
+        .accounts
+        .revoke_member_tokens(&who.email, &q.email, q.id.as_deref())
+        .map_err(bad)?;
+    Ok(Json(Done::new(match n {
+        1 => "1 token revoked".to_string(),
+        n => format!("{n} tokens revoked"),
+    })))
 }
 
 pub(super) async fn revoke_invite(

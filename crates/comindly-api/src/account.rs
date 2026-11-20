@@ -4,8 +4,9 @@
 use serde::{Deserialize, Serialize};
 
 pub use crate::server::{
-    AccessToken, AuditEntry, AuditPage, AuditQuery, DeviceRequest, Invite, Member, Role,
-    SecretInfo, SignIn,
+    service_email, service_name, AccessToken, AuditEntry, AuditPage, AuditQuery, DeviceRequest,
+    Invite, Member, MemberTokenRevoke, NewService, Role, SecretInfo, ServiceTokenRequest, SignIn,
+    SERVICE_DOMAIN,
 };
 
 /// `GET /api/v1/auth/me`: who is signed in, or `local` on this machine.

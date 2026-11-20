@@ -61,6 +61,60 @@ pub struct Member {
     pub fixed: bool,
     pub created: String,
     pub last_seen: Option<String>,
+    /// A service account: no person, no sign-in, only tokens an admin creates.
+    #[serde(default)]
+    pub service: bool,
+}
+
+/// Service accounts are members at this reserved domain, which no mailbox or identity provider has.
+pub const SERVICE_DOMAIN: &str = "service.invalid";
+
+/// The member address of service account `name`: lowercase letters, digits and dashes, 1-40.
+pub fn service_email(name: &str) -> Option<String> {
+    let name = name.trim();
+    let ok = (1..=40).contains(&name.len())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        && !name.starts_with('-')
+        && !name.ends_with('-');
+    ok.then(|| format!("{name}@{SERVICE_DOMAIN}"))
+}
+
+/// The service account's name, when `email` is one.
+pub fn service_name(email: &str) -> Option<&str> {
+    email
+        .strip_suffix(SERVICE_DOMAIN)
+        .and_then(|n| n.strip_suffix('@'))
+        .filter(|n| !n.is_empty())
+}
+
+/// `POST /api/v1/members/service`: create a service account.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewService {
+    pub name: String,
+    pub role: Role,
+}
+
+/// `POST /api/v1/members/service/token`: a token for a service account.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServiceTokenRequest {
+    pub name: String,
+    pub token_name: String,
+    /// Days until it expires; `None` never.
+    #[serde(default)]
+    pub expires_in_days: Option<u32>,
+    /// Addresses (`203.0.113.7`) or ranges (`203.0.113.0/24`) it works from; empty is anywhere.
+    #[serde(default)]
+    pub allowed: Vec<String>,
+}
+
+/// `POST /api/v1/members/tokens/revoke`: an admin revokes a member's token, or all with no `id`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemberTokenRevoke {
+    pub email: String,
+    #[serde(default)]
+    pub id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -80,6 +134,9 @@ pub struct AccessToken {
     /// `None` for a token that never expires.
     pub expires: Option<String>,
     pub expired: bool,
+    /// Addresses or ranges it works from; empty is anywhere.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed: Vec<String>,
 }
 
 /// One row of the audit log; details never hold token values or codes.
