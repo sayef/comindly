@@ -1551,20 +1551,12 @@ fn provenance(who: Option<&crate::server::Who>, s: &Session) -> Provenance {
     p
 }
 
-/// How a member is named on what they write: the email, or "build-bot (service account)".
-pub(crate) fn display_name(email: &str) -> String {
-    match api::service_name(email) {
-        Some(n) => format!("{n} (service account)"),
-        None => email.to_string(),
-    }
-}
-
 /// The signed-in member on a server, else this machine's user.
 fn identity(who: Option<&crate::server::Who>) -> crate::ledger::Identity {
     match who {
         Some(w) => crate::ledger::Identity {
             actor: format!("actor-{}", &blake3::hash(w.email.as_bytes()).to_hex()[..10]),
-            name: Some(display_name(&w.email)),
+            name: Some(w.display()),
         },
         None => crate::config::local_identity(),
     }
@@ -1990,6 +1982,7 @@ mod tests {
                     res.extensions_mut().insert(crate::server::Who {
                         email: "member@example.com".into(),
                         role: crate::server::Role::Member,
+                        name: None,
                     });
                     res
                 }),

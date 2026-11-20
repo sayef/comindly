@@ -772,6 +772,7 @@ pub(super) async fn member_tokens(
     let who = Who {
         email: server::normalize(&q.email),
         role: Role::Viewer,
+        name: None,
     };
     let tokens = server.accounts.tokens(&who).map_err(bad)?;
     Ok(Json(api::Tokens { tokens }))
