@@ -134,6 +134,31 @@ days later. Through the API, `POST /api/v1/tokens` takes `{"name": "…", "expir
 (`null` for no expiry). Records an agent writes say which member it works for; after each re-index, agents get the new
 index without reconnecting. Ledger records written in the app carry the member's address.
 
+### Service accounts
+
+For a tool or a shared machine rather than a person (a CI job, a bot, agents on a build server), an
+admin creates a service account under Settings → Members: a name such as `build-bot`, a role
+(viewer or member, never admin) and its teams. It has no email and never signs in: it works only with
+the tokens an admin creates for it there, each with a name, an expiry and, optionally, the addresses
+it works from (`203.0.113.7` or a range like `203.0.113.0/24`). A token used from anywhere else is
+refused with `403`. Behind a load balancer, set `COMINDLY_TRUST_PROXY=true` so comindly sees the
+caller's address ([Behind a proxy](#behind-a-proxy)).
+
+What a service account writes counts as an agent's, labelled "build-bot (service account)": its records
+start unconfirmed like any agent's, and it can never confirm one for a person. Through the API, admins
+use `POST /api/v1/members/service` (`{"name": "build-bot", "role": "member"}`) and
+`POST /api/v1/members/service/token` (`{"name": "build-bot", "token_name": "ci", "expires_in_days": 90,
+"allowed": ["203.0.113.0/24"]}`); creating, changing and revoking go to the [audit log](#audit-log).
+
+### When a token leaks
+
+Revoke it, and only it, at once: the person under Your access, an admin for anyone under Settings →
+Members (**Revoke tokens** revokes all of a member's tokens, a service account's tokens one by one),
+or `POST /api/v1/members/tokens/revoke` with `{"email": "…"}` and optionally the token's `id`. Each
+token shows when it was last used, which helps tell whether it was. Then create a new one and hand it
+to whoever needs it; rotating is the same steps on a schedule. A command line signs in again with
+`comindly login`.
+
 ### Agents through a gateway
 
 To keep the server private while an outside service (a code review bot, say) reaches `/mcp`, run a

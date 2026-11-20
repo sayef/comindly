@@ -17,6 +17,21 @@ pub trait AccountStore: Send + Sync {
     fn member(&self, email: &str) -> Result<Option<Who>>;
     fn members(&self) -> Result<Vec<Member>>;
     fn set_role(&self, by: &str, email: &str, role: Role) -> Result<()>;
+    /// A service account `name` with `role` (never admin): a member without a person or sign-in.
+    fn create_service(&self, by: &str, name: &str, role: Role) -> Result<Who>;
+    /// A token for service account `name`, working only from `allowed` addresses when given.
+    fn create_service_token(
+        &self,
+        by: &str,
+        name: &str,
+        token_name: &str,
+        expires_in_days: Option<u32>,
+        allowed: &[String],
+    ) -> Result<String>;
+    /// An admin revokes a member's token `id`, or with `None` all of them; how many went.
+    fn revoke_member_tokens(&self, by: &str, email: &str, id: Option<&str>) -> Result<usize>;
+    /// Whether the token `bearer` may be used from address `from`.
+    fn token_allows(&self, bearer: &str, from: &str) -> bool;
     /// Remove a member with their sessions, tokens and invitations.
     fn remove(&self, by: &str, email: &str) -> Result<()>;
     /// Invite `email`; returns the link token, or with `code` the invitation code.

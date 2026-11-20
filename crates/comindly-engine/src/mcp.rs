@@ -269,7 +269,7 @@ impl ComindlyServer {
         let identity = match who {
             Some(w) => crate::ledger::Identity {
                 actor: format!("actor-{}", &blake3::hash(w.email.as_bytes()).to_hex()[..10]),
-                name: Some(w.email.clone()),
+                name: Some(crate::web::display_name(&w.email)),
             },
             None => self.identity.clone(),
         };
@@ -1309,7 +1309,16 @@ impl ComindlyServer {
         ctx: rmcp::service::RequestContext<rmcp::RoleServer>,
         Parameters(p): Parameters<ReviewParam>,
     ) -> CallToolResult {
+        let service = ctx
+            .extensions
+            .get::<axum::http::request::Parts>()
+            .and_then(|parts| parts.extensions.get::<crate::server::Who>())
+            .is_some_and(|w| crate::api::service_name(&w.email).is_some());
         let result = match Self::may_write(&ctx, "write to the ledger") {
+            // A service account has no person behind it to vouch for a record.
+            Ok(()) if service && p.from_person => Err(anyhow::anyhow!(
+                "a service account has no person to confirm for: leave `from_person` off"
+            )),
             Ok(()) => self.write_review(p, self.agent(&ctx)).await,
             Err(e) => Err(e),
         };

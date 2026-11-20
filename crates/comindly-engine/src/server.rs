@@ -433,6 +433,66 @@ struct Token {
     last_used: Option<String>,
     #[serde(default)]
     expires: Option<String>,
+    /// Addresses (`203.0.113.7`) or ranges (`203.0.113.0/24`) it works from; empty is anywhere.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    allowed: Vec<String>,
+}
+
+/// Whether address `ip` is `rule`: one address, or a range in CIDR notation.
+pub fn ip_matches(ip: &str, rule: &str) -> bool {
+    use std::net::IpAddr;
+    let Ok(ip) = ip.trim().parse::<IpAddr>() else {
+        return false;
+    };
+    let (net, bits) = match rule.trim().split_once('/') {
+        Some((n, b)) => (n, b.parse::<u32>().ok()),
+        None => (rule.trim(), None),
+    };
+    let Ok(net) = net.parse::<IpAddr>() else {
+        return false;
+    };
+    let (a, b, width) = match (ip, net) {
+        (IpAddr::V4(a), IpAddr::V4(b)) => (u32::from(a) as u128, u32::from(b) as u128, 32),
+        (IpAddr::V6(a), IpAddr::V6(b)) => (u128::from(a), u128::from(b), 128),
+        (IpAddr::V6(a), IpAddr::V4(b)) => match a.to_ipv4_mapped() {
+            Some(a) => (u32::from(a) as u128, u32::from(b) as u128, 32),
+            None => return false,
+        },
+        _ => return false,
+    };
+    let bits = bits.unwrap_or(width).min(width);
+    let mask = if bits == 0 {
+        0
+    } else {
+        u128::MAX << (width - bits) & (u128::MAX >> (128 - width))
+    };
+    a & mask == b & mask
+}
+
+/// Each rule as an address or range, or why one is not.
+fn check_rules(rules: &[String]) -> Result<Vec<String>> {
+    let rules: Vec<String> = rules
+        .iter()
+        .map(|r| r.trim().to_string())
+        .filter(|r| !r.is_empty())
+        .collect();
+    for r in &rules {
+        let (net, bits) = match r.split_once('/') {
+            Some((n, b)) => (n, Some(b)),
+            None => (r.as_str(), None),
+        };
+        let width = match net.parse::<std::net::IpAddr>() {
+            Ok(std::net::IpAddr::V4(_)) => 32,
+            Ok(std::net::IpAddr::V6(_)) => 128,
+            Err(_) => 0,
+        };
+        let bits_ok = bits.is_none_or(|b| b.parse::<u32>().is_ok_and(|b| b <= width));
+        anyhow::ensure!(
+            width > 0 && bits_ok,
+            "`{r}` is not an address or range like 203.0.113.0/24"
+        );
+    }
+    Ok(rules)
 }
 
 impl Token {
@@ -1053,6 +1113,15 @@ fn valid_email(email: &str) -> bool {
     email.contains('@') && !email.contains(|c: char| c.is_whitespace() || c == '|')
 }
 
+/// A person's address: never a service account's, which signs in with its tokens only.
+fn person(email: &str) -> Result<()> {
+    anyhow::ensure!(
+        comindly_api::server::service_name(email).is_none(),
+        "a service account signs in with its access tokens only"
+    );
+    Ok(())
+}
+
 /// Secret names for a git host's token and for the LLM key.
 pub fn git_secret(host: &str) -> String {
     format!("git:{}", host.to_lowercase())
@@ -1090,6 +1159,7 @@ impl crate::backends::AccountStore for Store {
                 fixed: false,
                 created: u.created.clone(),
                 last_seen: u.last_seen.clone(),
+                service: comindly_api::server::service_name(email).is_some(),
             })
             .collect();
         for m in &mut out {
@@ -1106,6 +1176,7 @@ impl crate::backends::AccountStore for Store {
                     role: Role::Admin,
                     fixed: true,
                     created: String::new(),
+                    service: false,
                 });
             }
         }
@@ -1121,10 +1192,112 @@ impl crate::backends::AccountStore for Store {
         let user = self.state().users.get(&email).cloned();
         let mut user = user.with_context(|| format!("{email} is not a member"))?;
         self.may_manage(by)?;
+        anyhow::ensure!(
+            role != Role::Admin || comindly_api::server::service_name(&email).is_none(),
+            "a service account cannot be an admin"
+        );
         user.role = role;
         self.commit(vec![put("user", &email, &user)])?;
         self.audit(by, "role", &format!("{email} {}", role.as_str()));
         Ok(())
+    }
+
+    fn create_service(&self, by: &str, name: &str, role: Role) -> Result<Who> {
+        self.may_manage(by)?;
+        let email = comindly_api::server::service_email(name)
+            .context("a service account's name is 1-40 lowercase letters, digits and dashes")?;
+        anyhow::ensure!(role != Role::Admin, "a service account cannot be an admin");
+        let _w = self.write_lock();
+        anyhow::ensure!(
+            !self.state().users.contains_key(&email),
+            "there is a service account `{name}` already"
+        );
+        let user = User {
+            role,
+            created: now(),
+            last_seen: None,
+        };
+        self.commit(vec![put("user", &email, &user)])?;
+        self.audit(
+            by,
+            "service-account",
+            &format!("{} {}", name.trim(), role.as_str()),
+        );
+        Ok(Who { email, role })
+    }
+
+    fn create_service_token(
+        &self,
+        by: &str,
+        name: &str,
+        token_name: &str,
+        expires_in_days: Option<u32>,
+        allowed: &[String],
+    ) -> Result<String> {
+        self.may_manage(by)?;
+        let email = comindly_api::server::service_email(name).context("no such service account")?;
+        anyhow::ensure!(
+            self.state().users.contains_key(&email),
+            "no service account `{name}`"
+        );
+        let token_name = token_name.trim();
+        anyhow::ensure!(!token_name.is_empty(), "give the token a name");
+        if let Some(d) = expires_in_days {
+            anyhow::ensure!((1..=3650).contains(&d), "a token lasts 1 to 3650 days");
+        }
+        let allowed = check_rules(allowed)?;
+        let token = new_token("cly_");
+        let id = uuid::Uuid::new_v4().simple().to_string();
+        let row = Token {
+            hash: hash(&token),
+            email: email.clone(),
+            name: token_name.to_string(),
+            created: now(),
+            last_used: None,
+            expires: expires_in_days.map(|d| (Utc::now() + Duration::days(d.into())).to_rfc3339()),
+            allowed: allowed.clone(),
+        };
+        let _w = self.write_lock();
+        self.commit(vec![put("token", &id, &row)])?;
+        let from = if allowed.is_empty() {
+            "anywhere".to_string()
+        } else {
+            allowed.join(", ")
+        };
+        let lasts = expires_in_days.map_or("no expiry".to_string(), |d| format!("{d} days"));
+        self.audit(
+            by,
+            "service-token",
+            &format!("{} {token_name} ({lasts}, from {from})", name.trim()),
+        );
+        Ok(token)
+    }
+
+    fn revoke_member_tokens(&self, by: &str, email: &str, id: Option<&str>) -> Result<usize> {
+        self.may_manage(by)?;
+        let email = normalize(email);
+        let _w = self.write_lock();
+        let gone: Vec<(String, String)> = self
+            .state()
+            .tokens
+            .iter()
+            .filter(|(k, t)| t.email == email && id.is_none_or(|i| i == k.as_str()))
+            .map(|(k, t)| (k.clone(), t.name.clone()))
+            .collect();
+        self.commit(gone.iter().map(|(k, _)| del("token", k)).collect())?;
+        for (_, name) in &gone {
+            self.audit(by, "revoke-token", &format!("{email} {name}"));
+        }
+        Ok(gone.len())
+    }
+
+    fn token_allows(&self, bearer: &str, from: &str) -> bool {
+        let h = hash(bearer);
+        self.state()
+            .tokens
+            .values()
+            .find(|t| t.hash == h)
+            .is_none_or(|t| t.allowed.is_empty() || t.allowed.iter().any(|r| ip_matches(from, r)))
     }
 
     /// Remove a member with their sessions, tokens and invitations.
@@ -1180,6 +1353,7 @@ impl crate::backends::AccountStore for Store {
             email.contains('@') && !email.contains(char::is_whitespace),
             "that is not an email address"
         );
+        person(&email)?;
         let (token, h) = if code {
             let c = new_code();
             let h = code_hash(&c);
@@ -1254,6 +1428,9 @@ impl crate::backends::AccountStore for Store {
 
     /// A sign-in link token for a member, or `None` when `email` is not one.
     fn sign_in_link(&self, email: &str) -> Result<Option<String>> {
+        if person(&normalize(email)).is_err() {
+            return Ok(None);
+        }
         let Some(who) = self.member(email)? else {
             return Ok(None);
         };
@@ -1357,6 +1534,7 @@ impl crate::backends::AccountStore for Store {
     ) -> Result<(String, Who, Option<String>)> {
         let email = normalize(email);
         anyhow::ensure!(valid_email(&email), "Wrong email or code");
+        person(&email)?;
         let from = format!("code|{email}|{client}");
         anyhow::ensure!(
             self.failures(&from) < MAX_FAILED,
@@ -1422,6 +1600,7 @@ impl crate::backends::AccountStore for Store {
     /// newcomer who joins as a viewer; the identity provider has already checked who they are.
     fn sign_in_verified(&self, email: &str, how: &str, join: bool) -> Result<(String, Who)> {
         let email = normalize(email);
+        person(&email)?;
         if self.member(&email)?.is_some() {
             self.audit(&email, "sign-in", how);
             return self.session_for(&email);
@@ -1436,6 +1615,7 @@ impl crate::backends::AccountStore for Store {
             valid_email(&email),
             "the sign-in did not come with an email address"
         );
+        person(&email)?;
         if let Some(who) = self.member(&email)? {
             return Ok(who);
         }
@@ -1472,6 +1652,7 @@ impl crate::backends::AccountStore for Store {
     /// Give `email` a new sign-in code; their sessions end, except `keep` (the caller's own).
     fn reset_code(&self, by: &str, email: &str, keep: Option<&str>) -> Result<String> {
         let email = normalize(email);
+        person(&email)?;
         anyhow::ensure!(self.member(&email)?.is_some(), "{email} is not a member");
         if by != email {
             anyhow::ensure!(
@@ -1549,6 +1730,7 @@ impl crate::backends::AccountStore for Store {
             created: now(),
             last_used: None,
             expires: expires_in_days.map(|d| (Utc::now() + Duration::days(d.into())).to_rfc3339()),
+            allowed: Vec::new(),
         };
         let mut changes = long_expired(&self.state().tokens, |e| e == who.email);
         changes.push(put("token", &id, &row));
@@ -1575,6 +1757,7 @@ impl crate::backends::AccountStore for Store {
                 last_used: tok.last_used.clone(),
                 expires: tok.expires.clone(),
                 expired: tok.expired(&t),
+                allowed: tok.allowed.clone(),
             })
             .collect();
         out.sort_by(|a, b| b.created.cmp(&a.created));
@@ -1960,6 +2143,118 @@ mod tests {
             s.admins = vec!["a".into(), "a@x.org".into(), "admin@x.org".into()];
             s
         })
+    }
+
+    #[test]
+    fn a_service_account_works_with_tokens_and_never_signs_in_as_a_person() {
+        use crate::backends::Authenticator;
+        let (_d, s) = temp_store();
+        let who = s
+            .create_service("admin@x.org", "build-bot", Role::Member)
+            .unwrap();
+        assert_eq!(who.email, "build-bot@service.invalid");
+        assert!(
+            s.create_service("admin@x.org", "build-bot", Role::Member)
+                .is_err(),
+            "names are unique"
+        );
+        assert!(
+            s.create_service("admin@x.org", "ops", Role::Admin).is_err(),
+            "never an admin"
+        );
+        assert!(s
+            .create_service("admin@x.org", "Bad Name", Role::Viewer)
+            .is_err());
+        assert!(s.set_role("admin@x.org", &who.email, Role::Admin).is_err());
+        assert!(s
+            .members()
+            .unwrap()
+            .iter()
+            .any(|m| m.email == who.email && m.service));
+        // Every way a person signs in is closed to it.
+        assert!(s.sign_in_verified(&who.email, "oidc", false).is_err());
+        assert!(s.admit(&who.email, false).is_err());
+        assert!(s.sign_in_link(&who.email).unwrap().is_none());
+        assert!(s.reset_code("admin@x.org", &who.email, None).is_err());
+        assert!(s.sign_in_code(&who.email, "ABCD-EFGH", "1.2.3.4").is_err());
+        assert!(s
+            .invite("admin@x.org", "x@service.invalid", Role::Viewer, false)
+            .is_err());
+        // Its tokens, from where they may be used.
+        let open = s
+            .create_service_token("admin@x.org", "build-bot", "anywhere", Some(30), &[])
+            .unwrap();
+        let fenced = s
+            .create_service_token(
+                "admin@x.org",
+                "build-bot",
+                "box",
+                None,
+                &["203.0.113.0/24".into()],
+            )
+            .unwrap();
+        assert!(s
+            .create_service_token(
+                "admin@x.org",
+                "build-bot",
+                "x",
+                None,
+                &["not an address".into()]
+            )
+            .is_err());
+        assert!(
+            s.create_service_token("dev@x.org", "build-bot", "x", None, &[])
+                .is_err(),
+            "admins only"
+        );
+        let (w, via) = s.authenticate(None, Some(&fenced)).unwrap().unwrap();
+        assert_eq!(
+            (w.email.as_str(), via),
+            ("build-bot@service.invalid", Via::Token)
+        );
+        assert!(s.token_allows(&fenced, "203.0.113.7"));
+        assert!(!s.token_allows(&fenced, "198.51.100.1"));
+        assert!(s.token_allows(&open, "198.51.100.1"));
+        // A leak: the admin revokes one, then all.
+        let id = s
+            .tokens(&w)
+            .unwrap()
+            .iter()
+            .find(|t| t.name == "box")
+            .unwrap()
+            .id
+            .clone();
+        assert_eq!(
+            s.revoke_member_tokens("admin@x.org", &w.email, Some(&id))
+                .unwrap(),
+            1
+        );
+        assert!(s.authenticate(None, Some(&fenced)).unwrap().is_none());
+        assert_eq!(
+            s.revoke_member_tokens("admin@x.org", &w.email, None)
+                .unwrap(),
+            1
+        );
+        assert!(s.authenticate(None, Some(&open)).unwrap().is_none());
+    }
+
+    #[test]
+    fn addresses_match_single_ips_and_ranges() {
+        assert!(ip_matches("203.0.113.7", "203.0.113.7"));
+        assert!(ip_matches("203.0.113.7", "203.0.113.0/24"));
+        assert!(!ip_matches("203.0.114.7", "203.0.113.0/24"));
+        assert!(ip_matches("10.1.2.3", "0.0.0.0/0"));
+        assert!(ip_matches("2001:db8::1", "2001:db8::/32"));
+        assert!(!ip_matches("2001:db9::1", "2001:db8::/32"));
+        assert!(ip_matches("::ffff:203.0.113.7", "203.0.113.0/24"));
+        assert!(!ip_matches("garbage", "203.0.113.0/24"));
+        assert!(
+            check_rules(&["203.0.113.0/24".into(), " ".into()])
+                .unwrap()
+                .len()
+                == 1
+        );
+        assert!(check_rules(&["203.0.113.0/40".into()]).is_err());
     }
 
     #[test]

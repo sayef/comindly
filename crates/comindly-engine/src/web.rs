@@ -564,6 +564,16 @@ pub fn serve(data: Data, listener: std::net::TcpListener, access: Access) -> Res
             .route("/api/v1/members/role", post(auth::set_role))
             .route("/api/v1/members/remove", post(auth::remove))
             .route("/api/v1/members/revoke", post(auth::revoke_invite))
+            .route("/api/v1/members/service", post(auth::create_service))
+            .route(
+                "/api/v1/members/service/token",
+                post(auth::create_service_token),
+            )
+            .route("/api/v1/members/tokens", get(auth::member_tokens))
+            .route(
+                "/api/v1/members/tokens/revoke",
+                post(auth::revoke_member_tokens),
+            )
             .route("/api/v1/tokens", get(auth::tokens).post(auth::create_token))
             .route("/api/v1/tokens/revoke", post(auth::revoke_token))
             .route("/api/v1/secrets", get(auth::secrets).post(auth::set_secret))
@@ -1527,7 +1537,13 @@ fn neighbourhood(z: &Zoom) -> api::Neighbourhood {
 
 /// Provenance for a write from the UI: the signed-in member on a server, else this machine's user.
 fn provenance(who: Option<&crate::server::Who>, s: &Session) -> Provenance {
-    let mut p = Provenance::human("comindly-web", &identity(who));
+    // A service account is never a person: what it writes counts as an agent's.
+    let service = who.is_some_and(|w| api::service_name(&w.email).is_some());
+    let mut p = if service {
+        Provenance::agent("comindly-web", None, &identity(who))
+    } else {
+        Provenance::human("comindly-web", &identity(who))
+    };
     if let Some(w) = who {
         let teams = s.teams.read().unwrap_or_else(|e| e.into_inner());
         p.teams = teams.teams_of_member(&w.email);
@@ -1535,12 +1551,20 @@ fn provenance(who: Option<&crate::server::Who>, s: &Session) -> Provenance {
     p
 }
 
+/// How a member is named on what they write: the email, or "build-bot (service account)".
+pub(crate) fn display_name(email: &str) -> String {
+    match api::service_name(email) {
+        Some(n) => format!("{n} (service account)"),
+        None => email.to_string(),
+    }
+}
+
 /// The signed-in member on a server, else this machine's user.
 fn identity(who: Option<&crate::server::Who>) -> crate::ledger::Identity {
     match who {
         Some(w) => crate::ledger::Identity {
             actor: format!("actor-{}", &blake3::hash(w.email.as_bytes()).to_hex()[..10]),
-            name: Some(w.email.clone()),
+            name: Some(display_name(&w.email)),
         },
         None => crate::config::local_identity(),
     }
