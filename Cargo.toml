@@ -50,7 +50,7 @@ tree-sitter-kotlin-ng = "1.1"
 tree-sitter-rust = "0.24"
 scip = "0.10"
 protobuf = "=3.7.2"
-sqlparser = "0.63"
+sqlparser = "0.64"
 object_store = { version = "0.13.2", default-features = false, features = ["fs"] }
 uuid = { version = "1.24", features = ["v4", "v7", "serde", "v5"] }
 # Server mode: members, sessions and encrypted tokens in SQLite; sign-in links by email.
