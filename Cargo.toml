@@ -70,7 +70,7 @@ opentelemetry-otlp = { version = "0.33", default-features = false, features = ["
 tracing-opentelemetry = { version = "0.34", default-features = false }
 tower = { version = "0.5", default-features = false, features = ["util"] }
 yaml-rust2 = "0.13"
-hcl-rs = "0.19"
+hcl-rs = "0.20"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "query", "gzip"] }
 openidconnect = { version = "4.1", default-features = false }
 wry = "0.57"
