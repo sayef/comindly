@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
-import { api, type Role, type SecretState } from "@/lib/api";
+import { api, type Member, type Role, type SecretState } from "@/lib/api";
 import { date } from "@/lib/utils";
 import { PageHeader } from "@/components/page-header";
 import { ActivityTabs } from "@/pages/activity";
@@ -45,6 +45,157 @@ function RoleSelect({ email, role, pending, onChange }: { email: string; role: R
   );
 }
 
+const SERVICE_DOMAIN = "@service.invalid";
+const DAYS: [string, number | null][] = [
+  ["30 days", 30],
+  ["90 days", 90],
+  ["1 year", 365],
+  ["No expiry", null],
+];
+
+/** One service account: its role, its tokens with where they work from, and a new token. */
+function ServiceAccount({ m, onChanged }: { m: Member; onChanged: () => void }) {
+  const qc = useQueryClient();
+  const name = m.email.slice(0, -SERVICE_DOMAIN.length);
+  const tokens = useQuery({ queryKey: ["member-tokens", m.email], queryFn: () => api.memberTokens(m.email) });
+  const [tokenName, setTokenName] = useState("");
+  const [days, setDays] = useState<number | null>(90);
+  const [allowed, setAllowed] = useState("");
+  const refresh = () => qc.invalidateQueries({ queryKey: ["member-tokens", m.email] });
+  const create = useMutation({
+    mutationFn: () =>
+      api.createServiceToken(
+        name,
+        tokenName,
+        days,
+        allowed
+          .split(/[\s,]+/)
+          .map((a) => a.trim())
+          .filter(Boolean),
+      ),
+    meta: { inline: true },
+    onSuccess: () => (setTokenName(""), setAllowed(""), refresh()),
+  });
+  const revoke = useMutation({ mutationFn: (id: string) => api.revokeMemberTokens(m.email, id), onSuccess: refresh });
+  const role = useMutation({ mutationFn: (r: Role) => api.setRole(m.email, r), onSuccess: onChanged });
+  const remove = useMutation({ mutationFn: () => api.removeMember(m.email), onSuccess: onChanged });
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border p-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="font-semibold">{name}</span>
+        <select className={select} value={m.role} aria-label={`Role of ${name}`} onChange={(e) => role.mutate(e.target.value as Role)}>
+          <option value="viewer">Viewer</option>
+          <option value="member">Member</option>
+        </select>
+        <span className="text-xs text-muted-foreground">last used {date(m.last_seen)}</span>
+        <span className="ml-auto">
+          <ConfirmButton
+            variant="ghost"
+            size="sm"
+            question={`Remove ${name}? Its tokens stop working at once.`}
+            confirmLabel="Remove"
+            loading={remove.isPending}
+            onConfirm={() => remove.mutate()}
+          >
+            Remove
+          </ConfirmButton>
+        </span>
+      </div>
+      {(tokens.data?.tokens.length ?? 0) > 0 && (
+        <ul className="flex flex-col divide-y rounded-md border">
+          {tokens.data?.tokens.map((t) => (
+            <li key={t.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 text-sm">
+              <span className="font-medium">{t.name}</span>
+              <span className="text-xs text-muted-foreground">
+                from{" "}
+                {t.allowed?.length ? <span className="font-mono text-foreground">{t.allowed.join(", ")}</span> : "anywhere"}
+              </span>
+              <span className="text-xs text-muted-foreground">used {t.last_used ? date(t.last_used) : "never"}</span>
+              <span className="text-xs text-muted-foreground">
+                {t.expired ? <Badge variant="warning">expired</Badge> : t.expires ? `expires ${date(t.expires)}` : "never expires"}
+              </span>
+              <span className="ml-auto">
+                <ConfirmButton
+                  variant="ghost"
+                  size="sm"
+                  question={`Revoke ${t.name}? Whatever uses it stops working at once.`}
+                  confirmLabel="Revoke"
+                  loading={revoke.isPending && revoke.variables === t.id}
+                  onConfirm={() => revoke.mutate(t.id)}
+                >
+                  Revoke
+                </ConfirmButton>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form
+        className="flex flex-wrap gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (tokenName.trim()) create.mutate();
+        }}
+      >
+        <Input value={tokenName} onChange={(e) => setTokenName(e.target.value)} placeholder="New token, e.g. build machine" aria-label={`New token for ${name}`} className="min-w-44 flex-1" autoComplete="off" />
+        <Input value={allowed} onChange={(e) => setAllowed(e.target.value)} placeholder="Works from (empty: anywhere)" aria-label="Addresses it works from" className="min-w-56 flex-1 font-mono text-xs" autoComplete="off" spellCheck={false} />
+        <select className={select} value={days ?? ""} aria-label="Expires after" onChange={(e) => setDays(e.target.value ? Number(e.target.value) : null)}>
+          {DAYS.map(([l, d]) => (
+            <option key={l} value={d ?? ""}>
+              {l}
+            </option>
+          ))}
+        </select>
+        <Button type="submit" variant="outline" disabled={!tokenName.trim()} loading={create.isPending}>
+          Create token
+        </Button>
+      </form>
+      <Outcome error={create.error ?? revoke.error ?? role.error ?? remove.error} />
+      {create.data?.token && (
+        <Reveal label={`Token for ${name}`} value={create.data.token} hint="Copy it now; it is not shown again. Agents send it as Authorization: Bearer <token>." />
+      )}
+    </div>
+  );
+}
+
+/** Accounts for tools and shared machines: no person, no sign-in, tokens only. */
+function ServiceAccounts({ members, onChanged }: { members: Member[]; onChanged: () => void }) {
+  const [name, setName] = useState("");
+  const [role, setRole] = useState<Role>("viewer");
+  const create = useMutation({
+    mutationFn: () => api.createService(name.trim(), role),
+    meta: { inline: true },
+    onSuccess: () => (setName(""), onChanged()),
+  });
+  return (
+    <Section
+      title="Service accounts"
+      description="For tools and shared machines rather than a person: they work only with the tokens you create here, never sign in, and what they write counts as an agent's, never as a person's confirmation."
+    >
+      <form
+        className="flex flex-wrap gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (name.trim()) create.mutate();
+        }}
+      >
+        <Input value={name} onChange={(e) => setName(e.target.value.toLowerCase())} placeholder="name, e.g. build-bot" aria-label="Service account name" className="min-w-44 flex-1" autoComplete="off" spellCheck={false} />
+        <select className={select} value={role} aria-label="Role of the service account" onChange={(e) => setRole(e.target.value as Role)}>
+          <option value="viewer">Viewer</option>
+          <option value="member">Member</option>
+        </select>
+        <Button type="submit" variant="brand" disabled={!name.trim()} loading={create.isPending}>
+          Create
+        </Button>
+      </form>
+      <Outcome error={create.error} />
+      {members.map((m) => (
+        <ServiceAccount key={m.email} m={m} onChanged={onChanged} />
+      ))}
+    </Section>
+  );
+}
+
 export function MembersPage() {
   const qc = useQueryClient();
   const me = useQuery({ queryKey: ["me"], queryFn: api.me });
@@ -72,6 +223,10 @@ export function MembersPage() {
   const revoke = useMutation({
     mutationFn: (e: string) => api.revokeInvite(e),
     onSuccess: refresh,
+  });
+  const revokeTokens = useMutation({
+    mutationFn: (e: string) => api.revokeMemberTokens(e),
+    meta: { inline: true },
   });
   if (!list.data) return <Skeleton className="h-96 rounded-lg" />;
   const methods = list.data.sign_in_methods?.length ? list.data.sign_in_methods : [list.data.sign_in];
@@ -145,7 +300,7 @@ export function MembersPage() {
             </Tr>
           </thead>
           <tbody>
-            {list.data.members.map((m) => (
+            {list.data.members.filter((m) => !m.service).map((m) => (
               <Tr key={m.email}>
                 <Td className="align-middle font-medium">
                   {m.email} {m.email === me.data?.email && <span className="text-muted-foreground">(you)</span>}
@@ -182,6 +337,18 @@ export function MembersPage() {
                         Reset code
                       </ConfirmButton>
                     )}
+                    {me.data && m.email !== me.data.email && (
+                      <ConfirmButton
+                        variant="ghost"
+                        size="sm"
+                        question={`Revoke all of ${m.email}'s access tokens? Their agents and command lines stop working until they sign in again.`}
+                        confirmLabel="Revoke tokens"
+                        loading={revokeTokens.isPending && revokeTokens.variables === m.email}
+                        onConfirm={() => revokeTokens.mutate(m.email)}
+                      >
+                        Revoke tokens
+                      </ConfirmButton>
+                    )}
                     {!m.fixed && me.data && m.email !== me.data.email && (
                       <ConfirmButton
                         variant="ghost"
@@ -200,7 +367,8 @@ export function MembersPage() {
             ))}
           </tbody>
         </Table>
-        <Outcome error={change.error ?? remove.error ?? reset.error ?? revoke.error} />
+        <Outcome error={change.error ?? remove.error ?? reset.error ?? revoke.error ?? revokeTokens.error} />
+        {revokeTokens.data && <p className="text-xs text-muted-foreground">{revokeTokens.data.message}</p>}
         {reset.data?.code && (
           <Reveal
             label={`New sign-in code for ${reset.variables}`}
@@ -209,6 +377,8 @@ export function MembersPage() {
           />
         )}
       </Section>
+
+      <ServiceAccounts members={list.data.members.filter((m) => m.service)} onChanged={refresh} />
 
       {list.data.invites.length > 0 && (
         <Section title="Pending invitations">

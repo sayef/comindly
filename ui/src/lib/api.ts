@@ -560,6 +560,8 @@ export interface Member {
   fixed: boolean;
   created: string;
   last_seen: string | null;
+  /** A service account: no person, no sign-in, only tokens an admin creates. */
+  service?: boolean;
 }
 
 export interface Invite {
@@ -577,6 +579,8 @@ export interface AccessToken {
   /** `null` when the token never expires. */
   expires: string | null;
   expired: boolean;
+  /** Addresses or ranges it works from; none is anywhere. */
+  allowed?: string[];
 }
 
 export interface AuditEntry {
@@ -661,6 +665,11 @@ export const api = {
   resetCode: (email: string) => post<Done & { code: string }>("/api/v1/members/reset", { email }),
   setRole: (email: string, role: Role) => post("/api/v1/members/role", { email, role }),
   removeMember: (email: string) => post("/api/v1/members/remove", { email }),
+  createService: (name: string, role: Role) => post("/api/v1/members/service", { name, role }),
+  memberTokens: (email: string) => get<{ tokens: AccessToken[] }>(`/api/v1/members/tokens?email=${encodeURIComponent(email)}`),
+  createServiceToken: (name: string, token_name: string, expires_in_days: number | null, allowed: string[]) =>
+    post<Done & { token: string }>("/api/v1/members/service/token", { name, token_name, expires_in_days, allowed }),
+  revokeMemberTokens: (email: string, id?: string) => post("/api/v1/members/tokens/revoke", { email, id }),
   revokeInvite: (email: string) => post("/api/v1/members/revoke", { email }),
   tokens: () => get<{ tokens: AccessToken[] }>("/api/v1/tokens"),
   createToken: (name: string, expires_in_days: number | null) =>
