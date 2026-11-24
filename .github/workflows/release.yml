@@ -119,9 +119,13 @@ jobs:
           name: comindly-${{ matrix.target }}
           path: comindly*-${{ matrix.target }}.tar.gz*
 
+  # After publishing, so a macOS runner that is slow to come never holds the release back; it adds
+  # its archives to the release when it is done.
   build-macos:
-    needs: [tag, ui]
-    if: needs.tag.outputs.macos == 'true' && (needs.tag.outputs.tag != '' || github.event_name == 'workflow_dispatch')
+    needs: [tag, ui, publish]
+    if: ${{ !cancelled() && needs.tag.outputs.macos == 'true' && needs.publish.result == 'success' }}
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -148,14 +152,15 @@ jobs:
             tar -C target/${{ matrix.target }}/release -czf "$a" "$bin"
             shasum -a 256 "$a" > "$a.sha256"
           done
-      - uses: actions/upload-artifact@v7
-        with:
-          name: comindly-${{ matrix.target }}
-          path: comindly*-${{ matrix.target }}.tar.gz*
+      - name: Add to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.tag.outputs.tag }}
+        run: gh release upload "$TAG" comindly*-${{ matrix.target }}.tar.gz* -R "$GITHUB_REPOSITORY" --clobber
 
   publish:
-    needs: [tag, build, build-macos]
-    if: ${{ !cancelled() && needs.tag.outputs.tag != '' && needs.build.result == 'success' && needs.build-macos.result != 'failure' }}
+    needs: [tag, build]
+    if: ${{ !cancelled() && needs.tag.outputs.tag != '' && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -233,10 +238,10 @@ jobs:
 
   # Installs the published release the way users do; fails the release if that breaks.
   verify-install:
-    needs: [tag, publish]
-    # A skipped build-macos (betas) would otherwise skip this job too.
+    needs: [tag, publish, build-macos]
+    # A skipped build-macos (betas) would otherwise skip this job too; macOS is checked once it built.
     if: ${{ !cancelled() && needs.tag.outputs.tag != '' && needs.publish.result == 'success' }}
     uses: ./.github/workflows/install-check.yml
     with:
       tag: ${{ needs.tag.outputs.tag }}
-      macos: ${{ needs.tag.outputs.macos == 'true' }}
+      macos: ${{ needs.tag.outputs.macos == 'true' && needs.build-macos.result == 'success' }}
