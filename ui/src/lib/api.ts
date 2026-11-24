@@ -390,6 +390,19 @@ export interface NeedsToken {
   username: string;
 }
 
+/** A git host token the server uses, as its host sees it. */
+export interface TokenStatus {
+  name: string;
+  host: string;
+  /** YYYY-MM-DD; none when it never expires or the host does not say. */
+  expires?: string;
+  /** Days until it expires; negative once it has. */
+  days_left?: number;
+  refused: boolean;
+  expired: boolean;
+  unknown?: string;
+}
+
 export interface RepoRow {
   path: string;
   name: string;
@@ -674,6 +687,7 @@ export const api = {
   revokeMemberTokens: (email: string, id?: string) => post("/api/v1/members/tokens/revoke", { email, id }),
   revokeInvite: (email: string) => post("/api/v1/members/revoke", { email }),
   tokens: () => get<{ tokens: AccessToken[] }>("/api/v1/tokens"),
+  tokenStatus: () => get<TokenStatus[]>("/api/v1/secrets/status"),
   createToken: (name: string, expires_in_days: number | null) =>
     post<Done & { token: string }>("/api/v1/tokens", { name, expires_in_days }),
   revokeToken: (id: string) => post("/api/v1/tokens/revoke", { id }),

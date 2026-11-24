@@ -104,6 +104,76 @@ pub async fn list(source: &Source, auth: Option<&Auth>) -> Result<Vec<RemoteRepo
     Ok(repos)
 }
 
+/// Why the host refused: no token, or the one sent (expired, when the host says so).
+async fn refused(host: &str, auth: Option<&Auth>, resp: reqwest::Response) -> NeedsToken {
+    let body = resp.text().await.unwrap_or_default().to_lowercase();
+    NeedsToken {
+        host: host.to_string(),
+        username: crate::worktree::token_user(host).into(),
+        refused: auth.is_some(),
+        expired: auth.is_some() && body.contains("expired"),
+    }
+}
+
+/// When a token expires, and whether its host still takes it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TokenHealth {
+    /// `YYYY-MM-DD`; `None` when it never expires or the host does not say.
+    pub expires: Option<String>,
+    pub refused: bool,
+    pub expired: bool,
+}
+
+/// Ask `host` about `token`: GitLab's `personal_access_tokens/self` (also group and project tokens),
+/// GitHub's token expiry header.
+pub async fn token_health(host: &str, token: &str) -> Result<TokenHealth> {
+    let client = reqwest::Client::builder()
+        .user_agent(concat!("comindly/", env!("CARGO_PKG_VERSION")))
+        .timeout(std::time::Duration::from_secs(10))
+        .build()?;
+    let github = host == "github.com" || host.contains("github");
+    let resp = if github {
+        client
+            .get(format!("{}/rate_limit", github_api(host)))
+            .bearer_auth(token)
+            .send()
+            .await
+    } else {
+        client
+            .get(format!("https://{host}/api/v4/personal_access_tokens/self"))
+            .header("PRIVATE-TOKEN", token)
+            .send()
+            .await
+    }
+    .with_context(|| format!("reach {host}"))?;
+    let status = resp.status().as_u16();
+    if status == 401 || status == 403 {
+        let body = resp.text().await.unwrap_or_default().to_lowercase();
+        return Ok(TokenHealth {
+            expires: None,
+            refused: true,
+            expired: body.contains("expired"),
+        });
+    }
+    anyhow::ensure!(resp.status().is_success(), "{host} answered {status}");
+    let expires = if github {
+        resp.headers()
+            .get("github-authentication-token-expiration")
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v.chars().take(10).collect())
+    } else {
+        let v: serde_json::Value = resp.json().await?;
+        v["expires_at"]
+            .as_str()
+            .map(|d| d.chars().take(10).collect())
+    };
+    Ok(TokenHealth {
+        expires,
+        refused: false,
+        expired: false,
+    })
+}
+
 /// One object, or `None` when it is not found.
 async fn one(
     client: &reqwest::Client,
@@ -123,11 +193,7 @@ async fn one(
     let resp = req.send().await.with_context(|| format!("reach {host}"))?;
     match resp.status().as_u16() {
         404 => Ok(None),
-        401 | 403 => Err(NeedsToken {
-            host: host.to_string(),
-            username: crate::worktree::token_user(host).into(),
-        }
-        .into()),
+        401 | 403 => Err(refused(host, auth, resp).await.into()),
         s if !resp.status().is_success() => bail!("{host} answered {s}"),
         _ => Ok(Some(resp.json().await?)),
     }
@@ -166,11 +232,7 @@ async fn pages(
             return Ok(None);
         }
         if status == 401 || status == 403 {
-            return Err(NeedsToken {
-                host: host.to_string(),
-                username: crate::worktree::token_user(host).into(),
-            }
-            .into());
+            return Err(refused(host, auth, resp).await.into());
         }
         if !resp.status().is_success() {
             bail!("{host} answered {status}");

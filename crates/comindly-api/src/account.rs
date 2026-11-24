@@ -121,6 +121,26 @@ pub struct Secrets {
     pub can_store: bool,
 }
 
+/// `GET /api/v1/secrets/status`: each git host token the server uses, as its host sees it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenStatus {
+    /// The secret's name, `git:<host>`.
+    pub name: String,
+    pub host: String,
+    /// `YYYY-MM-DD`; none when it never expires or the host does not say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires: Option<String>,
+    /// Days until it expires; negative once it has.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub days_left: Option<i64>,
+    /// The host refused it: expired, revoked, or without access.
+    pub refused: bool,
+    pub expired: bool,
+    /// The host could not be asked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unknown: Option<String>,
+}
+
 /// One secret: stored here with its details, or from the deployment or nowhere.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]

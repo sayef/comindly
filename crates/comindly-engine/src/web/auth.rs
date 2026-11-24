@@ -907,6 +907,69 @@ fn label(name: &str) -> String {
 }
 
 /// The server's tokens and keys: where each comes from, never their values.
+/// What each host said about its token, kept for a while so the page does not ask on every load.
+type Health = (std::time::Instant, comindly_core::hosting::TokenHealth);
+static HEALTH: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, Health>>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// Each git host token the server uses: when it expires, and whether the host still takes it.
+pub(super) async fn token_status(On(server): On) -> Json<Vec<api::TokenStatus>> {
+    let mut hosts: Vec<String> = vec!["github.com".into(), "gitlab.com".into()];
+    for n in server.secrets.secret_names() {
+        if let Some(h) = n.strip_prefix("git:") {
+            if !hosts.iter().any(|x| x == h) {
+                hosts.push(h.to_string());
+            }
+        }
+    }
+    let today = chrono::Utc::now().date_naive();
+    let mut out = Vec::new();
+    for host in hosts {
+        let Some(token) = server.git_token(&host) else {
+            continue;
+        };
+        let key = format!("{host}|{}", blake3::hash(token.as_bytes()).to_hex());
+        let cached = HEALTH
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&key)
+            .filter(|(at, h)| {
+                // A refusal is asked again soon, in case the token was just fixed.
+                let keep = if h.refused { 600 } else { 6 * 3600 };
+                at.elapsed().as_secs() < keep
+            })
+            .map(|(_, h)| h.clone());
+        let (health, unknown) = match cached {
+            Some(h) => (h, None),
+            None => match comindly_core::hosting::token_health(&host, &token).await {
+                Ok(h) => {
+                    HEALTH
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .insert(key, (std::time::Instant::now(), h.clone()));
+                    (h, None)
+                }
+                Err(e) => (Default::default(), Some(format!("{e:#}"))),
+            },
+        };
+        let days_left = health
+            .expires
+            .as_deref()
+            .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+            .map(|d| (d - today).num_days());
+        out.push(api::TokenStatus {
+            name: server::git_secret(&host),
+            host,
+            expired: health.expired || days_left.is_some_and(|d| d < 0),
+            expires: health.expires,
+            days_left,
+            refused: health.refused,
+            unknown,
+        });
+    }
+    Json(out)
+}
+
 pub(super) async fn secrets(On(server): On) -> Json<api::Secrets> {
     let store = &server.secrets;
     let mut names = vec![

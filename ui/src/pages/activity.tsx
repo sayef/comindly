@@ -358,6 +358,7 @@ function Detail({ id, who }: { id: string; who: (j: JobRow) => string }) {
             <span className="[overflow-wrap:anywhere]">{j.error}</span>
           </div>
         )}
+        <TokenHint text={`${j.error ?? ""} ${JSON.stringify(events)}`} />
         {j.status === "queued" ? (
           <p className="text-sm text-muted-foreground">Waiting for the running job to end; its steps show here once it starts.</p>
         ) : events.length ? (
@@ -367,6 +368,25 @@ function Detail({ id, who }: { id: string; who: (j: JobRow) => string }) {
         )}
       </div>
     </Card>
+  );
+}
+
+/** A run that could not fetch because a host refused its token: the way to fix it. */
+function TokenHint({ text }: { text: string }) {
+  const { admin } = useAccess();
+  const host = /the ([a-z0-9.-]+) token (?:has expired|was refused)/i.exec(text)?.[1];
+  if (!host) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md bg-warning/10 px-3.5 py-2.5 text-sm">
+      <span className="min-w-0 flex-1">
+        {host} refused the stored token, so this run used the code fetched before.{admin ? "" : ` Ask an admin to update it in Settings → Integrations.`}
+      </span>
+      {admin && (
+        <Button asChild size="sm" variant="outline">
+          <Link to={`/settings/integrations#secret-git:${host}`}>Update token</Link>
+        </Button>
+      )}
+    </div>
   );
 }
 
