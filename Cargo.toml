@@ -35,7 +35,7 @@ git2 = { version = "0.21.0", default-features = false, features = ["vendored-lib
 tree-sitter = "0.27"
 tree-sitter-python = "0.25"
 tree-sitter-typescript = "0.23"
-model2vec-rs = "0.3"
+model2vec-rs = "0.4"
 # Arrow types come from lancedb's re-exports (lancedb::arrow::*) to match its exact arrow line.
 lancedb = { version = "0.37.1", default-features = false, features = ["aws", "gcs", "azure"] }
 lance-index = "=10.0.0" # for FullTextSearchQuery (BM25/FTS); pinned to lancedb's version
@@ -50,7 +50,7 @@ tree-sitter-kotlin-ng = "1.1"
 tree-sitter-rust = "0.24"
 scip = "0.10"
 protobuf = "=3.7.2"
-sqlparser = "0.63"
+sqlparser = "0.64"
 object_store = { version = "0.13.2", default-features = false, features = ["fs"] }
 uuid = { version = "1.24", features = ["v4", "v7", "serde", "v5"] }
 # Server mode: members, sessions and encrypted tokens in SQLite; sign-in links by email.
@@ -70,13 +70,13 @@ opentelemetry-otlp = { version = "0.33", default-features = false, features = ["
 tracing-opentelemetry = { version = "0.34", default-features = false }
 tower = { version = "0.5", default-features = false, features = ["util"] }
 yaml-rust2 = "0.13"
-hcl-rs = "0.19"
+hcl-rs = "0.20"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "query", "gzip"] }
 openidconnect = { version = "4.1", default-features = false }
 wry = "0.57"
 tao = "0.37"
 muda = "0.21"
-rfd = { version = "0.17", default-features = false }
+rfd = { version = "0.18", default-features = false }
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSImage", "NSResponder"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData"] }
