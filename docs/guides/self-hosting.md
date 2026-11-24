@@ -212,6 +212,12 @@ An admin pastes one there, and it is stored encrypted with `COMINDLY_SECRET_KEY`
 used instead of one the deployment provides; removing it goes back to the deployment's. Read-only tokens are enough: a GitLab group access token
 with `read_repository` and `read_api`, or a fine-grained GitHub token with Contents and Metadata read.
 
+Each git host token shows when it expires, as its host reports it (`GET /api/v1/secrets/status`, asked
+at most every few hours). From two weeks before, and once a host refuses a token (expired, revoked, or
+without access), admins see a notice in the app with **Update token**, which opens its row here. Adding
+repositories with a refused token says so instead of asking for one, and an indexing run that could not
+fetch for that reason says it indexed the code fetched before, with the same button.
+
 ## Audit log
 
 Admins see who changed what under Activity → Changes, newest first: sign-ins and sign-outs, joining,

@@ -29,7 +29,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Outcome } from "@/components/notice";
 import { ConfirmButton } from "@/components/confirm";
-import { ago, bytes, compact, date } from "@/lib/utils";
+import { ago, bytes, compact, date, sentence } from "@/lib/utils";
 import { useAbort } from "@/lib/abort";
 import { useAccess } from "@/lib/me";
 import { ApiError, api, type NeedsToken, pickFolder, type PromptTaskName, type ScanHit, type TeamSettings } from "@/lib/api";
@@ -403,10 +403,11 @@ function IndexPanel({ unlisted }: { unlisted: string[] }) {
 /** Pick repositories from a GitHub organisation or GitLab group; comindly clones them itself. */
 function OrgDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const qc = useQueryClient();
-  const { server } = useAccess();
+  const { server, admin } = useAccess();
   const team = useQuery({ queryKey: ["team"], queryFn: api.team, retry: false });
   const hasTeam = team.data?.version != null;
   const [url, setUrl] = useState("");
+  const [refused, setRefused] = useState<{ host: string; message: string } | null>(null);
   const [username, setUsername] = useState("");
   const [token, setToken] = useState("");
   const [asked, setAsked] = useState<NeedsToken | null>(null);
@@ -418,9 +419,16 @@ function OrgDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bo
   const list = useMutation({
     mutationFn: () => api.remoteRepos(url, asked && token.trim() ? { username, token } : undefined, abort.next()),
     meta: { inline: true, quiet: true },
-    onSuccess: (r) => (setAsked(null), setChecked(new Set(r.repos.filter((x) => !x.archived && !x.listed).map((x) => x.clone_url)))),
+    onSuccess: (r) => (setAsked(null), setRefused(null), setChecked(new Set(r.repos.filter((x) => !x.archived && !x.listed).map((x) => x.clone_url)))),
     onError: (e) => {
-      const need = e instanceof ApiError && e.body.code === "needs_token" ? (e.body as unknown as NeedsToken) : undefined;
+      const code = e instanceof ApiError ? e.body.code : undefined;
+      // On a server a stored token that was refused is replaced in Integrations; locally it is asked for again.
+      if (code === "token_refused" && server) {
+        const body = (e as ApiError).body as unknown as NeedsToken;
+        setRefused({ host: body.host, message: (e as ApiError).message });
+        return;
+      }
+      const need = code === "needs_token" || code === "token_refused" ? ((e as ApiError).body as unknown as NeedsToken) : undefined;
       if (need) (setAsked(need), setUsername((u) => u || need.username));
     },
   });
@@ -456,7 +464,7 @@ function OrgDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bo
           <Input
             id="org-url"
             value={url}
-            onChange={(e) => (setUrl(e.target.value), setAsked(null))}
+            onChange={(e) => (setUrl(e.target.value), setAsked(null), setRefused(null))}
             onKeyDown={(e) => e.key === "Enter" && url.trim() && list.mutate()}
             placeholder="github.com/acme or github.com/acme/orders"
             spellCheck={false}
@@ -493,7 +501,19 @@ function OrgDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bo
             </div>
           </div>
         )}
-        {!asked && (
+        {refused && (
+          <div className="mt-3 flex flex-col gap-2 rounded-md bg-muted p-3 text-sm" role="alert">
+            <p>{sentence(refused.message.replace(/;\s*update it under Settings → Integrations\.?$/, "."))}</p>
+            {admin ? (
+              <Button asChild size="sm" variant="outline" className="w-fit bg-card">
+                <Link to={`/settings/integrations#secret-git:${refused.host}`}>Update token</Link>
+              </Button>
+            ) : (
+              <p className="text-xs text-muted-foreground">Ask an admin to update the {refused.host} token in Settings → Integrations.</p>
+            )}
+          </div>
+        )}
+        {!asked && !refused && (
           <div className="mt-2">
             <Message error={list.error} />
           </div>

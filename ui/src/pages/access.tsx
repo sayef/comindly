@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ShieldCheck } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ConfirmButton } from "@/components/confirm";
 import { Outcome } from "@/components/notice";
 import { Reveal } from "@/components/reveal";
@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, Td, Th, Tr } from "@/components/ui/table";
-import { api, type Member, type Role, type SecretState } from "@/lib/api";
+import { api, type Member, type Role, type SecretState, type TokenStatus } from "@/lib/api";
 import { date } from "@/lib/utils";
 import { PageHeader } from "@/components/page-header";
 import { ActivityTabs } from "@/pages/activity";
@@ -437,17 +437,28 @@ export function MembersPage() {
   );
 }
 
-function SecretRow({ s, canStore }: { s: SecretState; canStore: boolean }) {
+/** How a git host sees the token: expired, refused, expiring soon, or when it expires. */
+function TokenHealth({ t }: { t?: TokenStatus }) {
+  if (!t) return null;
+  if (t.expired) return <Badge variant="warning">expired</Badge>;
+  if (t.refused) return <Badge variant="warning" title="Revoked, or without access to the repositories">refused by {t.host}</Badge>;
+  if (t.expires && t.days_left != null && t.days_left <= 14)
+    return <Badge variant="warning">expires in {t.days_left === 1 ? "1 day" : `${t.days_left} days`}</Badge>;
+  if (t.expires) return <span className="text-xs text-muted-foreground">expires {date(t.expires)}</span>;
+  return null;
+}
+
+function SecretRow({ s, canStore, status }: { s: SecretState; canStore: boolean; status?: TokenStatus }) {
   const qc = useQueryClient();
   const [value, setValue] = useState("");
   const save = useMutation({
     mutationFn: (v: string) => api.setSecret(s.name, v),
     meta: { inline: true },
-    onSuccess: () => (setValue(""), qc.invalidateQueries({ queryKey: ["secrets"] })),
+    onSuccess: () => (setValue(""), qc.invalidateQueries({ queryKey: ["secrets"] }), qc.invalidateQueries({ queryKey: ["token-status"] })),
   });
   const removing = save.isPending && save.variables === "";
   return (
-    <div className="flex flex-col gap-2 border-b py-3 last:border-0">
+    <div id={`secret-${s.name}`} className="flex scroll-mt-24 flex-col gap-2 border-b py-3 last:border-0 target:rounded-md target:bg-muted/50">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-sm font-semibold">{s.label}</span>
         {s.source === "deployment" && <Badge variant="outline">From the deployment</Badge>}
@@ -457,6 +468,7 @@ function SecretRow({ s, canStore }: { s: SecretState; canStore: boolean }) {
           </Badge>
         )}
         {s.source === "none" && <span className="text-xs text-muted-foreground">Not set</span>}
+        <TokenHealth t={status} />
         {s.source === "stored" && (
           <span className="text-xs text-muted-foreground">
             by {s.updated_by}, {date(s.updated)}
@@ -513,6 +525,11 @@ function SecretRow({ s, canStore }: { s: SecretState; canStore: boolean }) {
 
 export function IntegrationsPage() {
   const list = useQuery({ queryKey: ["secrets"], queryFn: api.secrets });
+  const status = useQuery({ queryKey: ["token-status"], queryFn: api.tokenStatus, staleTime: 60 * 60_000 });
+  // Opened from an "Update token" button: bring that row into view.
+  useEffect(() => {
+    if (list.data && window.location.hash) document.getElementById(decodeURIComponent(window.location.hash.slice(1)))?.scrollIntoView({ block: "center" });
+  }, [list.data]);
   const [host, setHost] = useState("");
   const [extra, setExtra] = useState<string[]>([]);
   if (!list.data) return <Skeleton className="h-96 rounded-lg" />;
@@ -543,7 +560,7 @@ export function IntegrationsPage() {
         )}
         <div>
           {rows.map((s) => (
-            <SecretRow key={s.name} s={s} canStore={list.data.can_store} />
+            <SecretRow key={s.name} s={s} canStore={list.data.can_store} status={status.data?.find((t) => t.name === s.name)} />
           ))}
         </div>
         {list.data.can_store && (

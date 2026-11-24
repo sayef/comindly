@@ -29,6 +29,7 @@ import { Activity } from "@/components/activity";
 import { CommandPalette } from "@/components/command-palette";
 import { useTheme } from "@/components/theme";
 import { TeamPicker } from "@/components/team-picker";
+import { TokenNotice } from "@/components/token-notice";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
@@ -305,6 +306,7 @@ export function Layout() {
         </header>
         <main id="main" tabIndex={-1} className="relative min-h-0 flex-1 overflow-y-auto focus-visible:outline-none">
           <div className="mx-auto w-full min-w-0 max-w-[1400px] px-4 py-7 md:px-7">
+            <TokenNotice />
             <Outlet />
           </div>
         </main>

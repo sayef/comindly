@@ -24,16 +24,29 @@ pub struct Auth {
     pub token: String,
 }
 
-/// Returned when an HTTPS remote needs a token that neither git's credential helper nor the environment has.
+/// Returned when an HTTPS remote needs a token that neither git's credential helper nor the
+/// environment has (`refused` false), or refused the one it was given.
 #[derive(Debug)]
 pub struct NeedsToken {
     pub host: String,
     pub username: String,
+    /// A token was sent and the host refused it.
+    pub refused: bool,
+    /// The host said the token has expired.
+    pub expired: bool,
 }
 
 impl std::fmt::Display for NeedsToken {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} needs an access token", self.host)
+        let host = &self.host;
+        match (self.refused, self.expired) {
+            (_, true) => write!(f, "the {host} token has expired; update it under Settings → Integrations"),
+            (true, false) => write!(
+                f,
+                "the {host} token was refused (expired, revoked, or no access here); update it under Settings → Integrations"
+            ),
+            _ => write!(f, "{host} needs an access token"),
+        }
     }
 }
 
@@ -270,7 +283,18 @@ pub fn prepare(cache: &Path, repo: &Path, creds: &dyn Credentials) -> Result<Che
             &["fetch", "--quiet", "origin", &branch],
             auth.as_ref(),
         ) {
-            let why = format!("{e:#}");
+            let mut why = format!("{e:#}");
+            // A refused token says so plainly instead of git's credential noise.
+            let remote = git(repo, &["remote", "get-url", "origin"]).unwrap_or_default();
+            if let Some(host) = https_host(remote.trim()).filter(|_| auth_failed(&why)) {
+                why = NeedsToken {
+                    username: token_user(&host).into(),
+                    host,
+                    refused: auth.is_some(),
+                    expired: false,
+                }
+                .to_string();
+            }
             git(repo, &["rev-parse", "--verify", "--quiet", &target])
                 .map_err(|_| e.context("and no earlier fetch to fall back to"))?;
             stale = Some(why);
@@ -365,7 +389,14 @@ pub fn ensure_clone(url: &str, dest: &Path, creds: &dyn Credentials) -> Result<(
         let _ = std::fs::remove_dir_all(dest);
         if let Some(host) = https_host(url).filter(|_| auth_failed(&format!("{e:#}"))) {
             let username = token_user(&host).into();
-            return Err(NeedsToken { host, username }.into());
+            let refused = auth.is_some();
+            return Err(NeedsToken {
+                host,
+                username,
+                refused,
+                expired: false,
+            }
+            .into());
         }
         return Err(e);
     }
@@ -418,6 +449,23 @@ fn credential(action: &str, input: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_refused_token_says_why_and_where_to_fix_it() {
+        let need = |refused, expired| {
+            NeedsToken {
+                host: "gitlab.com".into(),
+                username: "oauth2".into(),
+                refused,
+                expired,
+            }
+            .to_string()
+        };
+        assert_eq!(need(false, false), "gitlab.com needs an access token");
+        assert!(need(true, false).starts_with("the gitlab.com token was refused"));
+        assert!(need(true, true).starts_with("the gitlab.com token has expired"));
+        assert!(need(true, true).contains("Settings → Integrations"));
+    }
 
     #[test]
     fn hosts_and_token_users() {

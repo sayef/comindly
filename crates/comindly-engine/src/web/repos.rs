@@ -648,7 +648,12 @@ pub(super) async fn remote_list(
         .map_err(|e| match e.downcast_ref::<worktree::NeedsToken>() {
             Some(n) => {
                 let error = api::ErrorDetail {
-                    code: "needs_token".into(),
+                    code: if n.refused {
+                        "token_refused"
+                    } else {
+                        "needs_token"
+                    }
+                    .into(),
                     message: e.to_string(),
                     host: Some(n.host.clone()),
                     username: Some(n.username.clone()),
