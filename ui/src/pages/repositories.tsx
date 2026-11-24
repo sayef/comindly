@@ -503,9 +503,9 @@ function OrgDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bo
         )}
         {refused && (
           <div className="mt-3 flex flex-col gap-2 rounded-md bg-muted p-3 text-sm" role="alert">
-            <p>{sentence(refused.message)}</p>
+            <p>{sentence(refused.message.replace(/;\s*update it under Settings → Integrations\.?$/, "."))}</p>
             {admin ? (
-              <Button asChild size="sm" variant="outline" className="w-fit">
+              <Button asChild size="sm" variant="outline" className="w-fit bg-card">
                 <Link to={`/settings/integrations#secret-git:${refused.host}`}>Update token</Link>
               </Button>
             ) : (
