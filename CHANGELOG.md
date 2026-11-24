@@ -6,7 +6,51 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-## [0.5.0-beta.27](https://github.com/sayef/comindly/compare/v0.5.0-beta.26...v0.5.0-beta.27) - 2026-11-24
+## [0.5.0](https://github.com/sayef/comindly/compare/v0.5.0-beta.26...v0.5.0) - 2026-11-25
+
+The first stable release of 0.5: a small command line over an engine that runs on your machine or as a
+team server, a ledger that keeps up with the code, shared working notes for agents, and one-command setup
+for the agents people use. The detailed changes are in the 0.5.0 betas below.
+
+### Highlights
+
+- **Two programs.** `comindly` is a small command line; `comindly-engine` holds the index and serves the
+  app, the API and MCP. `comindly use` switches between the engine on your machine and a team server,
+  `comindly update` keeps both current, and `install.sh` installs the command line on macOS and Linux.
+- **Agents set up in one command.** `comindly init-agents --install` installs comindly as a plugin in
+  Claude Code, Codex, Cursor and Gemini CLI: the MCP tools, a skill with the full playbook, and hooks that
+  show what the team recorded before a file is edited. The plugins follow the profile in use and never
+  name a server.
+- **Discussions.** Shared working notes on a task while it is under way: the plan, each choice, what
+  changed after review, open questions. `why` and `preflight` list the open ones on the code they cover;
+  they close when their pull or merge request lands, after a quiet period, or by hand. Records can cite the
+  discussion they came from.
+- **A ledger that keeps up.** Records stay active when their code changes and say what changed; a person's
+  or an agent's confirmation vouches for the code as it is now; likely repeats wait for a look; every record
+  and review carries a reason. Evidence such as `mr:!123` is followed to where it landed.
+- **Team servers.** Sign-in through your identity provider, by email or with a code approved on any device
+  (also from a machine without a browser), roles and teams, service accounts for CI and shared tools with
+  tokens limited to the addresses they come from, and admins who can revoke any token that leaked. Git host
+  tokens show when they expire, and the app warns before one does.
+- **Models and prompts.** The LLM setup, a model per task and versioned prompts in Settings, with structured
+  output and a per-step choice of which LLM steps an index run takes.
+
+### Upgrading from 0.4
+
+- Install the command line again with `install.sh` (later, `comindly update`). The engine is a program of its
+  own now; the command line fetches it when it is first needed.
+- `comindly server` is now `comindly-engine` with `COMINDLY_PUBLIC_URL`; `comindly join` is `comindly use`.
+- Indexes and ledgers written by 0.4 are read as they are; nothing needs to be indexed again.
+
+### Added
+
+- Git host tokens show their expiry under Settings → Integrations, and admins see a notice in the app when one has expired, is refused, or expires within two weeks. When the host refuses a token, the Repositories page, the activity log and indexing errors say so and link to where it is updated.
+
+### Changed
+
+- Dependencies updated, among them `url` 2.5.9 for RUSTSEC-2026-0592. Embeddings are unchanged, so existing indexes stay valid.
+- Releases are published as soon as the Linux builds are ready; the macOS archives join the release when they are built.
+- When fetching a repository fails during indexing, the run says it used the last fetch and why.
 
 ## [0.5.0-beta.26](https://github.com/sayef/comindly/compare/v0.5.0-beta.25...v0.5.0-beta.26) - 2026-11-20
 
