@@ -69,6 +69,11 @@ if (mode === "server") {
   }
   await evaluate(post("/api/v1/members/invite", { email: "kim@acme.example", role: "member" }));
   await evaluate(post("/api/v1/tokens", { name: "Claude Code on my laptop" }));
+  // A service account for CI, with a token that only works from the build network.
+  await evaluate(post("/api/v1/members/service", { name: "Build Bot", role: "member" }));
+  await evaluate(
+    post("/api/v1/members/service/token", { name: "build-bot", token_name: "ci runner", expires_in_days: 90, allowed: ["203.0.113.0/24"] }),
+  );
   for (const theme of ["light", "dark"]) {
     await evaluate(`localStorage.setItem("comindly.theme", "${theme}")`);
     const suffix = theme === "dark" ? "-dark" : "";

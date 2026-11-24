@@ -1,6 +1,7 @@
 # Comindly Ledger — design plan
 
-> Status: **plan, not implemented**. Date: 2026-10-13. Sequencing: [roadmap.md](roadmap.md) (Track B).
+> Status: the original design, from 2026-10-13, kept for its reasoning. The ledger is built; how it
+> works today is in [The ledger](../guides/ledger.md).
 > Decision 2026-10-16: no automatic sources. Git harvest and the MR distiller were removed; records
 > come from people (`comindly remember`) and agents (MCP, hooks). Sections on harvest and the distiller
 > are historical.

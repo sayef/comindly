@@ -113,6 +113,34 @@
   </section>
 
   <section class="cm-section">
+    <div class="cm-wrap cm-split">
+      <div>
+        <p class="cm-label cm-label--accent">For the whole team</p>
+        <h2>Where your agents already work.</h2>
+        <p class="cm-sub">One command installs comindly as a plugin in Claude Code, Codex, Cursor and Gemini CLI: the
+          tools, a guide on when to use them, and hooks that show what the team recorded before a file is edited.</p>
+        <ul class="cm-list">
+          <li><code>discussion</code> shared working notes while a task is under way, closed when its merge request lands</li>
+          <li><code>service accounts</code> for CI and shared tools, with tokens limited to the addresses they come from</li>
+          <li><code>comindly use</code> signs in with a code you approve in the browser, also from a machine without one</li>
+        </ul>
+      </div>
+      <div class="cm-code">
+        <div class="cm-code__bar"><span></span><span></span><span></span><em>terminal</em></div>
+<pre><code><span class="c">#</span> <span class="m">set up every agent on this machine</span>
+<span class="k">comindly</span> init-agents --install --yes
+<span class="m">✓ claude: plugin installed</span>
+<span class="m">✓ codex: plugin installed</span>
+<span class="m">✓ cursor: plugin installed</span>
+<span class="m">✓ gemini: plugin installed</span>
+
+<span class="c">#</span> <span class="m">later</span>
+<span class="k">comindly</span> update<span class="cm-caret"></span></code></pre>
+      </div>
+    </div>
+  </section>
+
+  <section class="cm-section">
     <div class="cm-wrap cm-faq">
       <h2>Questions answered</h2>
       <details>
