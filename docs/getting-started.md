@@ -30,8 +30,9 @@ comindly --version
 
 This installs the command line. The first command that needs the engine downloads it, of the same
 version, and puts it beside `comindly` (`comindly engine install` does that now). For an offline
-machine or CI, install both at once with `COMINDLY_ENGINE=1`; `COMINDLY_VERSION=v0.5.0-beta.7` picks a
-version (betas are pre-releases, so the default is the latest stable one):
+machine or CI, install both at once with `COMINDLY_ENGINE=1`; `COMINDLY_VERSION=v0.5.0` picks a version
+(the default is the latest release; pre-releases only when named). Later, `comindly update` moves both
+to the newest release:
 
 ```sh
 curl -LsSf https://raw.githubusercontent.com/sayef/comindly/main/scripts/install.sh | COMINDLY_ENGINE=1 sh

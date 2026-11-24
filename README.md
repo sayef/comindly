@@ -58,9 +58,9 @@ offline machines and CI. `comindly update` moves to the newest release later. Or
 ## Try it
 
 ```sh
-comindly link ../orders ../payments ../shared-lib      # index your repositories
-comindly init-agents --install --yes                   # connect Claude Code, Gemini CLI, Cursor, Codex
-comindly app                                            # or look around in the app
+comindly link ../orders ../payments ../shared-lib   # index your repositories
+comindly init-agents --install --yes                # connect Claude Code, Codex, Cursor, Gemini CLI
+comindly app                                        # or look around in the app
 ```
 
 Then ask your agent, for example: "What breaks in other services if I change `place_order`?"
@@ -70,9 +70,10 @@ LLM summaries and flow walkthroughs are optional and use `OPENAI_API_KEY` or any
 ## For a team
 
 One container runs the engine as a team server: the index, the app and MCP for a whole team, with
-sign-in through your identity provider or by email, roles, and teams. The index lives in a folder or a
-bucket (S3, Google Cloud Storage, Azure). Developers point their command line at it with
-`comindly use https://comindly.example.com acme`. See
+sign-in through your identity provider or by email, roles, teams, and service accounts for CI and
+shared tools. The index lives in a folder or a bucket (S3, Google Cloud Storage, Azure). Developers
+point their command line at it with `comindly use https://comindly.example.com acme`, which signs in
+with a code they approve in the browser, also from a machine without one. See
 [Self-hosting](https://comindly.pages.dev/guides/self-hosting/).
 
 ## Learn more

@@ -121,7 +121,6 @@ nav:
       - MCP tools: reference/mcp.md
   - Architecture: architecture.md
   - Design:
-      - Roadmap: design/roadmap.md
       - Ledger design: design/ledger.md
   - About:
       - FAQ: faq.md
