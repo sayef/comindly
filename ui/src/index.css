@@ -1,4 +1,7 @@
+/* xyflow ships its styles in a layer; keep it above Tailwind's reset and below utilities. */
+@layer theme, base, xyflow, components, utilities;
 @import "tailwindcss";
+@import "@xyflow/react/dist/style.css";
 @import "@fontsource-variable/atkinson-hyperlegible-next";
 @import "@fontsource-variable/atkinson-hyperlegible-mono";
 
