@@ -120,8 +120,6 @@ nav:
       - Command line: reference/cli.md
       - MCP tools: reference/mcp.md
   - Architecture: architecture.md
-  - Design:
-      - Ledger design: design/ledger.md
   - About:
       - FAQ: faq.md
       - Changelog: changelog.md

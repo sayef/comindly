@@ -1,116 +1,113 @@
-# comindly — Rust Architecture
+# Architecture
 
-> Polyglot, cross-repo code-intelligence engine: an async engine with an MCP endpoint for agents
-> (`comindly-engine`), and a thin CLI that talks to it (`comindly`).
-> Read-heavy / write-rare: the index is a **versioned artifact in your storage**, not a live shared DB.
+comindly has two programs. `comindly-engine` holds the index and serves it: the web app, `/api/v1`
+and MCP for agents. `comindly` is a small command line that talks to an engine, either the one it starts
+on this machine or a team's server.
 
-## Decisions (locked)
+An index is built from the code and written as a new version to a folder or a bucket. It changes when
+the code does, and is read far more often than it is written, so comindly keeps it as versioned files
+rather than a database that many people write to at once.
 
-| Question | Decision |
-|---|---|
-| Language scope | **Polyglot from day 1** via tree-sitter grammars. Infra langs low priority. |
-| Rewrite | **Full Rust rewrite.** LLM enrichment stays, via Rig (provider-agnostic). |
-| Cross-repo graph | **Core launch requirement** — federated symbol identity from day 1. |
-| Embeddings | **Local model in CI** (Model2Vec). No source leaves org infra. |
-| Storage | A folder or bucket (S3, Google Cloud Storage, Azure), read with the platform's own credentials. |
+## How an index is built and read
 
-## The core reframe
-
-The index only changes on push-to-master. So we do **not** run a concurrent
-read/write database. Instead:
-
-```
-                    ┌──────────────────────────── CI on push to master ─────────────────────────┐
-  repo A push ─────▶│ comindly index → Lance tables {symbols, edges, embeddings, chunks}          │
-                    │              → write to  s3://comindly/<repo>/<commit>/                       │
-                    │ link-resolver: merge stack-graphs across ALL repos → cross-repo edges       │
-                    │              → s3://comindly/_graph/<ts>/  → atomically bump "latest" pointer  │
-                    └───────────────────────────────────────────────────────────────────────────┘
-                                                     │
-   each dev's engine ─────────▶ watch "latest" ──▶ pull delta ──▶ build in-mem petgraph ──▶ serve locally
+```mermaid
+flowchart TD
+    repos["Repositories<br/>default branch"] --> job["Indexing job<br/>parse with tree-sitter and SCIP,<br/>bind across repositories"]
+    job --> store[("Index version<br/>folder or bucket")]
+    job -. optional .-> extra["Embeddings, summaries,<br/>style guides, walkthroughs"]
+    extra -.-> store
+    store --> engine["comindly-engine<br/>graph in memory"]
+    engine --> mcp["Agents over MCP"]
+    engine --> app["Web app"]
+    engine --> cli["comindly<br/>command line"]
 ```
 
-Lance gives atomic versioning + cheap deltas for free. Consumers are stateless
-read-replicas. This dissolves DuckDB's single-writer pain and the shared-DB problem.
+- **Building.** An indexing job checks out each repository at its default branch, parses every file,
+  and binds references to definitions within and across repositories. A job runs when someone asks
+  for it (`comindly link`, the app), when a server's automatic re-index sees new commits, or in CI.
+- **Storing.** Each run writes a new version of the Lance tables (`symbols`, `edges`, `file_facts`,
+  `search`, `enrichment`, `flows`, `style_guide`, `repo_meta`). Readers always see a complete version;
+  earlier ones stay readable. Embeddings and LLM output are reused for code that did not change.
+- **Reading.** The engine loads the newest version and builds the symbol graph in memory with
+  `petgraph`. A whole organisation's graph fits in memory, so traversals need no graph database.
+- **The team's knowledge.** The ledger (`_ledger`), discussions (`_discussions`) and conventions sit
+  beside the index in the same location, so whoever can read the index sees them too.
 
-## Retrieval stance (research-informed — see landscape below)
+## Symbol identity
 
-The frontier is **de-emphasizing vector search for agents** (Anthropic removed it from
-Claude Code; Cody replaced embeddings with SCIP). So our backbone is **deterministic**,
-not fuzzy. Vectors are an *optional fallback* for NL "where is the code that does X",
-never the primary path.
+Every symbol has a global id in the SCIP scheme:
 
-Retrieval modes, in priority order:
-1. **Exact** — symbol/FTS lookup (deterministic, like grep/SCIP).
-2. **Structural** — graph traversal: `ripple` (blast radius), `thread` (exec trace), `zoom`.
-3. **Ranked** — personalized PageRank over the symbol graph (Aider-style) to pack the
-   **minimal token-budgeted context**, seeded by the agent's current focus.
-4. **Semantic** — vector similarity, *optional*, only when 1–3 miss.
-
-## Storage split (do NOT put the graph in a vector DB)
-
-| Concern | Store |
-|---|---|
-| Nodes + edges + FTS payload (the backbone) | **Lance/Parquet tables in S3, versioned** |
-| Multi-hop traversal (`ripple`, `thread`, `zoom`) + PageRank ranking | **In-memory `petgraph`**, built from edge tables |
-| Embeddings + code chunks (*optional* semantic fallback) | **Lance dataset in S3, versioned** |
-
-Lance earns its place as the **versioned, S3-backed columnar artifact store** — that is
-its real value here, independent of whether we lean on embeddings. The whole org symbol
-graph (40+ repos) is low-millions of edges — fits in RAM; BFS blast-radius is microseconds.
-No graph database needed. (KuzuDB is the fallback only if the in-mem graph stops fitting.)
-
-## Federated symbol identity (the differentiator)
-
-Global symbol ID follows the **SCIP** scheme so identity is stable and unique across repos:
-
-```
-<scheme> <package-manager> <package-name> <version> <descriptor>
-e.g.  scip-python  pip  acme  1.4.0  `acme/foo`/bar().
+```text
+<scheme> <package manager> <package> <version> <descriptor>
+comindly-treesitter . billing-api . billing/invoices/create_invoice().
 ```
 
-- Each repo indexes locally → emits symbols + intra-repo edges + unresolved references.
-- The **link-resolver** binds cross-repo references by SCIP id: an unresolved reference in
-  `service-a` (`from acme.foo import bar`) binds to the *definition* symbol in
-  `pkg-common`, producing a **cross-repo edge** (`cross_repo = true`).
-- `ripple(pkg-common::X)` then answers *"who across the org breaks if I change this?"*
-  — the query no per-repo tool gives you.
+A reference in one repository (`from shared_lib.money import round_cents`) binds to the definition in
+another through this id, which gives a cross-repository edge. `ripple` follows those edges backwards to
+answer which code in other repositories is affected by a change.
 
-**Resolver strategy — tree-sitter-first, SCIP-optional:**
-- **Default:** tree-sitter `tags.scm` extraction → fast, universal, *syntactic* symbol/ref
-  graph for every language. No per-language toolchain. Good enough for
-  ranking + most navigation.
-- **Precision upgrade:** ingest **SCIP indexes** where a team already emits them
-  (`scip-typescript`, `scip-python`, `rust-analyzer`, `scip-java`) for *semantic* accuracy.
-- **Note:** GitHub's `stack-graphs` (which I initially proposed) was **archived Sept 2025**.
-  It remains usable as an optional resolver but is unmaintained — SCIP is the safe backbone.
+Symbols come from tree-sitter for every supported language, with no compiler or build needed. Where a
+repository has a SCIP index (`scip-typescript`, `scip-python`, `rust-analyzer`, `scip-java`), its
+compiler-grade answers are used as well. When a name cannot be bound, the edge is left out rather than
+guessed.
+
+## Retrieval
+
+Answers come from the graph first; vectors only help when a question is phrased in words rather than
+names.
+
+1. **Exact.** Lookups by name or path, and full-text search.
+2. **Structural.** Graph traversal: `ripple` (what depends on a symbol), `thread` (what it calls),
+   `zoom` (one symbol with its callers, callees and contracts).
+3. **Ranked.** `context_pack` ranks symbols by personalized PageRank from the symbols an agent is
+   working on, and packs the most relevant code into a token budget.
+4. **Semantic.** Embeddings from a local Model2Vec model, combined with full-text search, for questions
+   like "where is the code that retries payments". No code leaves the machine for this.
+
+LLM steps (summaries, flow walkthroughs, style guides) are optional and go through any OpenAI-compatible
+endpoint.
 
 ## Layers
 
-comindly is five crates in one cargo workspace. Each depends only on those below it, and the compiler
+comindly is five crates in one cargo workspace. Each depends only on the ones below it, and the compiler
 enforces the boundaries.
 
+```mermaid
+flowchart TD
+    cli["<b>comindly</b><br/>the command line"]
+    engine["<b>comindly-engine</b><br/>HTTP, MCP, sign-in, jobs"]
+    core["<b>comindly-core</b><br/>the engine as an async library"]
+    ui["<b>comindly-ui</b><br/>the web app, embedded"]
+    api["<b>comindly-api</b><br/>requests and answers of /api/v1"]
+    cli ---> api
+    engine --> core
+    engine --> ui
+    engine --> api
+    core --> api
 ```
-  comindly            the command line: profiles (`comindly use`), the local engine started on
-                      demand, and every command as a call to an engine's `/api/v1`; MCP over stdio
-                      and the agent hooks forwarded to the engine. Never opens an index itself.
-        │
-        │           comindly-engine     axum: `/api/v1`, MCP over HTTP, the web app, sign-in and
-        │                               roles, jobs, the backends; this machine's preferences,
-        │                               credentials and checks; the `comindly-engine` binary and the
-        │                               macOS window.
-        │                 │         ╲
-        │           comindly-core     comindly-ui
-        │           the engine as an  the web app (React, in `ui/`), built and embedded
-        │           async library
-        │                 │
-  comindly-api        the requests and answers of `/api/v1`, and a typed client (feature `client`)
-```
+
+- **comindly**: profiles (`comindly use`), the local engine started on demand, and every command as a
+  call to an engine's `/api/v1`; MCP over stdio and the agent hooks forwarded to the engine. It never
+  opens an index itself.
+- **comindly-engine**: axum with `/api/v1`, MCP over HTTP, the web app, sign-in and roles, jobs and the
+  backends; this machine's preferences, credentials and checks; the macOS window.
+- **comindly-core**: parsing, binding, the index, queries, the ledger and the indexing pipeline.
+- **comindly-ui**: the web app (React, in `ui/`), built and embedded in the engine.
+- **comindly-api**: the request and answer types, and a typed client (feature `client`).
 
 One `comindly-engine` binary serves both ways: without `COMINDLY_PUBLIC_URL` it is the local engine on
 127.0.0.1 (port 7879, or a free port), with a local token and no sign-in; with it, the team server on
 0.0.0.0:7878 with sign-in and roles. A local engine writes its address, pid and version to
 `engine.json` in the config folder, where the command line finds it.
+
+```mermaid
+flowchart TD
+    agent["Agent"] --> cli["comindly"]
+    cli -- "on this machine" --> local["Local engine<br/>127.0.0.1, no sign-in"]
+    cli -- "comindly use &lt;url&gt;" --> server["Team server<br/>sign-in and roles"]
+    local --> idx1[("Index<br/>folder or bucket")]
+    server --> idx2[("Index<br/>folder or bucket")]
+```
 
 `comindly-core` reads no environment, no files of its own and no process-wide state, and prints
 nothing: everything a call needs is passed in. `comindly-engine` re-exports core, so
@@ -275,46 +272,3 @@ each readable only by its owner.
   exporter sits behind the `otel` cargo feature (on by default) and is configured at startup.
 - Graceful shutdown: on SIGTERM or Ctrl-C, stop accepting requests, let a running job stop at its next
   checkpoint and save its record.
-
-## What 0.4.0 changed
-
-0.4.0 rebuilt comindly as described above, in one release: indexing moved into core as an async,
-cancellable pipeline; one runtime per process; contexts instead of process-wide state; the stores,
-sign-in and mail behind traits; indexing as jobs inside the server; `/api/v1` with one error shape;
-roles; the command line as a client; settings moved to where they belong; and the crates above.
-Deployments keep the same image, environment variables and storage layout; settings an older server
-kept move over on first start, and nothing is re-indexed.
-
-## Competitive landscape
-
-Mid-2026 the field split three ways:
-
-| Camp | Who | Strength | Weakness we exploit |
-|---|---|---|---|
-| Agentic grep / JIT | Claude Code, Cody (post-pivot) | Always fresh, simple | No cross-file/cross-repo structure, no blast radius |
-| Semantic / vector | Cursor, Augment | Fuzzy recall | **Staleness**, noise; frontier de-emphasizing it |
-| Deterministic graph | GitHub stack-graphs, Meta Glean, Sourcegraph SCIP | Precise, cross-repo | Heavy per-lang indexers, SaaS/enterprise, not agent-native |
-
-Key signals: Anthropic removed vector search from Claude Code ("outperformed everything, by
-a lot"); Cody replaced embeddings with SCIP; `stack-graphs` archived Sept 2025; Aider's
-personalized-PageRank repomap sets the bar for token-efficient context; the winning metric
-is **task-success-per-token** ("agents burn 10x the tokens they need").
-
-**Our five differentiators:**
-1. **Deterministic cross-repo graph** (SCIP identity) — precise like Glean, but self-hosted.
-2. **Zero-staleness team index** — push-to-master → versioned S3 → everyone shares one fresh index. Solves the problem that killed embeddings, at *team* scale.
-3. **Cross-repo `ripple`** — org-wide blast radius; grep and per-repo tools can't answer it.
-4. **Ranked, token-budgeted context packs over MCP** — Aider's insight, org-wide, delivered as *the minimal correct context to change safely*, not a search dump.
-5. **Tree-sitter-first, SCIP-optional** — universal + fast by default, precise where it counts.
-
-One-liner: *Deterministic, always-fresh, cross-repo code intelligence that hands your agent
-the minimal correct context — self-hosted.*
-
-Sources: [Sourcegraph — Agentic Coding in 2026](https://sourcegraph.com/blog/agentic-coding) ·
-[AI agents don't need vector search anymore](https://buzzgrewal.medium.com/ai-agents-dont-need-vector-search-anymore-inside-the-agentic-search-stack-replacing-rag-in-2026-58efcabe4f6f) ·
-[Code Intelligence Tools Compared](https://rywalker.com/research/code-intelligence-tools) ·
-[Aider repomap](https://aider.chat/docs/repomap.html) ·
-[SCIP announcement](https://sourcegraph.com/blog/announcing-scip) ·
-[Stack graphs paper](https://arxiv.org/pdf/2211.01224) ·
-[Cross-repository code navigation](https://sourcegraph.com/blog/cross-repository-code-navigation) ·
-[AI assistants don't understand your code: LSP/SCIP](https://machinesdoitbetter.ai/ai-coding-assistants-dont-understand-your-code-lsp-scip-and-real-code-intelligence-2/)

@@ -1,12 +1,37 @@
-/* The landing page: always dark, full width, the docs chrome kept quiet. */
-.cm-home {
+/* The landing page: full width, the docs chrome kept quiet, light or dark with the rest of the site. */
+body:has(.cm-home) {
+  --ink: 242, 242, 242;
+  --paper: 11, 11, 12;
+  --glow: 141, 180, 234;
+  --glow-2: 201, 215, 234;
   --night: #0b0b0c;
   --night-2: #131315;
-  --line: rgba(242, 242, 242, 0.08);
+  --footer: #070708;
   --text: #f2f2f2;
-  --muted: rgba(242, 242, 242, 0.66);
+  --muted: rgba(var(--ink), 0.66);
   --accent: #8db4ea;
   --highlight: #c9d7ea;
+  --string: #93c5fd;
+  background: var(--night);
+}
+
+body[data-md-color-scheme="default"]:has(.cm-home) {
+  --ink: 20, 24, 31;
+  --paper: 248, 249, 251;
+  --glow: 59, 111, 182;
+  --glow-2: 120, 150, 196;
+  --night: #f8f9fb;
+  --night-2: #ffffff;
+  --footer: #eef1f5;
+  --text: #14181f;
+  --muted: rgba(20, 24, 31, 0.68);
+  --accent: #3b6fb6;
+  --highlight: #2c4f80;
+  --string: #2f6cb3;
+}
+
+.cm-home {
+  --line: rgba(var(--ink), 0.08);
   --mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
   background: var(--night);
@@ -15,44 +40,50 @@
   -webkit-font-smoothing: antialiased;
 }
 
-body:has(.cm-home) {
-  background: #0b0b0c;
-}
-
 body:has(.cm-home) .md-main {
   display: none;
 }
 
 body:has(.cm-home) .md-header,
 body:has(.cm-home) .md-header + .md-container .md-tabs {
-  background: rgba(11, 11, 12, 0.72);
+  background: rgba(var(--paper), 0.72);
   backdrop-filter: blur(12px);
-  color: #f2f2f2;
-  border-bottom: 1px solid rgba(242, 242, 242, 0.08);
+  color: var(--text);
+  border-bottom: 1px solid rgba(var(--ink), 0.08);
 }
 
-body:has(.cm-home) .md-logo img.cm-logo--ink {
+body[data-md-color-scheme="slate"]:has(.cm-home) .md-logo img.cm-logo--ink {
   display: none;
 }
 
-body:has(.cm-home) .md-logo img.cm-logo--paper {
+body[data-md-color-scheme="slate"]:has(.cm-home) .md-logo img.cm-logo--paper {
   display: block;
 }
 
 body:has(.cm-home) .md-search__form {
-  background: rgba(242, 242, 242, 0.06);
-  border-color: rgba(242, 242, 242, 0.1);
+  background: rgba(var(--ink), 0.06);
+  border-color: rgba(var(--ink), 0.1);
 }
 
 body:has(.cm-home) .md-search__input,
 body:has(.cm-home) .md-search__input::placeholder,
 body:has(.cm-home) .md-search__icon[for="__search"] {
-  color: rgba(242, 242, 242, 0.7);
+  color: rgba(var(--ink), 0.7);
 }
 
 body:has(.cm-home) .md-footer {
-  background: #070708;
-  border-top: 1px solid rgba(242, 242, 242, 0.08);
+  background: var(--footer);
+  border-top: 1px solid rgba(var(--ink), 0.08);
+}
+
+/* Screenshots: the light or dark one with the scheme. */
+.cm-shot--dark,
+body[data-md-color-scheme="slate"] .cm-shot--light {
+  display: none !important;
+}
+
+body[data-md-color-scheme="slate"] .cm-shot--dark {
+  display: block !important;
 }
 
 .cm-wrap {
@@ -97,7 +128,7 @@ body:has(.cm-home) .md-footer {
 .cm-home code {
   padding: 0.1em 0.35em;
   border-radius: 0.3rem;
-  background: rgba(242, 242, 242, 0.07);
+  background: rgba(var(--ink), 0.07);
   color: var(--text);
   font-family: var(--mono);
   font-size: 0.85em;
@@ -133,7 +164,7 @@ body:has(.cm-home) .md-footer {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(ellipse 42% 40% at 50% 48%, rgba(11, 11, 12, 0.92), rgba(11, 11, 12, 0.6) 60%, transparent 100%),
+    radial-gradient(ellipse 42% 40% at 50% 48%, rgba(var(--paper), 0.92), rgba(var(--paper), 0.6) 60%, transparent 100%),
     linear-gradient(to bottom, transparent 70%, var(--night));
   pointer-events: none;
 }
@@ -169,7 +200,7 @@ body:has(.cm-home) .md-footer {
   display: inline-flex;
   align-items: center;
   padding: 0.55rem 1.1rem;
-  border: 1px solid rgba(242, 242, 242, 0.22);
+  border: 1px solid rgba(var(--ink), 0.22);
   border-radius: 0.45rem;
   color: var(--text) !important;
   font-size: 0.75rem;
@@ -178,7 +209,7 @@ body:has(.cm-home) .md-footer {
 }
 
 .cm-btn:hover {
-  border-color: rgba(242, 242, 242, 0.5);
+  border-color: rgba(var(--ink), 0.5);
 }
 
 .cm-btn--solid {
@@ -200,7 +231,7 @@ body:has(.cm-home) .md-footer {
   padding: 0.4rem 0.8rem;
   border: 1px solid var(--line);
   border-radius: 0.45rem;
-  background: rgba(11, 11, 12, 0.6);
+  background: rgba(var(--paper), 0.6);
   color: var(--muted);
   max-width: 100%;
   font: 0.68rem var(--mono);
@@ -210,7 +241,7 @@ body:has(.cm-home) .md-footer {
 
 .cm-install:hover {
   color: var(--text);
-  border-color: rgba(242, 242, 242, 0.2);
+  border-color: rgba(var(--ink), 0.2);
 }
 
 .cm-install__prompt {
@@ -220,7 +251,7 @@ body:has(.cm-home) .md-footer {
 .cm-install__hint {
   padding-left: 0.5rem;
   border-left: 1px solid var(--line);
-  color: rgba(242, 242, 242, 0.4);
+  color: rgba(var(--ink), 0.4);
   font-size: 0.6rem;
   text-transform: uppercase;
   letter-spacing: 0.12em;
@@ -237,7 +268,7 @@ body:has(.cm-home) .md-footer {
   padding: 0.5rem;
   border: 1px solid var(--line);
   border-radius: 1rem;
-  background: linear-gradient(180deg, rgba(242, 242, 242, 0.05), rgba(242, 242, 242, 0.01));
+  background: linear-gradient(180deg, rgba(var(--ink), 0.05), rgba(var(--ink), 0.01));
 }
 
 .cm-panel::before {
@@ -245,7 +276,7 @@ body:has(.cm-home) .md-footer {
   position: absolute;
   inset: 10% 5% -6%;
   z-index: -1;
-  background: radial-gradient(closest-side, rgba(141, 180, 234, 0.22), rgba(201, 215, 234, 0.08) 60%, transparent);
+  background: radial-gradient(closest-side, rgba(var(--glow), 0.22), rgba(var(--glow-2), 0.08) 60%, transparent);
   filter: blur(40px);
 }
 
@@ -343,12 +374,12 @@ body:has(.cm-home) .md-footer {
   width: 0.4rem;
   height: 0.4rem;
   border-radius: 50%;
-  background: rgba(242, 242, 242, 0.16);
+  background: rgba(var(--ink), 0.16);
 }
 
 .cm-code__bar em {
   margin-left: 0.6rem;
-  color: rgba(242, 242, 242, 0.45);
+  color: rgba(var(--ink), 0.45);
   font: normal 0.6rem var(--mono);
 }
 
@@ -361,14 +392,14 @@ body:has(.cm-home) .md-footer {
 .cm-code pre code {
   padding: 0;
   background: none;
-  color: rgba(242, 242, 242, 0.85);
+  color: rgba(var(--ink), 0.85);
   font-size: 0.68rem;
   line-height: 1.75;
 }
 
 .cm-code .c,
 .cm-code .m {
-  color: rgba(242, 242, 242, 0.38);
+  color: rgba(var(--ink), 0.38);
 }
 
 .cm-code .k {
@@ -376,7 +407,7 @@ body:has(.cm-home) .md-footer {
 }
 
 .cm-code .s {
-  color: #93c5fd;
+  color: var(--string);
 }
 
 .cm-code .v {
@@ -497,8 +528,8 @@ body:has(.cm-home) .md-footer {
   position: absolute;
   inset: 20% -10% -40%;
   background:
-    radial-gradient(ellipse 35% 50% at 30% 70%, rgba(141, 180, 234, 0.2), transparent),
-    radial-gradient(ellipse 35% 50% at 70% 70%, rgba(201, 215, 234, 0.14), transparent);
+    radial-gradient(ellipse 35% 50% at 30% 70%, rgba(var(--glow), 0.2), transparent),
+    radial-gradient(ellipse 35% 50% at 70% 70%, rgba(var(--glow-2), 0.14), transparent);
   filter: blur(30px);
 }
 
