@@ -94,7 +94,7 @@ everyone read it; see [Team setup](guides/team-setup.md).
 
 ```sh
 comindly search "where do we retry HTTP calls"
-comindly explore OrderService.place_order   # neighbourhood and blast radius
+comindly explore record_audit_event         # neighbourhood and blast radius
 comindly contracts                          # who serves and who calls what
 comindly app                                # its own window on macOS, the browser elsewhere
 ```
@@ -164,8 +164,8 @@ example `AWS_PROFILE=… comindly engine start`.
 
 Restart the agent and ask it something only a map of the whole codebase can answer:
 
-- "What breaks in other services if I change the signature of `place_order`?"
-- "Who calls `GET /orders/{id}`, and which queue does the order service publish to?"
+- "What breaks in other services if I change the signature of `record_audit_event`?"
+- "Who calls `GET /api/v1/subjects/{id}`, and which queues receive the enrolment service's events?"
 - "What should I read before changing `PaymentClient.charge`?"
 - "Why is this function written this way? Did anyone try something else?"
 

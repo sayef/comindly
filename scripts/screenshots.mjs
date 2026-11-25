@@ -63,11 +63,11 @@ const post = (path, body, credentials = "include") =>
 if (mode === "server") {
   await evaluate(post("/api/v1/auth/redeem", { token: process.env.SHOT_ADMIN_TOKEN }));
   // A member and a viewer who joined, one invitation still open, and an agent's token.
-  for (const [email, role] of [["sam@acme.example", "member"], ["alex@acme.example", "viewer"]]) {
+  for (const [email, role] of [["sam@northvile.example", "member"], ["alex@northvile.example", "viewer"]]) {
     const invite = await evaluate(post("/api/v1/members/invite", { email, role }));
     await evaluate(post("/api/v1/auth/code", { email, code: invite.code }, "omit"));
   }
-  await evaluate(post("/api/v1/members/invite", { email: "kim@acme.example", role: "member" }));
+  await evaluate(post("/api/v1/members/invite", { email: "kim@northvile.example", role: "member" }));
   await evaluate(post("/api/v1/tokens", { name: "Claude Code on my laptop" }));
   // A service account for CI, with a token that only works from the build network.
   await evaluate(post("/api/v1/members/service", { name: "Build Bot", role: "member" }));
@@ -89,10 +89,14 @@ if (mode === "server") {
 }
 
 // Each example repository belongs to the team that commits to it, so the team picker shows.
-const TEAMS = { "acme-common": "Platform", orders: "Checkout", payments: "Payments", inventory: "Fulfilment", storefront: "Web" };
+const TEAMS = {
+  "northvile-common": "Platform", "northvile-jvm-common": "Platform", "audit-trail": "Platform", "trial-registry": "Study Build",
+  randomisation: "Subject Management", enrolment: "Subject Management", consent: "Subject Management",
+  "visit-scheduler": "Site Experience", "site-portal": "Site Experience", "lab-ingest": "Clinical Data", edc: "Clinical Data", safety: "Pharmacovigilance",
+};
 if (mode !== "server") for (const [repo, team] of Object.entries(TEAMS)) await evaluate(post("/api/v1/repos/teams", { repo, teams: [team] }));
 
-const focus = mode === "server" ? null : await evaluate(`fetch("/api/v1/find?q=create_order").then((r) => r.json()).then((j) => (j.results ?? j)[0]?.id)`);
+const focus = mode === "server" ? null : await evaluate(`fetch("/api/v1/find?q=open_susar").then((r) => r.json()).then((j) => (j.results ?? j)[0]?.id)`);
 
 for (const theme of mode === "server" ? [] : ["light", "dark"]) {
   await evaluate(`localStorage.setItem("comindly.theme", "${theme}")`);
@@ -121,7 +125,7 @@ for (const theme of mode === "server" ? [] : ["light", "dark"]) {
   }
   await go("/flows");
   await shot(`flows${suffix}`);
-  const across = await evaluate(`fetch("/api/v1/flows").then((r) => r.json()).then((l) => (l.find((f) => f.repos.length > 2) ?? l[0])?.entry.id)`);
+  const across = await evaluate(`fetch("/api/v1/flows").then((r) => r.json()).then((l) => (l.find((f) => f.entry.name === "enrol" && f.repos.length > 2) ?? [...l].sort((a, b) => b.repos.length - a.repos.length)[0])?.entry.id)`);
   if (across) {
     await go(`/flows?id=${encodeURIComponent(across)}`, 3000);
     await shot(`flow${suffix}`);
@@ -133,7 +137,7 @@ for (const theme of mode === "server" ? [] : ["light", "dark"]) {
   await go("/");
   await evaluate(`document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true, ctrlKey: true, bubbles: true }))`);
   await sleep(500);
-  await send("Input.insertText", { text: "charge an order" });
+  await send("Input.insertText", { text: "when is a SUSAR report due" });
   await sleep(2000);
   await shot(`palette${suffix}`);
 }
