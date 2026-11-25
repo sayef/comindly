@@ -32,7 +32,21 @@ function graph(canvas) {
   const REPOS = ["storefront", "orders", "payments", "catalog", "shipping"];
   const LINKS = [[0, 1], [0, 2], [1, 3], [2, 4], [3, 4], [0, 4], [1, 4]];
   const STEP = 420, HOLD = 1100, FADE = 1500, DEPTH = 5;
-  const PALE = [201, 215, 234], ACCENT = [141, 180, 234];
+  let PALE, ACCENT, INK, LIGHT;
+  const colors = () => {
+    const css = getComputedStyle(document.body);
+    const rgb = (name, dflt) => (css.getPropertyValue(name).trim() || dflt).split(",").map(Number);
+    INK = rgb("--ink", "242,242,242").join(",");
+    PALE = rgb("--glow-2", "201,215,234");
+    ACCENT = rgb("--glow", "141,180,234");
+    LIGHT = document.body.dataset.mdColorScheme === "default";
+  };
+  colors();
+  const scheme = new MutationObserver(() => {
+    colors();
+    if (still) show();
+  });
+  scheme.observe(document.body, { attributes: true, attributeFilter: ["data-md-color-scheme"] });
   const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const ctx = canvas.getContext("2d");
   let W = 0, H = 0, nodes = [], edges = [], adj = [], centers = [], ripples = [];
@@ -155,7 +169,7 @@ function graph(canvas) {
     for (const e of edges) {
       const [ax, ay, cx, cy, bx, by] = bend(e, t);
       ctx.setLineDash(e.contract ? [3, 6] : []);
-      ctx.strokeStyle = e.contract ? "rgba(141,180,234,0.18)" : "rgba(242,242,242,0.09)";
+      ctx.strokeStyle = e.contract ? `rgba(${ACCENT},0.18)` : `rgba(${INK},0.09)`;
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(ax, ay);
@@ -165,7 +179,7 @@ function graph(canvas) {
     ctx.setLineDash([]);
 
     const glow = new Map();
-    ctx.globalCompositeOperation = "lighter";
+    ctx.globalCompositeOperation = LIGHT ? "source-over" : "lighter";
     for (const r of ripples) {
       for (const s of r.lit) {
         const start = r.t0 + s.d * STEP;
@@ -191,7 +205,7 @@ function graph(canvas) {
       const [x, y] = at(i, t);
       const g = glow.get(i) ?? 0;
       const base = 0.3 + 0.14 * Math.sin(t * 0.0009 + n.phase);
-      ctx.fillStyle = g ? `rgba(${mix(ACCENT, PALE, g)},${Math.max(base, g)})` : `rgba(242,242,242,${base})`;
+      ctx.fillStyle = g ? `rgba(${mix(ACCENT, PALE, g)},${Math.max(base, g)})` : `rgba(${INK},${base})`;
       ctx.beginPath();
       ctx.arc(x, y, n.size + g * 1.6, 0, Math.PI * 2);
       ctx.fill();
@@ -201,7 +215,7 @@ function graph(canvas) {
       const age = t - r.t0;
       if (age < 0 || age > 1600) continue;
       const [x, y] = at(r.origin, t);
-      ctx.strokeStyle = `rgba(201,215,234,${0.6 * (1 - age / 1600)})`;
+      ctx.strokeStyle = `rgba(${PALE},${0.6 * (1 - age / 1600)})`;
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.arc(x, y, 4 + age / 40, 0, Math.PI * 2);
@@ -210,7 +224,7 @@ function graph(canvas) {
 
     ctx.font = '500 10px "Geist Mono", ui-monospace, monospace';
     ctx.textAlign = "center";
-    ctx.fillStyle = "rgba(242,242,242,0.32)";
+    ctx.fillStyle = `rgba(${INK},0.32)`;
     if (W > 760) centers.forEach(([x, y], i) => ctx.fillText(REPOS[i].toUpperCase().split("").join(" "), x, y + H * 0.12 + 22));
   }
 
@@ -271,6 +285,7 @@ function graph(canvas) {
   return () => {
     cancelAnimationFrame(raf);
     sizer.disconnect();
+    scheme.disconnect();
     watcher.disconnect();
     hero.removeEventListener("pointermove", poke);
   };

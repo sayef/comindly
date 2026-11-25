@@ -1,10 +1,9 @@
 # CI and merge requests
 
-**Model.** One central pipeline checks out the team's repos, runs `comindly link …` (with
-`--no-llm` when there is no LLM key), and writes a new **atomically-versioned** LanceDB dataset.
-Lance's newest version manifest is the "latest" pointer every consumer reads — no coordination, no
-staleness. comindly needs **no remote git credentials** itself when the CI job clones the repos (with its
-token); comindly indexes the local checkouts and their `.git`.
+**How it works.** One central pipeline checks out the team's repositories, runs `comindly link …` (with
+`--no-llm` when there is no LLM key) and writes a new version of the index. Readers always see the newest
+complete version, so nothing needs to coordinate. When the CI job clones the repositories with its own
+token, comindly needs no git credentials: it indexes the local checkouts and their `.git`.
 
 The command line starts the local engine beside it and indexes through it, so CI needs both programs:
 build them (`cargo build --release -p comindly -p comindly-engine`) or install them with
@@ -18,12 +17,12 @@ approach; the GitLab example below uses S3. Both are equivalent.
 [`.github/workflows/comindly-index.yml`](https://github.com/sayef/comindly/blob/main/.github/workflows/comindly-index.yml) builds the index on a
 schedule (and on demand). To enable it:
 
-- **Variable** `COMINDLY_INDEX_ENABLED = true` — lets the schedule run.
-- **Variable** `COMINDLY_REPOS` — space/newline list of `owner/repo` to index (kept in settings, not
+- **Variable** `COMINDLY_INDEX_ENABLED = true`: lets the schedule run.
+- **Variable** `COMINDLY_REPOS`: space/newline list of `owner/repo` to index (kept in settings, not
   committed, so repo names stay out of the public workflow file).
-- **Secret** `COMINDLY_REPO_TOKEN` — a fine-grained PAT with `Contents: read` (only for **private**
+- **Secret** `COMINDLY_REPO_TOKEN`: a fine-grained PAT with `Contents: read` (only for **private**
   repos; omit for public).
-- **Secret** `OPENAI_API_KEY` *(optional)* — turns on the LLM steps.
+- **Secret** `OPENAI_API_KEY` *(optional)*: turns on the LLM steps.
 
 It clones the listed repos, runs `comindly link …` (incremental against the previous index), and
 uploads the resulting index directory (which contains the internal `_graph` dataset) as the
@@ -56,7 +55,7 @@ jobs:
             -d '{"event_type":"comindly-reindex"}'
 ```
 
-**GitLab** (member repo `.gitlab-ci.yml`) — trigger the comindly project's pipeline via a
+**GitLab** (member repo `.gitlab-ci.yml`): trigger the comindly project's pipeline via a
 [pipeline trigger token](https://docs.gitlab.com/ci/triggers/):
 
 ```yaml
@@ -108,7 +107,7 @@ a repo yields no SCIP; `scip=off` skips it. Tree-sitter resolution covers everyt
 
 ## LLM provider (for summaries and walkthroughs)
 
-Enrichment uses an LLM via Rig — provider-agnostic. Defaults to OpenAI (`OPENAI_API_KEY`, model
+Summaries and walkthroughs use any OpenAI-compatible LLM. The default is OpenAI (`OPENAI_API_KEY`, model
 `gpt-6-luna`). Set `COMINDLY_LLM_MODEL` and `COMINDLY_LLM_BASE_URL` to target any OpenAI-compatible
 endpoint (a LiteLLM proxy, Ollama, vLLM, Azure).
 
