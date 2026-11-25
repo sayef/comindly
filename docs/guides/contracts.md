@@ -15,7 +15,7 @@ comindly contracts --type http --dangling          # routes nobody calls, calls 
 | HTTP | FastAPI, Next.js route handlers, Express, Spring MVC, Go net/http, gin, echo, chi, axum, actix | httpx, requests, fetch, axios (and client wrappers), Feign, RestTemplate, WebClient, Go `http`, reqwest |
 | SQS / SNS / S3 | AWS SDK calls in every supported language (boto3, Go, Java, Kotlin, JavaScript/TypeScript v2 and v3, Rust), Spring Cloud AWS templates; also through wrappers and constructors | the same SDKs' receive and read calls |
 | SQL tables | SQLAlchemy models, pypika, and any SQL statement passed to a call, in every language | reads through the same |
-| Infrastructure | Terraform `aws_sqs_queue`, `aws_sns_topic`, `aws_s3_bucket`, team modules (`queue_name`, `topic_name`, `bucket_name`) | topic subscriptions (`aws_sns_topic_subscription`, `*topic_arn` inputs) |
+| Infrastructure | Terraform `aws_sqs_queue`, `aws_sns_topic`, `aws_s3_bucket`, team modules (`queue_name`, `topic_name`, `bucket_name`); CloudFormation and SAM templates (also those CDK synthesizes) with `QueueName`, `TopicName`, `BucketName` | topic subscriptions (`aws_sns_topic_subscription`, `*topic_arn` inputs, `AWS::SNS::Subscription`, a topic's `Subscription` list) |
 
 The AWS SDKs share their operation and field names, so one table covers all of them: `SendMessage`,
 `sendMessage` and `send_message` are the same operation, and `QueueUrl`, `queueUrl` and `queue_url` the
