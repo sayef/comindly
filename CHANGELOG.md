@@ -6,6 +6,24 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.1](https://github.com/sayef/comindly/compare/v0.5.0...v0.5.1) - 2026-11-25
+
+Queues, topics, buckets and tables are now found in every supported language, and in CloudFormation and
+SAM templates. Index again to pick them up.
+
+### Added
+
+- AWS SDK calls name their queue, topic or bucket in Go, Rust, Java, Kotlin and TypeScript as they already
+  did in Python: `SendMessage`, `sendMessage` and `send_message` are the same operation, the client is
+  recognised from its declared type, and request fields are read from builders, struct literals, command
+  objects and setter chains.
+- Environment reads (`os.Getenv`, `std::env::var`, `System.getenv`, `process.env`) are evaluated the same
+  way as `os.environ` in Python.
+- A SQL statement passed to any call links the tables it reads and writes, whatever the database library.
+- CloudFormation and SAM templates (YAML or JSON, short tags included) declare queues, topics and buckets
+  and which queues subscribe to which topics, like Terraform.
+- Spring's `convertAndSend` on an SNS or SQS template publishes to its destination.
+
 ## [0.5.0](https://github.com/sayef/comindly/compare/v0.5.0-beta.26...v0.5.0) - 2026-11-25
 
 The first stable release of 0.5: a small command line over an engine that runs on your machine or as a
