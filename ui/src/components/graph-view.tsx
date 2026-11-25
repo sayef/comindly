@@ -11,7 +11,6 @@ import {
   type Node,
   type NodeProps,
 } from "@xyflow/react";
-import "@xyflow/react/dist/style.css";
 import { useMemo, useState } from "react";
 import { useTheme } from "@/components/theme";
 import { CONTRACTS, cn, repoColor } from "@/lib/utils";
@@ -182,12 +181,12 @@ export function GraphView({ nodes, edges, focus, highlight, onPick, className }:
         nodes={flowNodes}
         edges={flowEdges}
         nodeTypes={nodeTypes}
-        colorMode={theme === "dark" ? "dark" : "light"}
+        forceColorMode={theme === "dark" ? "dark" : "light"}
         fitView
         fitViewOptions={
           focus && narrow
             ? { nodes: [{ id: focus }], minZoom: MIN_ZOOM, maxZoom: MIN_ZOOM }
-            : { padding: 0.12, maxZoom: 1.2, minZoom: MIN_ZOOM }
+            : { padding: "6%", maxZoom: 1.2, minZoom: MIN_ZOOM }
         }
         minZoom={0.15}
         zoomOnScroll={false}
