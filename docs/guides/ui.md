@@ -107,7 +107,7 @@ can be bookmarked or shared.
 
 ### What it looks like
 
-The example company in `examples/acme`, indexed with comindly (`scripts/screenshots.sh`).
+A made-up clinical-trials platform in `examples/trials`, indexed with comindly (`scripts/screenshots.sh`).
 
 ![Overview: the org map with the service contracts between repositories](../assets/screenshots/overview.webp#only-light)
 ![Overview: the org map with the service contracts between repositories](../assets/screenshots/overview-dark.webp#only-dark)
@@ -151,10 +151,10 @@ Packages: an internal package and a consumer pinned behind its publisher
 Flows: where work travels, across repositories
 ///
 
-![A flow: every step, entering orders, inventory and payments](../assets/screenshots/flow.webp#only-light)
-![A flow: every step, entering orders, inventory and payments](../assets/screenshots/flow-dark.webp#only-dark)
+![A flow: enrolling a subject, through randomisation, consent, visit scheduling and the audit trail](../assets/screenshots/flow.webp#only-light)
+![A flow: enrolling a subject, through randomisation, consent, visit scheduling and the audit trail](../assets/screenshots/flow-dark.webp#only-dark)
 /// caption
-A flow: every step, entering orders, inventory and payments
+A flow: enrolling a subject, through randomisation, consent, visit scheduling and the audit trail
 ///
 
 ![Conventions: one table, with where each comes from](../assets/screenshots/conventions-open.webp#only-light)

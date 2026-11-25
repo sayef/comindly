@@ -1,0 +1,7 @@
+{
+  "name": "site-portal",
+  "version": "6.2.0",
+  "private": true,
+  "type": "module",
+  "dependencies": { "react": "^19.0.0", "date-fns": "^4.1.0" }
+}

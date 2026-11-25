@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.3.4</version>
+  </parent>
+  <groupId>com.northvile</groupId>
+  <artifactId>trial-registry</artifactId>
+  <version>4.2.0</version>
+  <dependencies>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.awspring.cloud</groupId>
+      <artifactId>spring-cloud-aws-starter-sns</artifactId>
+      <version>3.2.0</version>
+    </dependency>
+    <dependency>
+      <groupId>com.northvile</groupId>
+      <artifactId>northvile-jvm-common</artifactId>
+      <version>1.6.0</version>
+    </dependency>
+  </dependencies>
+</project>

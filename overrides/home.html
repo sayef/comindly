@@ -28,8 +28,8 @@
       <p class="cm-sub">Calls, imports and service contracts from Python, TypeScript, Go, Java, Kotlin and Rust, linked
         across repositories into one index that lives in a folder or your own bucket.</p>
       <figure class="cm-panel">
-        <img class="cm-shot--light" src="{{ 'assets/screenshots/overview.webp' | url }}" alt="The org map of an example shop: five repositories and the service contracts between them" width="1440" height="900" loading="lazy">
-        <img class="cm-shot--dark" src="{{ 'assets/screenshots/overview-dark.webp' | url }}" alt="The org map of an example shop: five repositories and the service contracts between them" width="1440" height="900" loading="lazy">
+        <img class="cm-shot--light" src="{{ 'assets/screenshots/overview.webp' | url }}" alt="The org map of an example clinical-trials platform: its repositories and the service contracts between them" width="1440" height="900" loading="lazy">
+        <img class="cm-shot--dark" src="{{ 'assets/screenshots/overview-dark.webp' | url }}" alt="The org map of an example clinical-trials platform: its repositories and the service contracts between them" width="1440" height="900" loading="lazy">
       </figure>
       <div class="cm-facts">
         <div><p class="cm-label">Symbols</p><p>Tree-sitter for every supported language, SCIP where an indexer is present.</p></div>
@@ -44,8 +44,8 @@
       <div>
         <p class="cm-label cm-label--accent">Blast radius</p>
         <h2>Change one function, see every caller.</h2>
-        <p class="cm-sub">Before an agent edits <code>place_order</code>, it asks who depends on it: in this repository,
-          in the services that call its route, and in the consumers of the queue it publishes to.</p>
+        <p class="cm-sub">Before an agent edits <code>open_susar</code>, it asks who depends on it: in this repository,
+          in the services that call its route, and in the consumers of the topic it publishes to.</p>
         <ul class="cm-list">
           <li><code>ripple</code> what breaks across services</li>
           <li><code>context_pack</code> what to read first</li>
@@ -53,8 +53,8 @@
         </ul>
       </div>
       <figure class="cm-panel cm-panel--tilt">
-        <img class="cm-shot--light" src="{{ 'assets/screenshots/explorer.webp' | url }}" alt="comindly showing create_order: its callers across repositories, blast radius and flow walkthrough" width="1440" height="900" loading="lazy">
-        <img class="cm-shot--dark" src="{{ 'assets/screenshots/explorer-dark.webp' | url }}" alt="comindly showing create_order: its callers across repositories, blast radius and flow walkthrough" width="1440" height="900" loading="lazy">
+        <img class="cm-shot--light" src="{{ 'assets/screenshots/explorer.webp' | url }}" alt="comindly showing open_susar in an example clinical-trials platform: its callers, the topic and bucket it writes to, and its blast radius" width="1440" height="900" loading="lazy">
+        <img class="cm-shot--dark" src="{{ 'assets/screenshots/explorer-dark.webp' | url }}" alt="comindly showing open_susar in an example clinical-trials platform: its callers, the topic and bucket it writes to, and its blast radius" width="1440" height="900" loading="lazy">
       </figure>
     </div>
   </section>
@@ -64,8 +64,8 @@
       <div>
         <p class="cm-label cm-label--accent">The ledger</p>
         <h2>What the team learned,<br>where agents look.</h2>
-        <p class="cm-sub">Decisions, failed attempts and constraints are anchored to symbols. They follow the code, go
-          stale when it changes, and reach agents only once someone trusts them.</p>
+        <p class="cm-sub">Decisions, failed attempts and constraints are anchored to symbols. They follow the code, say
+          what changed since they were written, and reach agents only once someone trusts them.</p>
         <ul class="cm-list">
           <li><code>why</code> reasoning blame for a symbol</li>
           <li><code>remember</code> a decision, constraint or dead end</li>
@@ -89,10 +89,10 @@
         <div class="cm-code">
           <div class="cm-code__bar"><span></span><span></span><span></span><em>terminal</em></div>
 <pre><code><span class="c">#</span> <span class="m">index three services into one graph</span>
-<span class="k">comindly</span> link ../orders ../payments ../catalog
+<span class="k">comindly</span> link ../enrolment ../safety ../northvile-common
 
 <span class="c">#</span> <span class="m">what breaks if this changes?</span>
-<span class="k">comindly</span> explore OrderService.place_order<span class="cm-caret"></span></code></pre>
+<span class="k">comindly</span> explore record_audit_event<span class="cm-caret"></span></code></pre>
         </div>
         <div class="cm-code">
           <div class="cm-code__bar"><span></span><span></span><span></span><em>~/.cursor/mcp.json</em></div>

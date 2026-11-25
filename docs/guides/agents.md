@@ -13,11 +13,11 @@ ask, what happens, and the habits that keep the answers good.
 |---|---|---|
 | Where something lives | "Where do we retry outgoing HTTP calls?" | `search` |
 | A symbol by name | "Find the `OrderService` class." | `find` |
-| Everything around a symbol | "Show me what calls and what is called by `place_order`." | `zoom` |
-| What a change can break | "What breaks in other services if I change `place_order`'s signature?" | `ripple` |
+| Everything around a symbol | "Show me what calls and what is called by `susar_due`." | `zoom` |
+| What a change can break | "What breaks in other services if I change `record_audit_event`'s signature?" | `ripple` |
 | What to read before a change | "What should I read before changing `PaymentClient.charge`?" | `context_pack` |
-| How a request flows | "Trace what happens after `place_order` is called." | `thread`, `flow` |
-| Which services talk, and how | "Who calls `GET /orders/{id}`? Which queue does orders publish to?" | `contracts` |
+| How a request flows | "Trace what happens after a subject is enrolled." | `thread`, `flow` |
+| Which services talk, and how | "Who calls `GET /api/v1/subjects/{id}`? Which queues receive `trial-events`?" | `contracts` |
 | How the repositories fit together | "Which repositories are indexed and who depends on whom?" | `repos` |
 | How code is written here | "Which conventions should I follow in the payments repo?" | `guide` |
 | Why code is the way it is | "Why is this lock here? Did anyone try something else?" | `why` |
@@ -33,7 +33,7 @@ The agent can also write to the team's ledger:
 | Keep working notes on a task | "Open a discussion for LIN-123 and post the plan and each choice you make." | `discussion` |
 
 Names in answers are the ones you see in the UI: methods as `Class.method`, contracts as
-`http:GET /orders/{}` or `sqs:order-events`, locations as `path:line`.
+`http:GET /api/v1/subjects/{}` or `sqs:visit-scheduling`, locations as `path:line`.
 
 ## How a good session looks
 

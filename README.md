@@ -27,7 +27,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/sayef/comindly/main/docs/assets/screenshots/explorer-dark.webp">
-    <img alt="comindly showing create_order in an example shop: callers across repositories, blast radius and a flow walkthrough" src="https://raw.githubusercontent.com/sayef/comindly/main/docs/assets/screenshots/explorer.webp" width="860">
+    <img alt="comindly showing open_susar in an example clinical-trials platform: its callers, the topic and bucket it writes to, and its blast radius" src="https://raw.githubusercontent.com/sayef/comindly/main/docs/assets/screenshots/explorer.webp" width="860">
   </picture>
 </p>
 
@@ -58,12 +58,12 @@ offline machines and CI. `comindly update` moves to the newest release later. Or
 ## Try it
 
 ```sh
-comindly link ../orders ../payments ../shared-lib   # index your repositories
+comindly link ../enrolment ../safety ../shared-lib  # index your repositories
 comindly init-agents --install --yes                # connect Claude Code, Codex, Cursor, Gemini CLI
 comindly app                                        # or look around in the app
 ```
 
-Then ask your agent, for example: "What breaks in other services if I change `place_order`?"
+Then ask your agent, for example: "What breaks in other services if I change `record_audit_event`?"
 The app's **Get started** page has the setup for Cursor, Codex and VS Code, and checks your machine.
 LLM summaries and flow walkthroughs are optional and use `OPENAI_API_KEY` or any OpenAI-compatible endpoint.
 
