@@ -84,13 +84,44 @@ impl LangSpec for TypeScript {
             ),
             _ => return None,
         };
-        if !HTTP_OPS.contains(&method.as_str()) {
+        let list = node.child_by_field_name("arguments")?;
+        let mut found = args(list, src);
+        // AWS SDK v3: `client.send(new SendMessageCommand({ QueueUrl }))` is that operation.
+        let method = match named_children(list).first() {
+            Some(cmd) if method == "send" && cmd.kind() == "new_expression" => {
+                let ctor = field_text(*cmd, "constructor", src).unwrap_or("");
+                match ctor.strip_suffix("Command") {
+                    Some(op) if super::sdk_op(op).is_some() => {
+                        found = cmd
+                            .child_by_field_name("arguments")
+                            .map(|a| args(a, src))
+                            .unwrap_or_default();
+                        op.to_string()
+                    }
+                    _ => method,
+                }
+            }
+            _ => method,
+        };
+        if super::sdk_op(&method).is_some() {
+            found.keywords = found
+                .positional
+                .iter()
+                .flatten()
+                .filter_map(|v| match v {
+                    ValueExpr::Record(pairs) => Some(pairs.clone()),
+                    _ => None,
+                })
+                .flatten()
+                .collect();
+        }
+        if !HTTP_OPS.contains(&method.as_str()) && !super::is_op(&method, &found) {
             return None;
         }
         Some(RawContract::Op {
             receiver,
             method,
-            args: args(node.child_by_field_name("arguments")?, src),
+            args: found,
         })
     }
 
@@ -386,6 +417,18 @@ fn value_expr(node: Node, src: &[u8]) -> Option<ValueExpr> {
                     _ => {}
                 }
             }
+            // A template without substitutions is a plain string (`SELECT …` in backticks).
+            if parts.iter().all(|p| matches!(p, TemplatePart::Lit(_))) {
+                return Some(ValueExpr::Lit(
+                    parts
+                        .into_iter()
+                        .map(|p| match p {
+                            TemplatePart::Lit(s) => s,
+                            TemplatePart::Expr(_) => String::new(),
+                        })
+                        .collect(),
+                ));
+            }
             Some(ValueExpr::Template(parts))
         }
         "object" => Some(ValueExpr::Record(
@@ -411,7 +454,13 @@ fn value_expr(node: Node, src: &[u8]) -> Option<ValueExpr> {
                 ],
             })
         }
-        "identifier" | "member_expression" => path(node, src).map(ValueExpr::Name),
+        "identifier" | "member_expression" => match path(node, src)? {
+            // `process.env.QUEUE_URL`.
+            p if p.len() == 3 && p[0] == "process" && p[1] == "env" => {
+                Some(ValueExpr::Env(p[2].clone()))
+            }
+            p => Some(ValueExpr::Name(p)),
+        },
         "parenthesized_expression" | "as_expression" | "satisfies_expression" => {
             value_expr(named_children(node).into_iter().next()?, src)
         }

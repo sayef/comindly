@@ -3,7 +3,7 @@
 
 use tree_sitter::Node;
 
-use super::{named_children, text, RawContract};
+use super::{field_text, named_children, text, RawContract};
 use crate::facts::{Args, ValueExpr};
 
 const MAPPINGS: &[(&str, &str)] = &[
@@ -239,8 +239,60 @@ pub(crate) fn value(node: Node, src: &[u8]) -> Option<ValueExpr> {
             value(*named_children(node).first()?, src)
         }
         "parenthesized_expression" => value(*named_children(node).first()?, src),
+        // `System.getenv("X")`.
+        "method_invocation" | "call_expression"
+            if text(node, src).starts_with("System.getenv(") =>
+        {
+            let lit = text(node, src)
+                .trim_start_matches("System.getenv(")
+                .trim_end_matches(')')
+                .trim()
+                .trim_matches('"');
+            (!lit.is_empty() && !lit.contains('"')).then(|| ValueExpr::Env(lit.to_string()))
+        }
         _ => None,
     }
+}
+
+/// The fields an SDK request argument sets, however it is written: a builder
+/// (`.queueUrl(u)`), a lambda (`r -> r.queueUrl(u)`) or a Kotlin block (`{ queueUrl = u }`).
+pub(crate) fn fields(node: Node, src: &[u8]) -> Vec<(String, ValueExpr)> {
+    let mut out = Vec::new();
+    let mut stack = vec![node];
+    while let Some(n) = stack.pop() {
+        let kids = named_children(n);
+        let set = match n.kind() {
+            "method_invocation" => field_text(n, "name", src).zip(
+                n.child_by_field_name("arguments")
+                    .map(named_children)
+                    .and_then(|a| (a.len() == 1).then(|| a[0])),
+            ),
+            "call_expression" => kids
+                .first()
+                .filter(|c| c.kind() == "navigation_expression")
+                .and_then(|c| named_children(*c).last().map(|l| text(*l, src)))
+                .zip(
+                    kids.iter()
+                        .find(|k| k.kind() == "value_arguments")
+                        .map(|a| named_children(*a))
+                        .filter(|a| a.len() == 1)
+                        .and_then(|a| named_children(a[0]).last().copied()),
+                ),
+            "assignment" => kids
+                .first()
+                .map(|t| text(*t, src).trim())
+                .filter(|t| !t.contains('.'))
+                .zip(kids.last().copied()),
+            _ => None,
+        };
+        if let Some((name, v)) = set {
+            if let Some(v) = value(v, src) {
+                out.push((name.to_string(), v));
+            }
+        }
+        stack.extend(kids);
+    }
+    out
 }
 
 /// Call arguments as values (Java `argument_list`, Kotlin `value_arguments`).

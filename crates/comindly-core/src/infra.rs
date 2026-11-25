@@ -63,7 +63,7 @@ pub fn files(root: &Path, repo: &str, rels: &[String]) -> Vec<(Symbol, FileFacts
                 continue;
             };
             let contracts = module.facts(body);
-            out.push(file(repo, rel, contracts));
+            out.push(file(repo, rel, "hcl", contracts));
         }
     }
     out
@@ -304,7 +304,12 @@ impl Module {
     }
 }
 
-fn file(repo: &str, rel: &str, contracts: Vec<ContractFact>) -> (Symbol, FileFacts) {
+pub(crate) fn file(
+    repo: &str,
+    rel: &str,
+    lang: &str,
+    contracts: Vec<ContractFact>,
+) -> (Symbol, FileFacts) {
     let id = GlobalSymbolId {
         scheme: "comindly-treesitter".into(),
         package_manager: ".".into(),
@@ -317,7 +322,7 @@ fn file(repo: &str, rel: &str, contracts: Vec<ContractFact>) -> (Symbol, FileFac
         id: id.clone(),
         name: rel.to_string(),
         kind: SymbolKind::File,
-        language: Language::Other("hcl".into()),
+        language: Language::Other(lang.into()),
         repo: RepoId(repo.to_string()),
         file_path: rel.to_string(),
         range: Range { start: at, end: at },
@@ -328,7 +333,7 @@ fn file(repo: &str, rel: &str, contracts: Vec<ContractFact>) -> (Symbol, FileFac
     let facts = FileFacts {
         repo: repo.to_string(),
         path: rel.to_string(),
-        language: Language::Other("hcl".into()),
+        language: Language::Other(lang.into()),
         file_id: id.render(),
         modules: Vec::new(),
         imports: Vec::new(),

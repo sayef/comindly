@@ -721,6 +721,46 @@ impl<'a> Binder<'a> {
             .find(|s| self.is_type(s))
     }
 
+    /// The type a receiver was declared with, as written, also when that type is not indexed
+    /// (`private final SnsTemplate sns`, `client *sqs.Client`).
+    pub(crate) fn declared_type(
+        &self,
+        receiver: &[String],
+        scope: &str,
+        _f: &FileFacts,
+    ) -> Option<Vec<String>> {
+        let path = |src: &TypeSource| match src {
+            TypeSource::Annotation(p) | TypeSource::Construct(p) => Some(p.clone()),
+            TypeSource::Alias { .. } => None,
+        };
+        let name = match receiver {
+            [n] => n.as_str(),
+            [r, n] if r == "self" || r == "this" => n.as_str(),
+            _ => return None,
+        };
+        if receiver.len() == 1 {
+            for s in self.scope_chain(scope) {
+                if let Some(t) = self
+                    .types
+                    .get(&(s.as_str(), name))
+                    .and_then(|src| path(src))
+                {
+                    return Some(t);
+                }
+            }
+        }
+        let class = self.enclosing_class(scope)?;
+        ["this", "self"]
+            .iter()
+            .map(|r| format!("{r}.{name}"))
+            .chain(std::iter::once(name.to_string()))
+            .find_map(|k| {
+                self.types
+                    .get(&(class.as_str(), k.as_str()))
+                    .and_then(|src| path(src))
+            })
+    }
+
     fn resolve_name(&self, head: &str, scope: &str, f: &FileFacts, depth: u32) -> Option<Value> {
         if head == "self" || head == "this" {
             return self.enclosing_class(scope).map(Value::Instance);

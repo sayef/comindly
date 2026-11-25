@@ -382,13 +382,14 @@ impl Python {
                     ),
                     _ => return None,
                 };
-                if !OPS.contains(&method.as_str()) {
+                let found = args(node.child_by_field_name("arguments")?, src);
+                if !OPS.contains(&method.as_str()) && !super::is_op(&method, &found) {
                     return None;
                 }
                 Some(RawContract::Op {
                     receiver,
                     method,
-                    args: args(node.child_by_field_name("arguments")?, src),
+                    args: found,
                 })
             }
             _ => None,

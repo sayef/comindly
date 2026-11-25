@@ -7,6 +7,7 @@
 
 pub mod answers;
 pub mod brief;
+pub mod cfn;
 pub mod checks;
 pub mod configvals;
 pub mod context;

@@ -58,7 +58,13 @@ impl LangSpec for Java {
                 args: spring::args(node.child_by_field_name("arguments")?, src),
             });
         }
-        if !spring::REST_TEMPLATE.iter().any(|(m, _)| *m == method) {
+        let list = node.child_by_field_name("arguments")?;
+        let mut args = spring::args(list, src);
+        if super::sdk_op(method).is_some() {
+            args.keywords = spring::fields(list, src);
+        }
+        if !spring::REST_TEMPLATE.iter().any(|(m, _)| *m == method) && !super::is_op(method, &args)
+        {
             return None;
         }
         Some(RawContract::Op {
@@ -67,7 +73,7 @@ impl LangSpec for Java {
                 .and_then(|o| path(o, src))
                 .unwrap_or_default(),
             method: method.to_string(),
-            args: spring::args(node.child_by_field_name("arguments")?, src),
+            args,
         })
     }
 

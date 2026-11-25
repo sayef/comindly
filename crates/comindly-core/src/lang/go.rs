@@ -58,7 +58,7 @@ impl LangSpec for Go {
         let (method, receiver) = p.split_last()?;
         let list = node.child_by_field_name("arguments")?;
         let args = args(list, src);
-        if receiver == ["http"] && !method.starts_with("Handle") {
+        if (receiver == ["http"] && !method.starts_with("Handle")) || super::is_op(method, &args) {
             return Some(RawContract::Op {
                 receiver: receiver.to_vec(),
                 method: method.clone(),
@@ -413,6 +413,15 @@ fn value(node: Node, src: &[u8]) -> Option<ValueExpr> {
         "call_expression" => {
             let func = path(node.child_by_field_name("function")?, src)?;
             let a = args(node.child_by_field_name("arguments")?, src);
+            if let (["os", "Getenv" | "LookupEnv"], Some(Some(ValueExpr::Lit(k)))) = (
+                func.iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+                a.positional.first(),
+            ) {
+                return Some(ValueExpr::Env(k.clone()));
+            }
             Some(ValueExpr::Call {
                 func,
                 args: a
@@ -434,9 +443,39 @@ fn args(list: Node, src: &[u8]) -> Args {
         if a.kind() == "comment" {
             continue;
         }
+        out.keywords.extend(fields(a, src));
         out.positional.push(value(a, src));
     }
     out
+}
+
+/// The keyed fields of a struct literal argument (`&sqs.SendMessageInput{QueueUrl: q}`).
+fn fields(node: Node, src: &[u8]) -> Vec<(String, ValueExpr)> {
+    let lit = match node.kind() {
+        "unary_expression" => node.child_by_field_name("operand"),
+        _ => Some(node),
+    };
+    let Some(body) = lit
+        .filter(|l| l.kind() == "composite_literal")
+        .and_then(|l| l.child_by_field_name("body"))
+    else {
+        return Vec::new();
+    };
+    fn unwrap(n: Node) -> Option<Node> {
+        match n.kind() {
+            "literal_element" => named_children(n).into_iter().next(),
+            _ => Some(n),
+        }
+    }
+    named_children(body)
+        .into_iter()
+        .filter(|e| e.kind() == "keyed_element")
+        .filter_map(|e| {
+            let kv = named_children(e);
+            let (k, v) = (unwrap(*kv.first()?)?, unwrap(*kv.get(1)?)?);
+            Some((text(k, src).to_string(), value(v, src)?))
+        })
+        .collect()
 }
 
 fn path(node: Node, src: &[u8]) -> Option<Vec<String>> {
