@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.1](https://github.com/sayef/comindly/compare/v0.5.0...v0.5.1) - 2026-11-25
+
 ## [0.5.0](https://github.com/sayef/comindly/compare/v0.5.0-beta.26...v0.5.0) - 2026-11-25
 
 The first stable release of 0.5: a small command line over an engine that runs on your machine or as a
