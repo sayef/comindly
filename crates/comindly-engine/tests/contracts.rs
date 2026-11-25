@@ -70,3 +70,55 @@ fn a_subclassed_router_serves_its_routes() {
         "{names:?}"
     );
 }
+
+/// The example platform: SDK calls and SQL in Go, Rust, Java, Kotlin and TypeScript join the
+/// same queues, topics, buckets and tables as Python and Terraform.
+#[test]
+fn sdk_calls_and_sql_join_contracts_in_every_language() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/trials");
+    let mut symbols = Vec::new();
+    let mut edges = Vec::new();
+    let mut facts = Vec::new();
+    for dir in std::fs::read_dir(&root)
+        .unwrap()
+        .flatten()
+        .filter(|d| d.path().is_dir())
+    {
+        let repo = dir.file_name().to_string_lossy().to_string();
+        let out = comindly_engine::parse::parse_repo(&dir.path(), &repo).unwrap();
+        symbols.extend(out.symbols);
+        edges.extend(out.edges);
+        facts.extend(out.facts);
+    }
+    let resolved = comindly_engine::resolve::resolve(&symbols, &edges, &facts);
+    symbols.extend(resolved.symbols);
+    let name = |id: &comindly_engine::model::GlobalSymbolId| {
+        symbols
+            .iter()
+            .find(|s| &s.id == id)
+            .map(|s| s.name.clone())
+            .unwrap_or_default()
+    };
+    let linked: Vec<(String, String)> = resolved
+        .edges
+        .iter()
+        .map(|e| (name(&e.src), name(&e.dst)))
+        .collect();
+    for (code, contract) in [
+        ("Consume", "sqs:audit-ingest"),
+        ("publish_flag", "sns:lab-flags"),
+        ("ingest_file", "s3:northvile-{}-lab-drops"),
+        ("insert", "table:lab_results"),
+        ("Insert", "table:audit_events"),
+        ("approve", "sns:protocol-amendments"),
+    ] {
+        assert!(
+            linked.iter().any(|(a, b)| a == code && b == contract),
+            "{code} → {contract} missing; {:?}",
+            linked
+                .iter()
+                .filter(|(_, b)| b == contract)
+                .collect::<Vec<_>>()
+        );
+    }
+}

@@ -40,14 +40,26 @@ impl LangSpec for Kotlin {
         }
         let mut receiver = path(*callee, src)?;
         let method = receiver.pop()?;
-        if !spring::REST_TEMPLATE.iter().any(|(m, _)| *m == method) {
+        let mut args = kids
+            .iter()
+            .find(|k| k.kind() == "value_arguments")
+            .map(|l| spring::args(*l, src))
+            .unwrap_or_default();
+        if super::sdk_op(&method).is_some() {
+            // Arguments and a trailing block (`sqs.sendMessage { queueUrl = u }`).
+            args.keywords = kids[1..]
+                .iter()
+                .flat_map(|k| spring::fields(*k, src))
+                .collect();
+        }
+        if !spring::REST_TEMPLATE.iter().any(|(m, _)| *m == method) && !super::is_op(&method, &args)
+        {
             return None;
         }
-        let list = kids.iter().find(|k| k.kind() == "value_arguments")?;
         Some(RawContract::Op {
             receiver,
             method,
-            args: spring::args(*list, src),
+            args,
         })
     }
 

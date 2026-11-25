@@ -30,7 +30,15 @@ const ROUTERS: &[&str] = &[
 const DB_READS: &[&str] = &["get", "query", "select", "scalars"];
 const DB_WRITES: &[&str] = &["add", "merge", "delete", "insert", "update"];
 /// Calls whose value is their first argument's (`Path("/x")`, `str(x)`).
-const PASS_THROUGH: &[&str] = &["Path", "PurePath", "PurePosixPath", "str", "URL", "HttpUrl"];
+const PASS_THROUGH: &[&str] = &[
+    "Path",
+    "PurePath",
+    "PurePosixPath",
+    "str",
+    "URL",
+    "HttpUrl",
+    "String",
+];
 /// Calls building record-like values whose keyword arguments are attributes.
 const RECORDS: &[&str] = &["AttrDict", "dict", "SimpleNamespace", "Namespace"];
 
@@ -405,7 +413,32 @@ fn aws_spec(svc: &str, method: &str) -> Option<(&'static [&'static str], usize, 
         ("s3", "download_file" | "download_fileobj") => {
             (&["Bucket"], 0, Scheme::S3, EdgeKind::Reads)
         }
+        // Spring Cloud AWS templates name the topic or queue first.
+        ("sns", "convert_and_send") => (&["Destination"], 0, Scheme::Sns, EdgeKind::Publishes),
+        ("sqs", "convert_and_send") => (&["Destination"], 0, Scheme::Sqs, EdgeKind::Publishes),
         _ => return None,
+    })
+}
+
+/// `QueueUrl`, `queueUrl` and `queue_url` name the same SDK field.
+fn same_key(a: &str, b: &str) -> bool {
+    let norm = |s: &str| {
+        s.chars()
+            .filter(|c| *c != '_')
+            .map(|c| c.to_ascii_lowercase())
+            .collect::<String>()
+    };
+    norm(a) == norm(b)
+}
+
+/// The AWS service of an SDK client or template type (`SqsClient`, `sqs.Client`, `SnsTemplate`).
+fn sdk_service(ty: &[String]) -> Option<&'static str> {
+    ty.iter().rev().take(2).find_map(|seg| {
+        ["sqs", "sns", "s3"].into_iter().find(|svc| {
+            let (head, rest) = seg.split_at(seg.len().min(svc.len()));
+            head.eq_ignore_ascii_case(svc)
+                && (rest.is_empty() || rest.starts_with(char::is_uppercase))
+        })
     })
 }
 
@@ -735,8 +768,18 @@ impl<'b, 'a> Cx<'b, 'a> {
         args: &Args,
         emit: &mut impl FnMut(&str, String, EdgeKind),
     ) {
-        if method == "text" && receiver.is_empty() {
-            if let Some(ValueExpr::Lit(sql)) = args.positional.first().and_then(Option::as_ref) {
+        // A SQL statement passed to any call reads or writes the tables it names.
+        let statements: Vec<&String> = args
+            .positional
+            .iter()
+            .flatten()
+            .filter_map(|v| match v {
+                ValueExpr::Lit(s) if crate::lang::is_sql(s) => Some(s),
+                _ => None,
+            })
+            .collect();
+        if !statements.is_empty() || (method == "text" && receiver.is_empty()) {
+            for sql in statements {
                 for (table, write) in sql_tables(sql) {
                     let kind = if write {
                         EdgeKind::Writes
@@ -918,15 +961,22 @@ impl<'b, 'a> Cx<'b, 'a> {
                 }
             }
             Some(Client::Aws(svc)) => {
-                if let Some((key, kind)) = self.aws(&svc, method, args, from) {
+                let op = crate::lang::snake(method);
+                if let Some((key, kind)) = self.aws(&svc, &op, args, from) {
                     emit(from, key, kind);
                 }
             }
             None => {
-                if let Some(svc) = infer_aws(method, |k| self.kwarg(args, k, from).is_some()) {
-                    if let Some((key, kind)) = self.aws(svc, method, args, from) {
-                        emit(from, key, kind);
-                    }
+                let Some(op) = crate::lang::sdk_op(method) else {
+                    return;
+                };
+                let svc = self
+                    .b
+                    .declared_type(receiver, from, f)
+                    .and_then(|t| sdk_service(&t))
+                    .or_else(|| infer_aws(&op, |k| self.kwarg(args, k, from).is_some()));
+                if let Some((key, kind)) = svc.and_then(|svc| self.aws(svc, &op, args, from)) {
+                    emit(from, key, kind);
                 }
             }
             _ => {}
@@ -1010,7 +1060,7 @@ impl<'b, 'a> Cx<'b, 'a> {
     /// A keyword argument, also when passed inside `**params` (`params = dict(TopicArn=…)`);
     /// returns the expression and the scope to read it in.
     fn kwarg(&self, args: &Args, key: &str, from: &str) -> Option<(ValueExpr, String)> {
-        if let Some((_, v)) = args.keywords.iter().find(|(n, _)| n == key) {
+        if let Some((_, v)) = args.keywords.iter().find(|(n, _)| same_key(n, key)) {
             return Some((v.clone(), from.to_string()));
         }
         args.keywords
@@ -1022,8 +1072,8 @@ impl<'b, 'a> Cx<'b, 'a> {
                     other => (other.clone(), from.to_string()),
                 };
                 let found = match &expr {
-                    ValueExpr::Call { kwargs, .. } => kwargs.iter().find(|(k, _)| k == key),
-                    ValueExpr::Record(pairs) => pairs.iter().find(|(k, _)| k == key),
+                    ValueExpr::Call { kwargs, .. } => kwargs.iter().find(|(k, _)| same_key(k, key)),
+                    ValueExpr::Record(pairs) => pairs.iter().find(|(k, _)| same_key(k, key)),
                     _ => None,
                 };
                 found.map(|(_, v)| (v.clone(), at))

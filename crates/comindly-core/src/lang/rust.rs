@@ -58,6 +58,20 @@ impl LangSpec for Rust {
                 let Some(method) = p.pop() else {
                     return Vec::new();
                 };
+                let mut found = Args {
+                    positional: args.iter().map(|n| value(*n, src)).collect(),
+                    ..Default::default()
+                };
+                if super::sdk_op(&method).is_some() {
+                    found.keywords = setters(node, src);
+                }
+                if super::is_op(&method, &found) {
+                    return vec![RawContract::Op {
+                        receiver: p,
+                        method,
+                        args: found,
+                    }];
+                }
                 if !VERBS.contains(&method.as_str()) || args.is_empty() {
                     return Vec::new();
                 }
@@ -400,8 +414,50 @@ fn method_router(node: Node, src: &[u8], out: &mut Vec<(String, Vec<String>)>) {
 }
 
 /// Literals, names, and `format!` templates with inline or positional arguments.
+/// The fields an SDK operation's builder sets after it: `s3.get_object().bucket(b).key(k)`.
+fn setters(op: Node, src: &[u8]) -> Vec<(String, ValueExpr)> {
+    let mut out = Vec::new();
+    let mut cur = op;
+    while let Some(field) = cur.parent().filter(|p| p.kind() == "field_expression") {
+        let Some(call) = field.parent().filter(|c| c.kind() == "call_expression") else {
+            break;
+        };
+        let args = call
+            .child_by_field_name("arguments")
+            .map(named_children)
+            .unwrap_or_default();
+        if let (Some(name), [arg]) = (field_text(field, "field", src), args.as_slice()) {
+            if let Some(v) = value(*arg, src) {
+                out.push((name.to_string(), v));
+            }
+        }
+        cur = call;
+    }
+    out
+}
+
 fn value(node: Node, src: &[u8]) -> Option<ValueExpr> {
     match node.kind() {
+        // `std::env::var("X")`, `env::var("X")`.
+        "call_expression" => {
+            let f = path(node.child_by_field_name("function")?, src)?;
+            let arg = named_children(node.child_by_field_name("arguments")?);
+            match (
+                f.iter()
+                    .rev()
+                    .take(2)
+                    .map(String::as_str)
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+                arg.as_slice(),
+            ) {
+                (["var", "env"], [k]) => match value(*k, src)? {
+                    ValueExpr::Lit(k) => Some(ValueExpr::Env(k)),
+                    _ => None,
+                },
+                _ => None,
+            }
+        }
         "string_literal" | "raw_string_literal" => Some(ValueExpr::Lit(
             named_children(node)
                 .iter()

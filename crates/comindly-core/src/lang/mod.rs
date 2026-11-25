@@ -131,6 +131,71 @@ pub fn spec(lang: &Language) -> Option<&'static dyn LangSpec> {
     }
 }
 
+/// AWS SDK operations that name a queue, topic or bucket, as `snake_case` in every SDK.
+pub(crate) const SDK_OPS: &[&str] = &[
+    "send_message",
+    "send_message_batch",
+    "receive_message",
+    "publish",
+    "publish_batch",
+    "put_object",
+    "get_object",
+    "upload_file",
+    "upload_fileobj",
+    "download_file",
+    "download_fileobj",
+    "head_object",
+    "delete_object",
+    "list_objects_v2",
+    "copy_object",
+    "convert_and_send",
+];
+
+/// `SendMessage`, `sendMessage` and `send_message` as `send_message`.
+pub(crate) fn snake(name: &str) -> String {
+    let mut out = String::with_capacity(name.len() + 4);
+    let mut prev: Option<char> = None;
+    for c in name.chars() {
+        if c.is_ascii_uppercase()
+            && prev.is_some_and(|p| p.is_ascii_lowercase() || p.is_ascii_digit())
+        {
+            out.push('_');
+        }
+        out.push(c.to_ascii_lowercase());
+        prev = Some(c);
+    }
+    out
+}
+
+/// The SDK operation a method name is, in any language's spelling.
+pub(crate) fn sdk_op(name: &str) -> Option<String> {
+    let s = snake(name);
+    SDK_OPS.contains(&s.as_str()).then_some(s)
+}
+
+/// A string that is a SQL statement naming tables.
+pub(crate) fn is_sql(s: &str) -> bool {
+    let head: String = s
+        .trim_start()
+        .chars()
+        .take(7)
+        .collect::<String>()
+        .to_ascii_uppercase();
+    ["SELECT ", "INSERT ", "UPDATE ", "DELETE ", "WITH "]
+        .iter()
+        .any(|k| head.starts_with(k))
+}
+
+/// A call worth keeping as an operation: an SDK operation, or one passed a SQL statement.
+pub(crate) fn is_op(method: &str, args: &Args) -> bool {
+    sdk_op(method).is_some()
+        || args
+            .positional
+            .iter()
+            .flatten()
+            .any(|v| matches!(v, ValueExpr::Lit(s) if is_sql(s)))
+}
+
 pub(crate) fn text<'a>(node: Node, src: &'a [u8]) -> &'a str {
     node.utf8_text(src).unwrap_or("")
 }

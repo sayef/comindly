@@ -876,6 +876,75 @@ mod tests {
         f.write_all(body.as_bytes()).unwrap();
     }
 
+    /// The operations a file reports: (method, named fields in order).
+    fn ops(name: &str, body: &str) -> Vec<(String, Vec<String>)> {
+        let dir = std::env::temp_dir().join(format!(
+            "comindly-ops-{}-{}",
+            std::process::id(),
+            name.replace(['/', '.'], "-")
+        ));
+        let file = dir.join(name);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        write(
+            file.parent().unwrap(),
+            file.file_name().unwrap().to_str().unwrap(),
+            body,
+        );
+        let out = parse_repo(&dir, "demo").unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+        out.facts
+            .iter()
+            .flat_map(|f| &f.contracts)
+            .filter_map(|c| match c {
+                crate::facts::ContractFact::Op { method, args, .. } => Some((
+                    method.clone(),
+                    args.keywords.iter().map(|(k, _)| k.clone()).collect(),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn has(ops: &[(String, Vec<String>)], method: &str, field: &str) -> bool {
+        ops.iter()
+            .any(|(m, k)| m == method && (field.is_empty() || k.iter().any(|k| k == field)))
+    }
+
+    #[test]
+    fn sdk_operations_and_their_fields_in_every_language() {
+        let go = ops(
+            "consumer.go",
+            "package main\nfunc f(c *sqs.Client) {\n  c.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{QueueUrl: aws.String(q)})\n  p.Exec(ctx, `INSERT INTO audit_events (id) VALUES ($1)`, id)\n}\n",
+        );
+        assert!(has(&go, "ReceiveMessage", "QueueUrl"), "{go:?}");
+        assert!(has(&go, "Exec", ""), "{go:?}");
+        let rs = ops(
+            "src/lib.rs",
+            "const T: &str = \"arn:aws:sns:eu-central-1:1:lab-flags\";\nasync fn f(sns: &Client) {\n    sns.publish().topic_arn(T).message(m).send().await;\n    sqlx::query(\"SELECT * FROM lab_results\");\n}\n",
+        );
+        assert!(has(&rs, "publish", "topic_arn"), "{rs:?}");
+        assert!(has(&rs, "query", ""), "{rs:?}");
+        let java = ops(
+            "S.java",
+            "class S { void f() { sqs.sendMessage(SendMessageRequest.builder().queueUrl(Q).messageBody(b).build()); sns.convertAndSend(TOPIC, x); jdbc.query(\"SELECT id FROM subjects\", m); } }\n",
+        );
+        assert!(has(&java, "sendMessage", "queueUrl"), "{java:?}");
+        assert!(has(&java, "convertAndSend", ""), "{java:?}");
+        assert!(has(&java, "query", ""), "{java:?}");
+        let kt = ops(
+            "S.kt",
+            "class S { suspend fun f() { sqs.sendMessage { queueUrl = Q; messageBody = b } } }\n",
+        );
+        assert!(has(&kt, "sendMessage", "queueUrl"), "{kt:?}");
+        let ts = ops(
+            "s.ts",
+            "async function f() {\n  await client.send(new SendMessageCommand({ QueueUrl: q, MessageBody: b }));\n  await sqs.sendMessage({ QueueUrl: q }).promise();\n  await pool.query(`SELECT id FROM visits`);\n}\n",
+        );
+        assert!(has(&ts, "SendMessage", "QueueUrl"), "{ts:?}");
+        assert!(has(&ts, "sendMessage", "QueueUrl"), "{ts:?}");
+        assert!(has(&ts, "query", ""), "{ts:?}");
+    }
+
     #[test]
     fn extracts_python_class_method_and_call() {
         let dir = std::env::temp_dir().join(format!("comindly-parse-test-{}", std::process::id()));
