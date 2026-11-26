@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.2](https://github.com/sayef/comindly/compare/v0.5.1...v0.5.2) - 2026-11-26
+
+Dependency updates.
+
+### Changed
+
+- Embeddings use model2vec-rs 0.5, which cuts long texts at the model's own maximum length.
+- The app's graphs use @xyflow/react 13 and keep their layout, zoom and controls.
+
 ## [0.5.1](https://github.com/sayef/comindly/compare/v0.5.0...v0.5.1) - 2026-11-25
 
 Queues, topics, buckets and tables are now found in every supported language, and in CloudFormation and
